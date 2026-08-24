@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class DrugCategory(enum.Enum):
+class DrugCategory(str, Enum):
     ANTIBIOTIC = "antibiotic"
     ANALGESIC = "analgesic"
     ANTIVIRAL = "antiviral"
@@ -10,7 +10,7 @@ class DrugCategory(enum.Enum):
     OTHER = "other"
 
 
-class DispenseStatus(enum.Enum):
+class DispenseStatus(str, Enum):
     PENDING = "pending"
     PARTIALLY_DISPENSED = "partially_dispensed"
     DISPENSED = "dispensed"

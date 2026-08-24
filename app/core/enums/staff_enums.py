@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class StaffRole(enum.Enum):
+class StaffRole(str, Enum):
     DOCTOR = "doctor"
     NURSE = "nurse"
     PHARMACIST = "pharmacist"
@@ -11,14 +11,14 @@ class StaffRole(enum.Enum):
     OTHER = "other"
 
 
-class StaffStatus(enum.Enum):
+class StaffStatus(str, Enum):
     ACTIVE = "active"
     ON_LEAVE = "on_leave"
     SUSPENDED = "suspended"
     TERMINATED = "terminated"
 
 
-class LeaveType(enum.Enum):
+class LeaveType(str, Enum):
     ANNUAL = "annual"
     SICK = "sick"
     MATERNITY = "maternity"
@@ -26,7 +26,7 @@ class LeaveType(enum.Enum):
     UNPAID = "unpaid"
 
 
-class LeaveStatus(enum.Enum):
+class LeaveStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"

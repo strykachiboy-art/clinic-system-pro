@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class AuditAction(enum.Enum):
+class AuditAction(str,Enum):
     CREATE = "create"
     UPDATE = "update"
     DELETE = "delete"

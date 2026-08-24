@@ -1,12 +1,12 @@
-import enum
+from enum import Enum
 
-class Gender(enum.Enum):
+class Gender(str, Enum):
     MALE = "male"
     FEMALE = "female"
     OTHER = "other"
 
 
-class BloodType(enum.Enum):
+class BloodType(str, Enum):
     A_POS = "A+"
     A_NEG = "A-"
     B_POS = "B+"
@@ -18,7 +18,7 @@ class BloodType(enum.Enum):
     UNKNOWN = "unknown"
 
 
-class FamilyRelation(enum.Enum):
+class FamilyRelation(str, Enum):
     SPOUSE = "spouse"
     CHILD = "child"
     PARENT = "parent"

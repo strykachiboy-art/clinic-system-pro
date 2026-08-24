@@ -1,12 +1,12 @@
-import enum
+from enum import Enum
 
-class ClinicStatus(enum.Enum):
+class ClinicStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     SUSPENDED = "suspended"
 
 
-class ClinicType(enum.Enum):
+class ClinicType(str, Enum):
     GENERAL = "general"
     SPECIALIST = "specialist"
     DENTAL = "dental"

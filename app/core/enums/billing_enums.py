@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class InvoiceStatus(enum.Enum):
+class InvoiceStatus(str, Enum):
     DRAFT = "draft"
     ISSUED = "issued"
     PARTIALLY_PAID = "partially_paid"
@@ -9,7 +9,7 @@ class InvoiceStatus(enum.Enum):
     CANCELLED = "cancelled"
 
 
-class PaymentMethod(enum.Enum):
+class PaymentMethod(str, Enum):
     CASH = "cash"
     CARD = "card"
     BANK_TRANSFER = "bank_transfer"
@@ -17,7 +17,7 @@ class PaymentMethod(enum.Enum):
     MOBILE_MONEY = "mobile_money"
 
 
-class PaymentStatus(enum.Enum):
+class PaymentStatus(str, Enum):
     PENDING = "pending"
     SUCCESSFUL = "successful"
     FAILED = "failed"

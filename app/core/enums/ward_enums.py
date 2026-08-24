@@ -1,19 +1,20 @@
-import enum
+from enum import Enum
 
-class BedStatus(enum.Enum):
+
+class BedStatus(str, Enum):
     AVAILABLE = "available"
     OCCUPIED = "occupied"
     RESERVED = "reserved"
     MAINTENANCE = "maintenance"
 
 
-class AdmissionStatus(enum.Enum):
+class AdmissionStatus(str, Enum):
     ADMITTED = "admitted"
     DISCHARGED = "discharged"
     TRANSFERRED = "transferred"
 
 
-class WardType(enum.Enum):
+class WardType(str, Enum):
     GENERAL = "general"
     ICU = "icu"
     MATERNITY = "maternity"

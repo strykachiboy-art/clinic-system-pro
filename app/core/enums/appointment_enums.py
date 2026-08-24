@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class AppointmentStatus(enum.Enum):
+class AppointmentStatus(str, Enum):
     SCHEDULED = "scheduled"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
@@ -8,7 +8,7 @@ class AppointmentStatus(enum.Enum):
     NO_SHOW = "no_show"
 
 
-class AppointmentType(enum.Enum):
+class AppointmentType(str, Enum):
     IN_PERSON = "in_person"
     TELEMEDICINE = "telemedicine"
     FOLLOW_UP = "follow_up"

@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class InventoryCategory(enum.Enum):
+class InventoryCategory(str, Enum):
     MEDICAL_SUPPLY = "medical_supply"     
     EQUIPMENT = "equipment"                
     CONSUMABLE = "consumable"           
@@ -8,7 +8,7 @@ class InventoryCategory(enum.Enum):
     OTHER = "other"
 
 
-class StockMovementType(enum.Enum):
+class StockMovementType(str, Enum):
     RESTOCK = "restock"
     USAGE = "usage"
     ADJUSTMENT = "adjustment"

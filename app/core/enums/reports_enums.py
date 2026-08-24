@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class ReportType(enum.Enum):
+class ReportType(str, Enum):
     OVERVIEW = "overview"
     PATIENTS = "patients"
     STAFF = "staff"
@@ -11,7 +11,7 @@ class ReportType(enum.Enum):
     PHARMACY = "pharmacy"
 
 
-class ReportFormat(enum.Enum):
+class ReportFormat(str, Enum):
     PDF = "pdf"
     CSV = "csv"
     XLSX = "xlsx"

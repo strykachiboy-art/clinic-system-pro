@@ -1,6 +1,6 @@
-import enum
+from enum import Enum
 
-class LabOrderStatus(enum.Enum):
+class LabOrderStatus(str,Enum):
     ORDERED = "ordered"
     SAMPLE_COLLECTED = "sample_collected"
     IN_PROGRESS = "in_progress"
@@ -8,13 +8,13 @@ class LabOrderStatus(enum.Enum):
     CANCELLED = "cancelled"
 
 
-class LabResultFlag(enum.Enum):
+class LabResultFlag(str, Enum):
     NORMAL = "normal"
     ABNORMAL = "abnormal"
     CRITICAL = "critical"
 
 
-class SampleType(enum.Enum):
+class SampleType(str, Enum):
     BLOOD = "blood"
     URINE = "urine"
     STOOL = "stool"
