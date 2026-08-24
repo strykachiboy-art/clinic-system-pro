@@ -1,0 +1,35 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.Python
+
+# Flask / DB
+instance/
+*.db
+*.sqlite3
+
+# Migrations (keep the folder, ignore generated cache if any)
+# app/migrations/  <- do NOT ignore this, you want migrations committed
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
