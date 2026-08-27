@@ -33,6 +33,11 @@ class Clinic(db.Model):
     created_at = db.Column(db.DateTime, default=_utcnow)
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
+    # AI feature cache/metering — see app/modules/ai
+    ai_credits = db.Column(db.Integer, nullable=False, default=0)
+    api_token = db.Column(db.String(255), nullable=True)
+    ai_requests_this_month = db.Column(db.Integer, nullable=False, default=0)
+
     # Relationships
     branches = db.relationship("Clinic", backref=db.backref("parent_clinic", remote_side=[id]))
 
@@ -40,6 +45,13 @@ class Clinic(db.Model):
     invoices = db.relationship("Invoice", back_populates="clinic")
     patients = db.relationship("Patient", back_populates="clinic")
     staff = db.relationship("Staff", back_populates="clinic")
+    ai_logs = db.relationship("AILog", back_populates="clinic")
+    wards = db.relationship("Ward", back_populates="clinic")
+    lab_orders = db.relationship("LabOrder", back_populates="clinic")
+    prescriptions = db.relationship("Prescription", back_populates="clinic")
+    inventory_items = db.relationship("InventoryItem", back_populates="clinic")
+    consultations = db.relationship("Consultation", back_populates="clinic")
+    generated_reports = db.relationship("GeneratedReport", back_populates="clinic")
 
     def __repr__(self):
         return f"<Clinic {self.name} ({self.status.value})>"

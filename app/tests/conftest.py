@@ -43,7 +43,7 @@ def patient(db, clinic):
 
 @pytest.fixture()
 def user(db, clinic):
-    from app.modules.user.models.user_model import User
+    from app.modules.user.models.user import User
     from app.core.enums.role_enums import Role
     u = User(email="admin@test.com", role=Role.ADMIN, clinic_id=clinic.id)
     u.set_password("supersecret")

@@ -37,7 +37,7 @@ def create_invoice(clinic_id, patient_id, items: list[dict], appointment_id=None
         ))
 
     invoice.total_amount = total
-    db.session.flush()  # ensure invoice.id + total_amount are available for the log
+    db.session.flush()  
 
     create_audit_log(
         action=AuditAction.CREATE,
