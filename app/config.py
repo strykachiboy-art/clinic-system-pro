@@ -33,6 +33,10 @@ class Config:
     # Rate limiting
     RATELIMIT_STORAGE_URI = REDIS_URL
 
+    # AI features (app/modules/ai)
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

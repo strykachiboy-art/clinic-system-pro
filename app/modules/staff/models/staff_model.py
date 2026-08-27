@@ -38,7 +38,7 @@ class Staff(db.Model):
     generated_reports = db.relationship("GeneratedReport", back_populates="generated_by")
 
     payroll_records = db.relationship("PayrollRecord", back_populates="staff", cascade="all, delete-orphan")
-    leave_requests = db.relationship("LeaveRequest", back_populates="staff", cascade="all, delete-orphan")
+    leave_requests = db.relationship("LeaveRequest", back_populates="staff", cascade="all, delete-orphan", foreign_keys="LeaveRequest.staff_id")
 
     def __repr__(self):
         return f"<Staff {self.first_name} {self.last_name} ({self.role.value})>"

@@ -27,30 +27,38 @@ class Patient(db.Model):
     allergies = db.Column(db.Text, nullable=True)
     chronic_conditions = db.Column(db.Text, nullable=True)
 
-    patient_number = db.Column(db.String(50), unique=True, nullable=False)  # hospital card/MRN
+    patient_number = db.Column(db.String(50), unique=True, nullable=False) 
     is_active = db.Column(db.Boolean, default=True)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
+    # AI feature cache — populated/refreshed by app/modules/ai services
+    ai_risk_score = db.Column(db.Float, nullable=True)
+    ai_summary = db.Column(db.Text, nullable=True)
+    ai_triage_data = db.Column(db.JSON, nullable=True)
+
     # Relationships
     clinic = db.relationship("Clinic", back_populates="patients")
 
-    family_members = db.relationship("PatientFamilyMember", back_populates="patient", cascade="all, delete-orphan")
+    family_members = db.relationship("PatientFamilyMember", back_populates="patient", cascade="all, delete-orphan", foreign_keys="PatientFamilyMember.patient_id")
     insurances = db.relationship("PatientInsurance", back_populates="patient", cascade="all, delete-orphan")
     vitals_history = db.relationship("PatientVitals", back_populates="patient", cascade="all, delete-orphan")
+    ai_logs = db.relationship("AILog", back_populates="patient")
 
     appointments = db.relationship("Appointment", back_populates="patient")
     invoices = db.relationship("Invoice", back_populates="patient")
     consultations = db.relationship("Consultation", back_populates="patient")
     lab_orders = db.relationship("LabOrder", back_populates="patient")
+    prescriptions = db.relationship("Prescription", back_populates="patient")
+    admissions = db.relationship("Admission", back_populates="patient")
 
     def __repr__(self):
         return f"<Patient {self.first_name} {self.last_name} ({self.patient_number})>"
 
 
 class PatientFamilyMember(db.Model):
-    """Linked family/guardian contacts — e.g. next of kin, or a linked dependent patient record."""
+    
     __tablename__ = "patient_family_members"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -87,7 +95,7 @@ class PatientInsurance(db.Model):
     is_primary = db.Column(db.Boolean, default=True)
     is_active = db.Column(db.Boolean, default=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     patient = db.relationship("Patient", back_populates="insurances")
 
@@ -113,7 +121,7 @@ class PatientVitals(db.Model):
     weight_kg = db.Column(db.Numeric(5, 2), nullable=True)
     height_cm = db.Column(db.Numeric(5, 2), nullable=True)
 
-    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    recorded_at = db.Column(db.DateTime, default=_utcnow)
 
     patient = db.relationship("Patient", back_populates="vitals_history")
 

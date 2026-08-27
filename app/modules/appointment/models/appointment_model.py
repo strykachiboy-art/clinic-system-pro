@@ -39,6 +39,7 @@ class Appointment(db.Model):
     clinic = db.relationship("Clinic", back_populates="appointments")
     patient = db.relationship("Patient", back_populates="appointments")
     staff = db.relationship("Staff", back_populates="appointments")
+    consultation = db.relationship("Consultation", back_populates="appointment", uselist=False)
 
     def __repr__(self):
         return f"<Appointment {self.id} - Patient {self.patient_id} with Staff {self.staff_id}>"

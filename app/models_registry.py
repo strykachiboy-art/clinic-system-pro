@@ -1,9 +1,7 @@
-"""
-Imports every model in the project so SQLAlchemy's metadata is aware of them
-before Alembic/Flask-Migrate scans it. This file has no logic — just imports.
-"""
+
 
 # Core
+from app.modules.user.models.user import User
 from app.core.audit.models.audit_model import AuditLog
 
 # Clinic
@@ -45,3 +43,9 @@ from app.modules.inventory.models.inventory_model import InventoryItem, Inventor
 
 # Reports
 from app.modules.reports.models.reports_model import GeneratedReport
+
+# AI
+from app.modules.ai.models.ai_model import AILog
+
+# User
+from app.modules.user.models.user import User
