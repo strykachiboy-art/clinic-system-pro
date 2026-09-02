@@ -6,6 +6,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_socketio import SocketIO
 from celery import Celery
+from celery.schedules import crontab
 import redis
 
 db = SQLAlchemy()
@@ -34,4 +35,19 @@ def init_extensions(app):
     celery.conf.update(
         broker_url=app.config.get("REDIS_URL"),
         result_backend=app.config.get("REDIS_URL"),
+        timezone="UTC",
+        beat_schedule={
+            "check-upcoming-appointments-hourly": {
+                "task": "check_upcoming_appointments",
+                "schedule": 3600.0,
+            },
+            "mark-overdue-invoices-daily": {
+                "task": "mark_overdue_invoices",
+                "schedule": crontab(hour=0, minute=0),
+            },
+            "reset-monthly-ai-usage": {
+                "task": "reset_monthly_ai_usage",
+                "schedule": crontab(day_of_month=1, hour=0, minute=0),
+            },
+        },
     )
