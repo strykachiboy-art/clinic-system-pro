@@ -1,5 +1,6 @@
 import os
-from flask import Flask
+from flask import Flask, jsonify
+from app.core.exceptions import DomainError
 
 from app.config import config_by_name
 from app.extensions import init_extensions, db
@@ -17,6 +18,11 @@ def create_app(config_name=None):
         from app import models_registry
 
     register_blueprints(app)
+    
+    @app.errorhandler(DomainError)
+    def handle_domain_error(err):
+        return jsonify({"success": False, "error": str(err)}), err.status_code
+
 
     return app
 
