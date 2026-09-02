@@ -29,5 +29,7 @@ def create_app(config_name=None):
 
 def register_blueprints(app):
     from app.core.audit.routes.audit_route import audit_bp
+    from app.modules.ai.routes.ai_route import ai_bp
 
     app.register_blueprint(audit_bp)
+    app.register_blueprint(ai_bp)
