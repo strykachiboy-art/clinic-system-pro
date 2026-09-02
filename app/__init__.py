@@ -22,4 +22,6 @@ def create_app(config_name=None):
 
 
 def register_blueprints(app):
-    pass
+    from app.core.audit.routes.audit_route import audit_bp
+
+    app.register_blueprint(audit_bp)

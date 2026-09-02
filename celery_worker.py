@@ -16,6 +16,3 @@ class ContextTask(celery.Task):
 
 celery.Task = ContextTask
 
-# Import task modules here so Celery registers them
-# e.g. from app.modules.appointment.services.appointment_service import send_appointment_reminder
-# e.g. from app.modules.notifications.services.notification_service import send_notification

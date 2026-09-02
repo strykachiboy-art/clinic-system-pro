@@ -3,11 +3,14 @@ from app.extensions import db
 from app.core.audit.models.audit_model import AuditLog
 from app.core.audit.schema.audit_request import AuditLogResponseSchema
 from app.core.enums.audit_enums import AuditAction
+from app.core.enums.role_enums import Role
+from app.core.utils.decorators import role_required
 
 audit_bp = Blueprint("audit", __name__, url_prefix="/api/audit-logs")
 
 
 @audit_bp.route("", methods=["GET"])
+@role_required(Role.ADMIN)
 def get_audit_logs():
     user_id = request.args.get("user_id", type=int)
     action_str = request.args.get("action", type=str)
@@ -41,6 +44,7 @@ def get_audit_logs():
 
 
 @audit_bp.route("/<int:log_id>", methods=["GET"])
+@role_required(Role.ADMIN)
 def get_audit_log_by_id(log_id: int):
     log = db.session.get(AuditLog, log_id)
     if not log:
