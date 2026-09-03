@@ -33,6 +33,9 @@ class Bed(db.Model):
     bed_number = db.Column(db.String(30), nullable=False)
     status = db.Column(db.Enum(BedStatus), default=BedStatus.AVAILABLE, nullable=False)
 
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
+
     ward = db.relationship("Ward", back_populates="beds")
     admissions = db.relationship("Admission", back_populates="bed")
 
@@ -51,6 +54,8 @@ class Admission(db.Model):
     status = db.Column(db.Enum(AdmissionStatus), default=AdmissionStatus.ADMITTED, nullable=False)
     reason = db.Column(db.Text, nullable=True)
 
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
     admitted_at = db.Column(db.DateTime, default=_utcnow)
     discharged_at = db.Column(db.DateTime, nullable=True)
 
@@ -75,6 +80,7 @@ class WardTransfer(db.Model):
     to_bed_id = db.Column(db.Integer, db.ForeignKey("beds.id"), nullable=False)
     reason = db.Column(db.String(255), nullable=True)
 
+    created_at = db.Column(db.DateTime, default=_utcnow)
     transferred_at = db.Column(db.DateTime, default=_utcnow)
 
     admission = db.relationship("Admission", back_populates="transfers")

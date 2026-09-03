@@ -48,6 +48,9 @@ class InvoiceItem(db.Model):
 
     invoice = db.relationship("Invoice", back_populates="items")
 
+    def __repr__(self):
+        return f"<InvoiceItem {self.description} x{self.quantity}>"
+
 
 class Payment(db.Model):
     __tablename__ = "payments"
@@ -60,6 +63,8 @@ class Payment(db.Model):
     status = db.Column(db.Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
     reference = db.Column(db.String(120), nullable=True)
 
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
     paid_at = db.Column(db.DateTime, default=_utcnow)
 
     invoice = db.relationship("Invoice", back_populates="payments")

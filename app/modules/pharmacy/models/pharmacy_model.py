@@ -26,6 +26,7 @@ class Drug(db.Model):
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     batches = db.relationship("DrugBatch", back_populates="drug", cascade="all, delete-orphan")
     prescription_items = db.relationship("PrescriptionItem", back_populates="drug")
@@ -43,13 +44,15 @@ class DrugBatch(db.Model):
 
     batch_number = db.Column(db.String(80), nullable=False)
     quantity_on_hand = db.Column(db.Integer, default=0, nullable=False)
-    reorder_level = db.Column(db.Integer, default=20)
+    reorder_level = db.Column(db.Integer, default=20, nullable=False)
 
     expiry_date = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
     received_at = db.Column(db.DateTime, default=_utcnow)
 
     drug = db.relationship("Drug", back_populates="batches")
-    supplier = db.relationship("InventorySupplier")
+    supplier = db.relationship("InventorySupplier", back_populates="drug_batches")
 
     __table_args__ = (
         db.UniqueConstraint("drug_id", "batch_number", name="uq_drug_batch_number"),
@@ -68,6 +71,8 @@ class DispenseRecord(db.Model):
     dispensed_by_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=False)
 
     status = db.Column(db.Enum(DispenseStatus), default=DispenseStatus.PENDING, nullable=False)
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
     dispensed_at = db.Column(db.DateTime, default=_utcnow)
     notes = db.Column(db.Text, nullable=True)
 

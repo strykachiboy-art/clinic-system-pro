@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from app.extensions import db
-from app.core.enums.staff_enums import StaffRole, StaffStatus, LeaveType, LeaveStatus
+from app.core.enums.staff_enums import StaffStatus, LeaveType, LeaveStatus
 
 
 def _utcnow():
@@ -15,7 +15,6 @@ class Staff(db.Model):
 
     first_name = db.Column(db.String(80), nullable=False)
     last_name = db.Column(db.String(80), nullable=False)
-    role = db.Column(db.Enum(StaffRole), nullable=False)
     specialty = db.Column(db.String(100), nullable=True)
 
     phone = db.Column(db.String(30), nullable=True)
@@ -28,7 +27,7 @@ class Staff(db.Model):
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     clinic = db.relationship("Clinic", back_populates="staff")
-    user = db.relationship("User", back_populates="staff")
+    user = db.relationship("User", back_populates="staff_profile")
 
     appointments = db.relationship("Appointment", back_populates="staff")
     consultations = db.relationship("Consultation", back_populates="staff")
@@ -37,15 +36,16 @@ class Staff(db.Model):
     dispense_records = db.relationship("DispenseRecord", back_populates="dispensed_by")
     stock_movements = db.relationship("StockMovement", back_populates="performed_by")
     generated_reports = db.relationship("GeneratedReport", back_populates="generated_by")
+
     admissions = db.relationship("Admission", back_populates="admitted_by")
-    driver_trips = db.relationship("AmbulanceTrip", back_populates="driver", foreign_keys="AmbulanceTrip.driver_id")
-    paramedic_trips = db.relationship("AmbulanceTrip", back_populates="paramedic", foreign_keys="AmbulanceTrip.paramedic_id")
+    driver_trips = db.relationship("AmbulanceTrip", foreign_keys="AmbulanceTrip.driver_id", back_populates="driver")
+    paramedic_trips = db.relationship("AmbulanceTrip", foreign_keys="AmbulanceTrip.paramedic_id", back_populates="paramedic")
 
     payroll_records = db.relationship("PayrollRecord", back_populates="staff", cascade="all, delete-orphan")
     leave_requests = db.relationship("LeaveRequest", back_populates="staff", cascade="all, delete-orphan", foreign_keys="LeaveRequest.staff_id")
 
     def __repr__(self):
-        return f"<Staff {self.first_name} {self.last_name} ({self.role.value})>"
+        return f"<Staff {self.first_name} {self.last_name}>"
 
 
 class PayrollRecord(db.Model):
@@ -64,6 +64,7 @@ class PayrollRecord(db.Model):
 
     paid_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     staff = db.relationship("Staff", back_populates="payroll_records")
 
@@ -88,9 +89,11 @@ class LeaveRequest(db.Model):
     reviewed_at = db.Column(db.DateTime, nullable=True)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     staff = db.relationship("Staff", back_populates="leave_requests", foreign_keys=[staff_id])
     reviewed_by = db.relationship("Staff", foreign_keys=[reviewed_by_id])
 
     def __repr__(self):
         return f"<LeaveRequest Staff {self.staff_id} ({self.status.value})>"
+    

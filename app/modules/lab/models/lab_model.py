@@ -27,6 +27,7 @@ class LabTest(db.Model):
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     orders = db.relationship("LabOrderItem", back_populates="test")
 

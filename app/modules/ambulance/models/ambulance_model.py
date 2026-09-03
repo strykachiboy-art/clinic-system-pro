@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from app.extensions import db
 from app.core.enums.ambulance_enums import TripType, TripStatus, VehicleStatus, EquipmentLevel
-from app.core.enums.staff_enums import StaffRole, StaffStatus
+from app.core.enums.staff_enums import StaffStatus
 
 def _utcnow():
     return datetime.now(timezone.utc)
@@ -15,12 +15,13 @@ class AmbulanceVehicle(db.Model):
 
     plate_number = db.Column(db.String(30), unique=True, nullable=False)
     equipment_level = db.Column(db.Enum(EquipmentLevel), default=EquipmentLevel.BLS, nullable=False)
-    capacity = db.Column(db.Integer, default=1) 
+    capacity = db.Column(db.Integer, default=1, nullable=False)
 
     status = db.Column(db.Enum(VehicleStatus), default=VehicleStatus.AVAILABLE, nullable=False)
     last_service_date = db.Column(db.Date, nullable=True)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     clinic = db.relationship("Clinic", back_populates="ambulance_vehicles")
     trips = db.relationship("AmbulanceTrip", back_populates="vehicle")
@@ -64,6 +65,8 @@ class AmbulanceTrip(db.Model):
     # Status pipeline timestamps — mirrors LabOrder's pattern of one
     # timestamp per real-world milestone, so the full timeline is
     # reconstructable without parsing audit logs.
+    created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
     requested_at = db.Column(db.DateTime, default=_utcnow)
     dispatched_at = db.Column(db.DateTime, nullable=True)
     pickup_at = db.Column(db.DateTime, nullable=True)
@@ -90,9 +93,6 @@ class AmbulanceTrip(db.Model):
         if staff is None:
             return staff
 
-        expected_role = StaffRole.DRIVER if relationship_name == "driver" else StaffRole.PARAMEDIC
-        if staff.role != expected_role:
-            raise ValueError(f"Ambulance {relationship_name} must have the {expected_role.value} role")
         if staff.status != StaffStatus.ACTIVE:
             raise ValueError(f"Ambulance {relationship_name} must be active")
         if self.clinic_id is not None and staff.clinic_id != self.clinic_id:

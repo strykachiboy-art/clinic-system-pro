@@ -24,6 +24,7 @@ class AILog(db.Model):
     credits_used = db.Column(db.Integer, nullable=False, default=0)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     clinic = db.relationship("Clinic", back_populates="ai_logs")
     patient = db.relationship("Patient", back_populates="ai_logs")

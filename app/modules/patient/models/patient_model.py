@@ -74,6 +74,7 @@ class PatientFamilyMember(db.Model):
     is_emergency_contact = db.Column(db.Boolean, default=False)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     patient = db.relationship("Patient", back_populates="family_members", foreign_keys=[patient_id])
 
@@ -97,6 +98,7 @@ class PatientInsurance(db.Model):
     is_active = db.Column(db.Boolean, default=True)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     patient = db.relationship("Patient", back_populates="insurances")
 

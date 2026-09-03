@@ -16,7 +16,7 @@ from app.modules.ai.services.ai_service import (
 )
 
 ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
-AI_ROLES = (Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.PHARMACIST, Role.LAB_TECH)
+AI_ROLES = (Role.ADMIN, Role.DOCTOR, Role.NURSE, Role.PHARMACIST, Role.LAB_TECHNICIAN)
 
 
 def _user_id():

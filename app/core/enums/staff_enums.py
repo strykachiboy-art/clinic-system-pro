@@ -1,18 +1,5 @@
 from enum import Enum
 
-class StaffRole(str, Enum):
-    DOCTOR = "doctor"
-    NURSE = "nurse"
-    PHARMACIST = "pharmacist"
-    LAB_TECHNICIAN = "lab_technician"
-    RECEPTIONIST = "receptionist"
-    ADMIN = "admin"
-    ACCOUNTANT = "accountant"
-    DRIVER = "driver"
-    PARAMEDIC = "paramedic"
-    OTHER = "other"
-
-
 class StaffStatus(str, Enum):
     ACTIVE = "active"
     ON_LEAVE = "on_leave"

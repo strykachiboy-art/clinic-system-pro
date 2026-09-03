@@ -18,7 +18,7 @@ class InventoryItem(db.Model):
 
     unit = db.Column(db.String(30), nullable=True)              
     quantity_on_hand = db.Column(db.Integer, default=0, nullable=False)
-    reorder_level = db.Column(db.Integer, default=10)            
+    reorder_level = db.Column(db.Integer, default=10, nullable=False)            
 
     unit_cost = db.Column(db.Numeric(10, 2), nullable=True)
     expiry_date = db.Column(db.Date, nullable=True)              
@@ -51,8 +51,10 @@ class InventorySupplier(db.Model):
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=_utcnow)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     items = db.relationship("InventoryItem", back_populates="supplier")
+    drug_batches = db.relationship("DrugBatch", back_populates="supplier")
 
     def __repr__(self):
         return f"<InventorySupplier {self.name}>"
