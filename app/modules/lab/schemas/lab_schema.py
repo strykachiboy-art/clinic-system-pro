@@ -14,6 +14,10 @@ class LabTestCreateSchema(BaseModel):
     unit: Optional[str] = Field(None, max_length=30)
     price: Optional[Decimal] = Field(None, ge=0)
 
+    # NEW
+    critical_low: Optional[Decimal] = Field(None, description="Value at/below which a result auto-flags CRITICAL")
+    critical_high: Optional[Decimal] = Field(None, description="Value at/above which a result auto-flags CRITICAL")
+
     class Config:
         from_attributes = True
 
@@ -26,6 +30,9 @@ class LabTestUpdateSchema(BaseModel):
     unit: Optional[str] = Field(None, max_length=30)
     price: Optional[Decimal] = Field(None, ge=0)
     is_active: Optional[bool] = Field(None)
+
+    critical_low: Optional[Decimal] = Field(None)
+    critical_high: Optional[Decimal] = Field(None)
 
     class Config:
         from_attributes = True

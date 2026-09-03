@@ -6,18 +6,24 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 class LabTest(db.Model):
-    """Catalog of tests a clinic offers, e.g. CBC, Malaria Test, Lipid Panel."""
     __tablename__ = "lab_tests"
 
     id = db.Column(db.Integer, primary_key=True)
-    clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=True)  # null = global catalog
+    clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=True)
 
     name = db.Column(db.String(150), nullable=False)
-    code = db.Column(db.String(50), unique=True, nullable=True)    
+    code = db.Column(db.String(50), unique=True, nullable=True)
     sample_type = db.Column(db.Enum(SampleType), default=SampleType.BLOOD, nullable=False)
-    reference_range = db.Column(db.String(150), nullable=True)      
-    unit = db.Column(db.String(30), nullable=True)               
+    reference_range = db.Column(db.String(150), nullable=True)
+    unit = db.Column(db.String(30), nullable=True)
     price = db.Column(db.Numeric(10, 2), nullable=True)
+
+    # NEW: numeric critical thresholds, separate from reference_range.
+    # Nullable — a test with no thresholds set simply can't be
+    # auto-flagged CRITICAL, and enter_result() will leave that to a
+    # human, same as it already does for non-numeric results.
+    critical_low = db.Column(db.Numeric(10, 3), nullable=True)
+    critical_high = db.Column(db.Numeric(10, 3), nullable=True)
 
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=_utcnow)
@@ -39,10 +45,13 @@ class LabOrder(db.Model):
 
     status = db.Column(db.Enum(LabOrderStatus), default=LabOrderStatus.ORDERED, nullable=False)
 
-    # Equipment integration / tracking
     qr_code = db.Column(db.String(150), unique=True, nullable=True)
     sample_collected_at = db.Column(db.DateTime, nullable=True)
-    equipment_reference_id = db.Column(db.String(150), nullable=True)  # external machine/LIS reference
+    equipment_reference_id = db.Column(db.String(150), nullable=True)
+
+    # NEW: queryable/reportable cancel reason, instead of only living
+    # inside an audit log description string.
+    cancellation_reason = db.Column(db.String(255), nullable=True)
 
     created_at = db.Column(db.DateTime, default=_utcnow)
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
@@ -52,7 +61,6 @@ class LabOrder(db.Model):
     patient = db.relationship("Patient", back_populates="lab_orders")
     consultation = db.relationship("Consultation", back_populates="lab_orders")
     ordered_by = db.relationship("Staff", back_populates="lab_orders")
-
     items = db.relationship("LabOrderItem", back_populates="order", cascade="all, delete-orphan")
 
     def __repr__(self):

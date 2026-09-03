@@ -5,3 +5,8 @@ app = create_app(os.environ.get("FLASK_ENV", "production"))
 
 if __name__ == "__main__":
     app.run()
+    
+
+# $env:FLASK_APP = "wsgi.py"
+# flask --app run.py db init
+

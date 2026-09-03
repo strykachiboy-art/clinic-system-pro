@@ -35,7 +35,6 @@ class Drug(db.Model):
 
 
 class DrugBatch(db.Model):
-    """Stock kept per batch so expiry alerts and FEFO dispensing work correctly."""
     __tablename__ = "drug_batches"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -51,6 +50,10 @@ class DrugBatch(db.Model):
 
     drug = db.relationship("Drug", back_populates="batches")
     supplier = db.relationship("InventorySupplier")
+
+    __table_args__ = (
+        db.UniqueConstraint("drug_id", "batch_number", name="uq_drug_batch_number"),
+    )
 
     def __repr__(self):
         return f"<DrugBatch {self.batch_number} - {self.drug_id} ({self.quantity_on_hand})>"
@@ -74,7 +77,8 @@ class DispenseRecord(db.Model):
 
     def __repr__(self):
         return f"<DispenseRecord {self.id} - Prescription {self.prescription_id} ({self.status.value})>"
-
+    
+    
 
 class DispenseItem(db.Model):
     __tablename__ = "dispense_items"
@@ -83,10 +87,13 @@ class DispenseItem(db.Model):
     dispense_record_id = db.Column(db.Integer, db.ForeignKey("dispense_records.id"), nullable=False)
     batch_id = db.Column(db.Integer, db.ForeignKey("drug_batches.id"), nullable=False)
 
+    prescription_item_id = db.Column(db.Integer, db.ForeignKey("prescription_items.id"), nullable=True)
+
     quantity_dispensed = db.Column(db.Integer, nullable=False)
 
     dispense_record = db.relationship("DispenseRecord", back_populates="items")
     batch = db.relationship("DrugBatch")
+    prescription_item = db.relationship("PrescriptionItem")
 
     def __repr__(self):
         return f"<DispenseItem Batch {self.batch_id} x{self.quantity_dispensed}>"
