@@ -33,3 +33,6 @@ def register_blueprints(app):
 
     app.register_blueprint(audit_bp)
     app.register_blueprint(ai_bp)
+    
+    
+# then we issue access tokens in login
