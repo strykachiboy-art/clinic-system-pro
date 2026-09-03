@@ -49,3 +49,6 @@ from app.modules.ai.models.ai_model import AILog
 
 # User
 from app.modules.user.models.user import User
+
+# Ambulance
+from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle, AmbulanceTrip
