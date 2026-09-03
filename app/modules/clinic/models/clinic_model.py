@@ -52,6 +52,8 @@ class Clinic(db.Model):
     inventory_items = db.relationship("InventoryItem", back_populates="clinic")
     consultations = db.relationship("Consultation", back_populates="clinic")
     generated_reports = db.relationship("GeneratedReport", back_populates="clinic")
+    ambulance_vehicles = db.relationship("AmbulanceVehicle", back_populates="clinic")
+    ambulance_trips = db.relationship("AmbulanceTrip", back_populates="clinic")
 
     def __repr__(self):
         return f"<Clinic {self.name} ({self.status.value})>"

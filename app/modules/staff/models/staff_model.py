@@ -11,7 +11,7 @@ class Staff(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
-    user_id = db.Column(db.Integer, nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, unique=True)
 
     first_name = db.Column(db.String(80), nullable=False)
     last_name = db.Column(db.String(80), nullable=False)
@@ -28,6 +28,7 @@ class Staff(db.Model):
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     clinic = db.relationship("Clinic", back_populates="staff")
+    user = db.relationship("User", back_populates="staff")
 
     appointments = db.relationship("Appointment", back_populates="staff")
     consultations = db.relationship("Consultation", back_populates="staff")
@@ -36,6 +37,9 @@ class Staff(db.Model):
     dispense_records = db.relationship("DispenseRecord", back_populates="dispensed_by")
     stock_movements = db.relationship("StockMovement", back_populates="performed_by")
     generated_reports = db.relationship("GeneratedReport", back_populates="generated_by")
+    admissions = db.relationship("Admission", back_populates="admitted_by")
+    driver_trips = db.relationship("AmbulanceTrip", back_populates="driver", foreign_keys="AmbulanceTrip.driver_id")
+    paramedic_trips = db.relationship("AmbulanceTrip", back_populates="paramedic", foreign_keys="AmbulanceTrip.paramedic_id")
 
     payroll_records = db.relationship("PayrollRecord", back_populates="staff", cascade="all, delete-orphan")
     leave_requests = db.relationship("LeaveRequest", back_populates="staff", cascade="all, delete-orphan", foreign_keys="LeaveRequest.staff_id")

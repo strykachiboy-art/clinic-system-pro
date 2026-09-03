@@ -27,6 +27,7 @@ class User(db.Model):
     last_login_at = db.Column(db.DateTime, nullable=True)
 
     audit_logs = db.relationship("AuditLog", back_populates="user")
+    staff = db.relationship("Staff", back_populates="user")
 
     def set_password(self, raw_password: str):
         self.password_hash = generate_password_hash(raw_password)

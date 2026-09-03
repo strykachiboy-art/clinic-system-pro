@@ -56,7 +56,8 @@ class Admission(db.Model):
 
     patient = db.relationship("Patient", back_populates="admissions")
     bed = db.relationship("Bed", back_populates="admissions")
-    admitted_by = db.relationship("Staff")
+    admitted_by = db.relationship("Staff", back_populates="admissions")
+    ambulance_trips = db.relationship("AmbulanceTrip", back_populates="admission")
     transfers = db.relationship("WardTransfer", back_populates="admission", cascade="all, delete-orphan")
 
     def __repr__(self):

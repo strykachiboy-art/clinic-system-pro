@@ -52,6 +52,7 @@ class Patient(db.Model):
     lab_orders = db.relationship("LabOrder", back_populates="patient")
     prescriptions = db.relationship("Prescription", back_populates="patient")
     admissions = db.relationship("Admission", back_populates="patient")
+    ambulance_trips = db.relationship("AmbulanceTrip", back_populates="patient")
 
     def __repr__(self):
         return f"<Patient {self.first_name} {self.last_name} ({self.patient_number})>"

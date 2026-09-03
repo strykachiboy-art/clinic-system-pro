@@ -62,7 +62,7 @@ class ConsultationTemplate(db.Model):
     specialty = db.Column(db.String(100), nullable=True)       
     structure = db.Column(db.JSON, nullable=False)         
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=_utcnow)
 
     consultations = db.relationship("Consultation", back_populates="template")
 

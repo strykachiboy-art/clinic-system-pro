@@ -29,6 +29,7 @@ class Invoice(db.Model):
     patient = db.relationship("Patient", back_populates="invoices")
     items = db.relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
     payments = db.relationship("Payment", back_populates="invoice", cascade="all, delete-orphan")
+    ambulance_trip = db.relationship("AmbulanceTrip", back_populates="invoice", uselist=False)
 
     def __repr__(self):
         return f"<Invoice {self.invoice_number} - {self.status.value}>"

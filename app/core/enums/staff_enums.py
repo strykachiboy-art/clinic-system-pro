@@ -8,6 +8,8 @@ class StaffRole(str, Enum):
     RECEPTIONIST = "receptionist"
     ADMIN = "admin"
     ACCOUNTANT = "accountant"
+    DRIVER = "driver"
+    PARAMEDIC = "paramedic"
     OTHER = "other"
 
 
