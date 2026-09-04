@@ -32,6 +32,12 @@ def register_blueprints(app):
     from app.modules.billing.routes.billing_route import billing_bp
     from app.modules.clinic.routes.clinic_route import clinic_bp
     from app.modules.consultation.routes.consultation_route import consultation_bp
+    from app.modules.inventory.routes.inventory_route import inventory_bp
+    from app.modules.lab.routes.lab_route import lab_bp
+    from app.modules.patient.routes.patient_route import patient_bp
+    from app.modules.prescription.routes.prescription_route import prescription_bp
+    from app.modules.reports.routes.reports_route import reports_bp
+    from app.modules.staff.routes.staff_route import staff_bp
     from app.modules.ward.routes.ward_route import ward_bp
 
     app.register_blueprint(vehicle_bp)
@@ -42,6 +48,12 @@ def register_blueprints(app):
     app.register_blueprint(billing_bp)
     app.register_blueprint(clinic_bp)
     app.register_blueprint(consultation_bp)
+    app.register_blueprint(inventory_bp)
+    app.register_blueprint(lab_bp)
+    app.register_blueprint(patient_bp)
+    app.register_blueprint(prescription_bp)
+    app.register_blueprint(reports_bp)
+    app.register_blueprint(staff_bp)
     app.register_blueprint(ward_bp)
 
 

@@ -116,6 +116,43 @@ def _query_consultation_type():
         }), 422
 
 
+def _serialize_consultation(consultation):
+    return {
+        "id": consultation.id,
+        "clinic_id": consultation.clinic_id,
+        "patient_id": consultation.patient_id,
+        "staff_id": consultation.staff_id,
+        "appointment_id": consultation.appointment_id,
+        "icd10_code": consultation.icd10_code,
+        "consultation_type": consultation.consultation_type.value,
+        "status": consultation.status.value,
+        "chief_complaint": consultation.chief_complaint,
+        "symptoms": consultation.symptoms,
+        "diagnosis": consultation.diagnosis,
+        "treatment_plan": consultation.treatment_plan,
+        "notes": consultation.notes,
+        "voice_note_url": consultation.voice_note_url,
+        "transcribed_text": consultation.transcribed_text,
+        "template_id": consultation.template_id,
+        "started_at": consultation.started_at.isoformat() if consultation.started_at else None,
+        "ended_at": consultation.ended_at.isoformat() if consultation.ended_at else None,
+        "created_at": consultation.created_at.isoformat() if consultation.created_at else None,
+        "updated_at": consultation.updated_at.isoformat() if consultation.updated_at else None,
+    }
+
+
+def _serialize_template(template):
+    return {
+        "id": template.id,
+        "clinic_id": template.clinic_id,
+        "name": template.name,
+        "specialty": template.specialty,
+        "structure": template.structure,
+        "is_active": template.is_active,
+        "created_at": template.created_at.isoformat() if template.created_at else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Consultation lifecycle
 # ---------------------------------------------------------------------------
@@ -139,7 +176,7 @@ def start():
 
     return jsonify({
         "success": True,
-        "data": consultation,
+        "data": _serialize_consultation(consultation),
     }), 201
 
 
@@ -160,7 +197,7 @@ def get(consultation_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultation,
+        "data": _serialize_consultation(consultation),
     }), 200
 
 
@@ -188,7 +225,7 @@ def update(consultation_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultation,
+        "data": _serialize_consultation(consultation),
     }), 200
 
 
@@ -216,7 +253,7 @@ def complete(consultation_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultation,
+        "data": _serialize_consultation(consultation),
     }), 200
 
 
@@ -242,7 +279,7 @@ def cancel(consultation_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultation,
+        "data": _serialize_consultation(consultation),
     }), 200
 
 
@@ -264,7 +301,7 @@ def patient_consultations(patient_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultations,
+        "data": [_serialize_consultation(item) for item in consultations],
     }), 200
 
 
@@ -298,7 +335,7 @@ def staff_consultations(staff_id: int):
 
     return jsonify({
         "success": True,
-        "data": consultations,
+        "data": [_serialize_consultation(item) for item in consultations],
     }), 200
 
 
@@ -327,7 +364,7 @@ def create_template():
 
     return jsonify({
         "success": True,
-        "data": template,
+        "data": _serialize_template(template),
     }), 201
 
 
@@ -359,5 +396,5 @@ def active_templates():
 
     return jsonify({
         "success": True,
-        "data": templates,
+        "data": [_serialize_template(item) for item in templates],
     }), 200

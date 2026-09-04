@@ -718,3 +718,15 @@ def consume_ai_credit(clinic_id: int) -> Clinic:
     clinic.ai_requests_this_month += 1
 
     return clinic
+
+
+def ensure_clinic_active(clinic_id: int) -> Clinic:
+    """Return a clinic only when it is active for operational writes."""
+    clinic = get_clinic(clinic_id)
+
+    if clinic.status != ClinicStatus.ACTIVE:
+        raise ValidationError(
+            f"Clinic {clinic_id} is not active"
+        )
+
+    return clinic

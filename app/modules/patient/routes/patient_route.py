@@ -1,6 +1,9 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
+from app.extensions import db
+from app.core.auth.user.models.user_model import User
+from app.core.exceptions import ValidationError
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
 
@@ -59,7 +62,11 @@ def create_patient_route():
         request.get_json(silent=True) or {}
     )
 
-    clinic_id = int(get_jwt_identity())
+    user = db.session.get(User, int(get_jwt_identity()))
+    if user is None or user.clinic_id is None:
+        raise ValidationError("Authenticated user is not assigned to a clinic")
+
+    clinic_id = user.clinic_id
 
     patient = create_patient(
         clinic_id=clinic_id,

@@ -14,3 +14,9 @@ class HIEOperation(str, Enum):
     CLINICAL_DOCUMENT_SUBMISSION = "clinical_document_submission"
     PATIENT_QUERY = "patient_query"
     CLINICAL_DATA_QUERY = "clinical_data_query"
+
+
+class HIESubmissionStatus(str, Enum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILED = "failed"
