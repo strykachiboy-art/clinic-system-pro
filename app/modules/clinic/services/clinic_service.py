@@ -7,7 +7,7 @@ from app.core.exceptions import (
     ValidationError,
     ConflictError,
 )
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.clinic_enums import (
     ClinicStatus,

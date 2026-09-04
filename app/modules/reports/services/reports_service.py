@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from app.extensions import db
 
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.reports_enums import ReportFormat, ReportType
 from app.core.enums.role_enums import Role

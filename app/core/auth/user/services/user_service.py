@@ -3,7 +3,7 @@ from flask_jwt_extended import create_access_token, create_refresh_token
 from app.extensions import db
 from app.core.utils.decorators import transactional
 from app.core.exceptions import ValidationError, ConflictError
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
 from app.core.auth.user.models.user_model import User

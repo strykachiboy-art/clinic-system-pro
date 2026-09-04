@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.extensions import db
 
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.staff_enums import StaffStatus
 from app.core.enums.ward_enums import (

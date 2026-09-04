@@ -8,7 +8,7 @@ from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.enums.audit_enums import AuditAction
 from app.core.utils.decorators import transactional
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.utils.qrcode_util import generate_tracking_code
 
 from app.modules.patient.models.patient_model import (

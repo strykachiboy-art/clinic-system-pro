@@ -8,7 +8,7 @@ from app.core.exceptions import (
 
 from app.core.utils.decorators import transactional
 
-from app.core.audit.services.audit_services import (
+from app.core.audit.services.audit_service import (
     create_audit_log,
 )
 

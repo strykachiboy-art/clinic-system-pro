@@ -14,7 +14,7 @@ from app.core.enums.appointment_enums import (
     AppointmentStatus,
     AppointmentType,
 )
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import (
     ConflictError,

@@ -8,7 +8,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.utils.decorators import transactional
-from app.core.audit.services.audit_services import create_audit_log
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.staff_enums import (
     LeaveStatus,

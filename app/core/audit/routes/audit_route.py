@@ -1,57 +1,78 @@
 from flask import Blueprint, jsonify, request
-from app.extensions import db
-from app.core.audit.models.audit_model import AuditLog
+
 from app.core.audit.schema.audit_request import AuditLogResponseSchema
+from app.core.audit.services.audit_service import (
+    get_audit_log_by_id,
+    list_audit_logs,
+)
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
 
-audit_bp = Blueprint("audit", __name__, url_prefix="/api/audit-logs")
+
+audit_bp = Blueprint(
+    "audit",
+    __name__,
+    url_prefix="/api/audit-logs",
+)
 
 
-@audit_bp.route("", methods=["GET"])
+@audit_bp.get("")
 @role_required(Role.ADMIN)
 def get_audit_logs():
     user_id = request.args.get("user_id", type=int)
-    action_str = request.args.get("action", type=str)
-    entity_type = request.args.get("entity_type", type=str)
+    action_value = request.args.get("action")
+    entity_type = request.args.get("entity_type")
     entity_id = request.args.get("entity_id", type=int)
-    
-    query = AuditLog.query
 
-    if user_id is not None:
-        query = query.filter_by(user_id=user_id)
-    if action_str:
-        try:
-            action_enum = AuditAction(action_str)
-            query = query.filter_by(action=action_enum)
-        except ValueError:
-            return jsonify({"error": f"Invalid action value: {action_str}"}), 400
-    if entity_type:
-        query = query.filter_by(entity_type=entity_type)
-    if entity_id is not None:
-        query = query.filter_by(entity_id=entity_id)
+    page = request.args.get("page", default=1, type=int)
+    per_page = request.args.get("per_page", default=20, type=int)
 
-    logs = query.order_by(AuditLog.created_at.desc()).all()
+    action = None
 
-    response_data = [AuditLogResponseSchema.model_validate(log).model_dump(mode='json') for log in logs]
+    if action_value:
+        action = AuditAction(action_value)
 
-    return jsonify({
-        "success": True,
-        "count": len(response_data),
-        "data": response_data
-    }), 200
+    pagination = list_audit_logs(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        page=page,
+        per_page=per_page,
+    )
+
+    response_data = [
+        AuditLogResponseSchema.model_validate(log).model_dump(mode="json")
+        for log in pagination.items
+    ]
+
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "items": response_data,
+                "total": pagination.total,
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "pages": pagination.pages,
+            },
+        }
+    ), 200
 
 
-@audit_bp.route("/<int:log_id>", methods=["GET"])
+@audit_bp.get("/<int:log_id>")
 @role_required(Role.ADMIN)
-def get_audit_log_by_id(log_id: int):
-    log = db.session.get(AuditLog, log_id)
-    if not log:
-        return jsonify({"error": "Audit log not found"}), 404
+def get_audit_log(log_id: int):
+    log = get_audit_log_by_id(log_id)
 
-    result = AuditLogResponseSchema.model_validate(log).model_dump(mode='json')
-    return jsonify({
-        "success": True,
-        "data": result
-    }), 200
+    result = AuditLogResponseSchema.model_validate(log).model_dump(
+        mode="json"
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "data": result,
+        }
+    ), 200
