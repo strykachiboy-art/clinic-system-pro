@@ -27,3 +27,5 @@ if __name__ == "__main__":
 # Type "help" for help.
 
 # postgres=#
+
+# then we issue access tokens in login

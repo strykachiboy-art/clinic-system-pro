@@ -1,36 +1,221 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
-from pydantic import BaseModel, Field, model_validator
 
-from app.core.enums.billing_enums import PaymentMethod
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-class InvoiceItemSchema(BaseModel):
-    description: str = Field(..., max_length=255)
-    quantity: int = Field(..., gt=0)
-    unit_price: Decimal = Field(..., gt=0)
-
-
-class InvoiceCreateSchema(BaseModel):
-    clinic_id: int = Field(..., description="ID of the clinic")
-    patient_id: int = Field(..., description="ID of the patient")
-    appointment_id: Optional[int] = Field(None, description="Linked appointment, if any")
-
-    items: list[InvoiceItemSchema] = Field(..., min_length=1, description="Line items for this invoice")
-
-    due_date: Optional[date] = Field(None)
-    is_insurance_claim: bool = Field(False)
-    insurance_provider: Optional[str] = Field(None, max_length=120)
-
-    @model_validator(mode="after")
-    def provider_required_if_insurance(self):
-        if self.is_insurance_claim and not self.insurance_provider:
-            raise ValueError("insurance_provider is required when is_insurance_claim is true")
-        return self
+from app.core.enums.billing_enums import (
+    InvoiceStatus,
+    PaymentGateway,
+    PaymentMethod,
+    PaymentStatus,
+)
 
 
-class PaymentRecordSchema(BaseModel):
+# ============================================================================
+# Invoice Item Schemas
+# ============================================================================
+
+
+class InvoiceItemRequest(BaseModel):
+    """
+    Data required to add an item to an invoice.
+    """
+
+    description: str = Field(..., min_length=1, max_length=255)
+    quantity: int = Field(default=1, ge=1)
+    unit_price: Decimal = Field(..., ge=0)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Description cannot be empty")
+
+        return value
+
+
+class InvoiceItemResponse(BaseModel):
+    """
+    Invoice item returned by the API.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    invoice_id: int
+    description: str
+    quantity: int
+    unit_price: Decimal
+    subtotal: Decimal
+
+
+# ============================================================================
+# Invoice Schemas
+# ============================================================================
+
+
+class CreateInvoiceRequest(BaseModel):
+    """
+    Data required to create an invoice.
+    """
+
+    clinic_id: int = Field(..., gt=0)
+    patient_id: int = Field(..., gt=0)
+    appointment_id: int | None = Field(default=None, gt=0)
+
+    due_date: date | None = None
+
+    is_insurance_claim: bool = False
+    insurance_provider: str | None = Field(default=None, max_length=120)
+
+    items: list[InvoiceItemRequest] = Field(..., min_length=1)
+
+    @field_validator("insurance_provider")
+    @classmethod
+    def validate_insurance_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(
+        cls,
+        value: list[InvoiceItemRequest],
+    ) -> list[InvoiceItemRequest]:
+        if not value:
+            raise ValueError("At least one invoice item is required")
+
+        return value
+
+
+class InvoiceResponse(BaseModel):
+    """
+    Complete invoice representation returned by the API.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    clinic_id: int
+    patient_id: int
+    appointment_id: int | None
+
+    invoice_number: str
+
+    total_amount: Decimal
+    amount_paid: Decimal
+
+    status: InvoiceStatus
+
+    due_date: date | None
+
+    is_insurance_claim: bool
+    insurance_provider: str | None
+
+    created_at: datetime
+    updated_at: datetime
+
+    items: list[InvoiceItemResponse] = Field(default_factory=list)
+
+
+class OutstandingInvoiceResponse(BaseModel):
+    """
+    Invoice representation used when returning outstanding invoices.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    clinic_id: int
+    patient_id: int
+    appointment_id: int | None
+
+    invoice_number: str
+
+    total_amount: Decimal
+    amount_paid: Decimal
+
+    status: InvoiceStatus
+
+    due_date: date | None
+
+    is_insurance_claim: bool
+    insurance_provider: str | None
+
+    created_at: datetime
+    updated_at: datetime
+
+
+# ============================================================================
+# Payment Schemas
+# ============================================================================
+
+
+class RecordPaymentRequest(BaseModel):
+    """
+    Data required to record a successful payment.
+
+    Gateway is optional because manual payments such as cash and
+    insurance payments do not require an electronic payment provider.
+    """
+
+    invoice_id: int = Field(..., gt=0)
+
     amount: Decimal = Field(..., gt=0)
-    method: PaymentMethod = Field(...)
-    reference: Optional[str] = Field(None, max_length=120, description="Gateway/transaction reference")
+
+    method: PaymentMethod
+
+    gateway: PaymentGateway | None = None
+
+    reference: str | None = Field(default=None, max_length=120)
+
+    gateway_transaction_id: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+
+    @field_validator("reference", "gateway_transaction_id")
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+
+class PaymentResponse(BaseModel):
+    """
+    Payment representation returned by the API.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    invoice_id: int
+
+    amount: Decimal
+
+    method: PaymentMethod
+    status: PaymentStatus
+
+    gateway: PaymentGateway | None
+
+    reference: str | None
+    gateway_transaction_id: str | None
+
+    failure_reason: str | None
+
+    created_at: datetime
+    updated_at: datetime
+    paid_at: datetime | None

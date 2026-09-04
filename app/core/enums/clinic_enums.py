@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ClinicStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"

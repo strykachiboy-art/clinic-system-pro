@@ -21,7 +21,13 @@ class ConsultationStartSchema(BaseModel):
 
 
 class ConsultationUpdateSchema(BaseModel):
-    """For in-progress editing of the clinical note before it's completed."""
+    """
+    Update clinical documentation.
+
+    Completed consultations may be updated for legitimate
+    documentation corrections or additions. Cancelled
+    consultations cannot be edited.
+    """
     icd10_code: Optional[str] = Field(None, max_length=10)
     chief_complaint: Optional[str] = Field(None)
     symptoms: Optional[str] = Field(None)

@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class InvoiceStatus(str, Enum):
     DRAFT = "draft"
     ISSUED = "issued"
@@ -22,3 +23,9 @@ class PaymentStatus(str, Enum):
     SUCCESSFUL = "successful"
     FAILED = "failed"
     REFUNDED = "refunded"
+
+
+class PaymentGateway(str, Enum):
+    STRIPE = "stripe"
+    PAYSTACK = "paystack"
+    FLUTTERWAVE = "flutterwave"

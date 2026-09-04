@@ -27,16 +27,26 @@ class Config:
     CELERY_RESULT_BACKEND = REDIS_URL
 
     # File uploads
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
     UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "uploads")
 
     # Rate limiting
     RATELIMIT_STORAGE_URI = REDIS_URL
 
-    # AI features (app/modules/ai)
+    # AI features
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
     OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
+        # Payment gateways
+    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
+    STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+
+    PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY")
+    PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY")
+
+    FLUTTERWAVE_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY")
+    FLUTTERWAVE_PUBLIC_KEY = os.environ.get("FLUTTERWAVE_PUBLIC_KEY")
+    FLUTTERWAVE_WEBHOOK_SECRET = os.environ.get("FLUTTERWAVE_WEBHOOK_SECRET")
 
 class DevelopmentConfig(Config):
     DEBUG = True

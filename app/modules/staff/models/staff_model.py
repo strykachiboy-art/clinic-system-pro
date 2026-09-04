@@ -27,7 +27,7 @@ class Staff(db.Model):
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     clinic = db.relationship("Clinic", back_populates="staff")
-    user = db.relationship("User", back_populates="staff_profile")
+    user = db.relationship("User", back_populates="staff")
 
     appointments = db.relationship("Appointment", back_populates="staff")
     consultations = db.relationship("Consultation", back_populates="staff")
