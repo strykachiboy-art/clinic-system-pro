@@ -22,6 +22,7 @@ class ConsultationStartSchema(BaseModel):
 
 class ConsultationUpdateSchema(BaseModel):
     """For in-progress editing of the clinical note before it's completed."""
+    icd10_code: Optional[str] = Field(None, max_length=10)
     chief_complaint: Optional[str] = Field(None)
     symptoms: Optional[str] = Field(None)
     diagnosis: Optional[str] = Field(None)

@@ -10,6 +10,12 @@ from app.core.enums.lab_enums import LabOrderStatus, LabResultFlag
 from app.modules.lab.models.lab_model import LabTest, LabOrder, LabOrderItem
 
 
+_EDITABLE_LAB_TEST_FIELDS = {
+    "loinc_code", "code", "sample_type", "reference_range", "unit", "price",
+    "critical_low", "critical_high", "is_active",
+}
+
+
 # ---------------------------------------------------------------------
 # Lab test catalog
 # ---------------------------------------------------------------------
@@ -40,6 +46,10 @@ def create_lab_test(name: str, **fields) -> LabTest:
     if not name or not name.strip():
         raise ValidationError("Lab test name is required")
 
+    unknown = set(fields) - _EDITABLE_LAB_TEST_FIELDS
+    if unknown:
+        raise ValidationError(f"Unknown lab test field(s): {', '.join(sorted(unknown))}")
+
     code = fields.get("code")
     if code and LabTest.query.filter_by(code=code).first():
         raise ConflictError(f"Lab test code '{code}' already exists")
@@ -66,6 +76,10 @@ def create_lab_test(name: str, **fields) -> LabTest:
 @transactional
 def update_lab_test(test_id: int, **fields) -> LabTest:
     test = get_lab_test(test_id)
+
+    unknown = set(fields) - _EDITABLE_LAB_TEST_FIELDS
+    if unknown:
+        raise ValidationError(f"Unknown lab test field(s): {', '.join(sorted(unknown))}")
 
     # Validate the resulting critical thresholds make sense even when
     # only one side of the pair is being changed in this call.

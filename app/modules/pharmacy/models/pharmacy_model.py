@@ -15,7 +15,8 @@ class Drug(db.Model):
     name = db.Column(db.String(150), nullable=False)
     generic_name = db.Column(db.String(150), nullable=True)
     category = db.Column(db.Enum(DrugCategory), default=DrugCategory.OTHER, nullable=False)
-
+    
+    rxnorm_code = db.Column(db.String(20), nullable=True)
     barcode = db.Column(db.String(80), unique=True, nullable=True)
     manufacturer = db.Column(db.String(150), nullable=True)
     dosage_form = db.Column(db.String(50), nullable=True)         

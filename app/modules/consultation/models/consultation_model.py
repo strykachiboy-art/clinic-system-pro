@@ -14,7 +14,8 @@ class Consultation(db.Model):
     patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=False)
     staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=False)
     appointment_id = db.Column(db.Integer, db.ForeignKey("appointments.id"), nullable=True)
-
+    icd10_code = db.Column(db.String(10), nullable=True) 
+    
     consultation_type = db.Column(db.Enum(ConsultationType), default=ConsultationType.GENERAL, nullable=False)
     status = db.Column(db.Enum(ConsultationStatus), default=ConsultationStatus.IN_PROGRESS, nullable=False)
 

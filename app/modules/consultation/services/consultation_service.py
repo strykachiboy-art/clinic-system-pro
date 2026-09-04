@@ -44,7 +44,7 @@ def update_consultation_note(consultation_id, **fields):
     consultation = db.get_or_404(Consultation, consultation_id)
 
     updatable = {
-        "chief_complaint", "symptoms", "diagnosis", "treatment_plan",
+        "icd10_code", "chief_complaint", "symptoms", "diagnosis", "treatment_plan",
         "notes", "voice_note_url", "transcribed_text",
     }
     old_value = {}

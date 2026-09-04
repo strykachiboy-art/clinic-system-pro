@@ -1,7 +1,7 @@
 
 
 # Core
-from app.modules.user.models.user_model import User
+from app.core.auth.user.models.user_model import User
 from app.core.audit.models.audit_model import AuditLog
 
 # Clinic
@@ -48,7 +48,7 @@ from app.modules.reports.models.reports_model import GeneratedReport
 from app.modules.ai.models.ai_model import AILog
 
 # User
-from app.modules.user.models.user_model import User
+from app.core.auth.user.models.user_model import User
 
 # Ambulance
 from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle, AmbulanceTrip

@@ -6,7 +6,7 @@ from app.core.exceptions import ValidationError, ConflictError
 from app.core.audit.services.audit_services import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
-from app.modules.user.models.user_model import User
+from app.core.auth.user.models.user_model import User
 
 
 def get_user(user_id: int) -> User:
@@ -38,9 +38,7 @@ def register_user(email: str, password: str, role: Role, clinic_id: int | None =
 
     # NOTE: no create_audit_log user_id here — this route runs before
     # any login exists, so there's no g.current_user_id to attribute
-    # to. create_audit_log already handles this gracefully (logs
-    # user_id=None outside a request context or with none set), which
-    # is the CORRECT behavior for self-registration, not a bug.
+    # to.
     create_audit_log(
         action=AuditAction.CREATE,
         entity_type="User",

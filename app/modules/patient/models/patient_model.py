@@ -10,6 +10,8 @@ class Patient(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=False)
+    emirates_id = db.Column(db.String(20), unique=True, nullable=True)  # format: 784-YYYY-NNNNNNN-N
+    umrn = db.Column(db.String(50), unique=True, nullable=True)  
 
     # Identity
     first_name = db.Column(db.String(80), nullable=False)

@@ -7,6 +7,7 @@ from app.core.enums.lab_enums import LabOrderStatus, LabResultFlag, SampleType
 
 class LabTestCreateSchema(BaseModel):
     clinic_id: Optional[int] = Field(None, description="Null for a clinic-agnostic/global test catalog entry")
+    loinc_code: Optional[str] = Field(None, max_length=20)
     name: str = Field(..., max_length=150)
     code: Optional[str] = Field(None, max_length=50)
     sample_type: SampleType = Field(default=SampleType.BLOOD)
@@ -23,6 +24,7 @@ class LabTestCreateSchema(BaseModel):
 
 
 class LabTestUpdateSchema(BaseModel):
+    loinc_code: Optional[str] = Field(None, max_length=20)
     name: Optional[str] = Field(None, max_length=150)
     code: Optional[str] = Field(None, max_length=50)
     sample_type: Optional[SampleType] = Field(None)

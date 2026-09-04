@@ -8,6 +8,12 @@ from app.core.enums.pharmacy_enums import DispenseStatus
 from app.modules.pharmacy.models.pharmacy_model import Drug, DrugBatch, DispenseRecord, DispenseItem
 
 
+_EDITABLE_DRUG_FIELDS = {
+    "generic_name", "category", "rxnorm_code", "barcode", "manufacturer",
+    "dosage_form", "strength", "unit_price", "is_controlled",
+}
+
+
 # ---------------------------------------------------------------------
 # Drug catalog
 # ---------------------------------------------------------------------
@@ -36,6 +42,10 @@ def create_drug(name: str, **fields) -> Drug:
     if not name or not name.strip():
         raise ValidationError("Drug name is required")
 
+    unknown = set(fields) - _EDITABLE_DRUG_FIELDS
+    if unknown:
+        raise ValidationError(f"Unknown drug field(s): {', '.join(sorted(unknown))}")
+
     barcode = fields.get("barcode")
     if barcode and Drug.query.filter_by(barcode=barcode).first():
         raise ConflictError(f"Drug barcode '{barcode}' already exists")
@@ -57,6 +67,10 @@ def create_drug(name: str, **fields) -> Drug:
 @transactional
 def update_drug(drug_id: int, **fields) -> Drug:
     drug = get_drug(drug_id)
+
+    unknown = set(fields) - _EDITABLE_DRUG_FIELDS
+    if unknown:
+        raise ValidationError(f"Unknown drug field(s): {', '.join(sorted(unknown))}")
 
     old_value, new_value = {}, {}
     for key, new_val in fields.items():
@@ -212,14 +226,6 @@ def create_dispense_record(prescription_id: int, dispensed_by_id: int,
     batches can't cover a line, dispenses what's available and the
     record status reflects the shortfall rather than silently under-
     or over-delivering.
-
-    prescription_item_id is optional and currently unused for
-    validation — prescription_service doesn't exist as usable code
-    yet. It's threaded through so records created today are already
-    linkable once that module lands, instead of needing a backfill.
-    Once prescription_service exists, this should validate the
-    dispensed quantity against what was actually prescribed instead
-    of trusting the caller's 'quantity' outright.
     """
     if not items:
         raise ValidationError("A dispense record must include at least one item")

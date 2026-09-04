@@ -27,7 +27,7 @@ def _utcnow():
 
 
 # ---------------------------------------------------------------------
-# Data gatherers — or "extractors" — one per report type, all returning 
+# Data gatherers — or "extractors" — one per report type, all returning
 # the same (headers, rows) shape
 # ---------------------------------------------------------------------
 
@@ -140,6 +140,10 @@ _GATHERERS = {
     ReportType.PHARMACY: _gather_pharmacy,
 }
 
+# NOTE FOR TESTS: staff_service.py now exists (built this session) but
+# is NOT yet wired in here — still deliberately excluded pending your
+# decision on whether to add it now. Test this set as CURRENTLY
+# unsupported; update the test if/when STAFF gets wired in.
 _UNSUPPORTED_TYPES = {ReportType.STAFF, ReportType.INVENTORY}
 
 
@@ -169,6 +173,9 @@ def _write_xlsx(headers: list[str], rows: list[list]) -> bytes:
 
 
 def _write_pdf(headers: list[str], rows: list[list]) -> bytes:
+    # NOTE FOR TESTS: this always raises. Write a test asserting
+    # generate_report(..., ReportFormat.PDF) raises NotImplementedError
+    # rather than silently producing a corrupt/empty file.
     raise NotImplementedError(
         "PDF export requires choosing a PDF library (e.g. reportlab, "
         "weasyprint) — not implemented yet. CSV and XLSX are available now."
@@ -215,6 +222,9 @@ def generate_report(report_type: ReportType, report_format: ReportFormat,
     storage abstraction. Before this goes to production, file_url
     should point at real persistent storage (S3, GCS, etc.), and this
     function should call into core/files rather than write locally.
+
+    NOTE FOR TESTS: use a tmp_path fixture for storage_dir so tests
+    don't litter your real project directory with generated files.
     """
     if report_type in _UNSUPPORTED_TYPES:
         raise NotImplementedError(

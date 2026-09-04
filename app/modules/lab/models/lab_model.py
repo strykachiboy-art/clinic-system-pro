@@ -10,7 +10,8 @@ class LabTest(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     clinic_id = db.Column(db.Integer, db.ForeignKey("clinics.id"), nullable=True)
-
+    
+    loinc_code = db.Column(db.String(20), nullable=True)    # standard lab test terminology for Observation resources
     name = db.Column(db.String(150), nullable=False)
     code = db.Column(db.String(50), unique=True, nullable=True)
     sample_type = db.Column(db.Enum(SampleType), default=SampleType.BLOOD, nullable=False)

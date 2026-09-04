@@ -12,6 +12,7 @@ from app.modules.patient.models.patient_model import (
 _EDITABLE_PATIENT_FIELDS = {
     "first_name", "last_name", "date_of_birth", "gender", "blood_type",
     "phone", "email", "address", "allergies", "chronic_conditions",
+    "emirates_id", "umrn"
 }
 
 
