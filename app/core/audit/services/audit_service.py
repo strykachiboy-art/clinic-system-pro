@@ -1,8 +1,41 @@
 from typing import Optional
-
+from app.extensions import db
 from app.core.audit.models.audit_model import AuditLog
 from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import NotFoundError
+
+
+def create_audit_log(
+    *,
+    action: AuditAction,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    description: Optional[str] = None,
+    old_value=None,
+    new_value=None,
+    user_id: Optional[int] = None,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[int] = None,
+    details=None,
+) -> AuditLog:
+    """Create an audit record using either supported service API shape."""
+    resolved_entity_type = entity_type or resource_type
+    resolved_entity_id = entity_id if entity_id is not None else resource_id
+
+    if resolved_entity_type is None or resolved_entity_id is None:
+        raise ValueError("Audit entity type and entity ID are required")
+
+    log = AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type=resolved_entity_type,
+        entity_id=resolved_entity_id,
+        description=description,
+        old_value=old_value,
+        new_value=new_value if new_value is not None else details,
+    )
+    db.session.add(log)
+    return log
 
 
 def list_audit_logs(

@@ -1,6 +1,6 @@
 import secrets
 
-from app.extensions import db
+from app.extensions import celery, db
 from app.core.utils.decorators import transactional
 from app.core.exceptions import (
     NotFoundError,
@@ -718,6 +718,17 @@ def consume_ai_credit(clinic_id: int) -> Clinic:
     clinic.ai_requests_this_month += 1
 
     return clinic
+
+
+@celery.task(name="reset_monthly_ai_usage")
+def reset_monthly_ai_usage():
+    """Reset the monthly AI request counter for every clinic."""
+    updated = Clinic.query.update(
+        {Clinic.ai_requests_this_month: 0},
+        synchronize_session=False,
+    )
+    db.session.commit()
+    return updated
 
 
 def ensure_clinic_active(clinic_id: int) -> Clinic:
