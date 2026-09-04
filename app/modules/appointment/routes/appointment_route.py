@@ -56,6 +56,27 @@ APPOINTMENT_ROLES = (
 )
 
 
+def _serialize_appointment(appointment):
+    return {
+        "id": appointment.id,
+        "clinic_id": appointment.clinic_id,
+        "patient_id": appointment.patient_id,
+        "staff_id": appointment.staff_id,
+        "scheduled_start": appointment.scheduled_start.isoformat(),
+        "scheduled_end": appointment.scheduled_end.isoformat(),
+        "status": appointment.status.value,
+        "appointment_type": appointment.appointment_type.value,
+        "reason": appointment.reason,
+        "notes": appointment.notes,
+        "google_calendar_event_id": appointment.google_calendar_event_id,
+        "reminder_sent": appointment.reminder_sent,
+        "created_at": appointment.created_at.isoformat() if appointment.created_at else None,
+        "updated_at": appointment.updated_at.isoformat() if appointment.updated_at else None,
+        "cancelled_at": appointment.cancelled_at.isoformat() if appointment.cancelled_at else None,
+        "cancellation_reason": appointment.cancellation_reason,
+    }
+
+
 # ---------------------------------------------------------------------
 # Request validation helpers
 # ---------------------------------------------------------------------
@@ -134,7 +155,7 @@ def create():
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 201
 
 
@@ -172,7 +193,7 @@ def reschedule(appointment_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 200
 
 
@@ -197,7 +218,7 @@ def confirm(appointment_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 200
 
 
@@ -228,7 +249,7 @@ def cancel(appointment_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 200
 
 
@@ -259,7 +280,7 @@ def complete(appointment_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 200
 
 
@@ -282,7 +303,7 @@ def no_show(appointment_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointment,
+        "data": _serialize_appointment(appointment),
     }), 200
 
 
@@ -310,7 +331,7 @@ def patient_appointments(patient_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointments,
+        "data": [_serialize_appointment(item) for item in appointments],
     }), 200
 
 
@@ -346,5 +367,5 @@ def staff_appointments(staff_id: int):
 
     return jsonify({
         "success": True,
-        "data": appointments,
+        "data": [_serialize_appointment(item) for item in appointments],
     }), 200

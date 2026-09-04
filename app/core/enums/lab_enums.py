@@ -1,6 +1,7 @@
 from enum import Enum
 
-class LabOrderStatus(str,Enum):
+
+class LabOrderStatus(str, Enum):
     ORDERED = "ordered"
     SAMPLE_COLLECTED = "sample_collected"
     IN_PROGRESS = "in_progress"

@@ -14,6 +14,13 @@ class AdmissionStatus(str, Enum):
     TRANSFERRED = "transferred"
 
 
+class ReservationStatus(str, Enum):
+    PENDING = "pending"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    FULFILLED = "fulfilled"
+
+
 class WardType(str, Enum):
     GENERAL = "general"
     ICU = "icu"

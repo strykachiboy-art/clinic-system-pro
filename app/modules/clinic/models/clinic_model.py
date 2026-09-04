@@ -152,6 +152,16 @@ class Clinic(db.Model):
         "Appointment",
         back_populates="clinic",
     )
+    
+    drugs = db.relationship(
+       "Drug",
+       back_populates="clinic",
+    )
+
+    drug_batches = db.relationship(
+        "DrugBatch",
+       back_populates="clinic",
+    )
 
     invoices = db.relationship(
         "Invoice",

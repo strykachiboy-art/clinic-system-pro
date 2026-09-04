@@ -12,6 +12,16 @@ class AdmissionCreateSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdmissionFromReservationSchema(BaseModel):
+    admitted_by_id: int = Field(...)
+    reason: Optional[str] = Field(
+        None,
+        max_length=255,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AdmissionDischargeSchema(BaseModel):
     reason: Optional[str] = Field(
         None,

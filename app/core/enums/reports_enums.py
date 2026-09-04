@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ReportType(str, Enum):
     OVERVIEW = "overview"
     PATIENTS = "patients"
@@ -9,6 +10,7 @@ class ReportType(str, Enum):
     INVENTORY = "inventory"
     LAB = "lab"
     PHARMACY = "pharmacy"
+    WARD = "ward"
 
 
 class ReportFormat(str, Enum):

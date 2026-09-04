@@ -58,6 +58,11 @@ class User(db.Model):
         db.DateTime,
         nullable=True,
     )
+    
+    ai_logs = db.relationship(
+       "AILog",
+       back_populates="user",
+    )
 
     audit_logs = db.relationship(
         "AuditLog",

@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
 from app.core.enums.role_enums import Role
+from app.core.enums.ward_enums import BedStatus
 from app.core.utils.decorators import role_required
 
 from app.modules.ward.schemas.ward_schema import (
@@ -10,10 +11,13 @@ from app.modules.ward.schemas.ward_schema import (
 from app.modules.ward.schemas.bed_schema import (
     BedCreateSchema,
     BedMaintenanceSchema,
+    BedReservationCancelSchema,
+    BedReservationCreateSchema,
 )
 from app.modules.ward.schemas.admission_schema import (
     AdmissionCreateSchema,
     AdmissionDischargeSchema,
+    AdmissionFromReservationSchema,
     AdmissionTransferSchema,
 )
 
@@ -31,6 +35,13 @@ from app.modules.ward.services.ward_service import (
     list_admissions_for_patient,
     transfer_bed,
     discharge_patient,
+    get_bed_reservation,
+    list_bed_reservations,
+    get_active_bed_reservation_for_patient,
+    get_active_bed_reservation_for_bed,
+    reserve_bed,
+    cancel_bed_reservation,
+    admit_patient_from_reservation,
 )
 
 
@@ -108,12 +119,44 @@ def _serialize_bed(bed):
     }
 
 
+def _serialize_reservation(reservation):
+    return {
+        "id": reservation.id,
+        "patient_id": reservation.patient_id,
+        "bed_id": reservation.bed_id,
+        "reserved_by_id": reservation.reserved_by_id,
+        "status": reservation.status.value,
+        "reason": reservation.reason,
+        "reserved_at": (
+            reservation.reserved_at.isoformat()
+            if reservation.reserved_at
+            else None
+        ),
+        "expires_at": (
+            reservation.expires_at.isoformat()
+            if reservation.expires_at
+            else None
+        ),
+        "cancelled_at": (
+            reservation.cancelled_at.isoformat()
+            if reservation.cancelled_at
+            else None
+        ),
+        "fulfilled_at": (
+            reservation.fulfilled_at.isoformat()
+            if reservation.fulfilled_at
+            else None
+        ),
+    }
+
+
 def _serialize_admission(admission):
     return {
         "id": admission.id,
         "patient_id": admission.patient_id,
         "bed_id": admission.bed_id,
         "admitted_by_id": admission.admitted_by_id,
+        "reservation_id": admission.reservation_id,
         "status": admission.status.value,
         "reason": admission.reason,
         "admitted_at": (
@@ -260,8 +303,6 @@ def list_beds_route(ward_id: int):
     parsed_status = None
 
     if status:
-        from app.core.enums.ward_enums import BedStatus
-
         parsed_status = BedStatus(status)
 
     beds = list_beds(
@@ -308,6 +349,163 @@ def set_bed_maintenance_route(bed_id: int):
 
 
 # ---------------------------------------------------------------------------
+# BED RESERVATIONS
+# ---------------------------------------------------------------------------
+
+@ward_bp.post("/reservations")
+@jwt_required()
+@role_required(*CLINICAL_ROLES)
+def reserve_bed_route():
+    payload = BedReservationCreateSchema.model_validate(
+        request.get_json() or {}
+    )
+
+    reservation = reserve_bed(
+        patient_id=payload.patient_id,
+        bed_id=payload.bed_id,
+        reserved_by_id=payload.reserved_by_id,
+        reason=payload.reason,
+        expires_at=payload.expires_at,
+    )
+
+    return jsonify({
+        "message": "Bed reserved successfully",
+        "data": _serialize_reservation(reservation),
+    }), 201
+
+
+@ward_bp.get("/reservations")
+@jwt_required()
+@role_required(*VIEW_ROLES)
+def list_bed_reservations_route():
+    clinic_id = request.args.get(
+        "clinic_id",
+        type=int,
+    )
+
+    patient_id = request.args.get(
+        "patient_id",
+        type=int,
+    )
+
+    bed_id = request.args.get(
+        "bed_id",
+        type=int,
+    )
+
+    reservations = list_bed_reservations(
+        clinic_id=clinic_id,
+        patient_id=patient_id,
+        bed_id=bed_id,
+    )
+
+    return jsonify({
+        "data": [
+            _serialize_reservation(reservation)
+            for reservation in reservations
+        ],
+    }), 200
+
+
+@ward_bp.get("/reservations/<int:reservation_id>")
+@jwt_required()
+@role_required(*VIEW_ROLES)
+def get_bed_reservation_route(reservation_id: int):
+    reservation = get_bed_reservation(
+        reservation_id,
+    )
+
+    return jsonify({
+        "data": _serialize_reservation(reservation),
+    }), 200
+
+
+@ward_bp.get(
+    "/patients/<int:patient_id>/reservation"
+)
+@jwt_required()
+@role_required(*VIEW_ROLES)
+def get_patient_active_reservation_route(patient_id: int):
+    reservation = get_active_bed_reservation_for_patient(
+        patient_id,
+    )
+
+    return jsonify({
+        "data": (
+            _serialize_reservation(reservation)
+            if reservation
+            else None
+        ),
+    }), 200
+
+
+@ward_bp.get(
+    "/beds/<int:bed_id>/reservation"
+)
+@jwt_required()
+@role_required(*VIEW_ROLES)
+def get_bed_active_reservation_route(bed_id: int):
+    reservation = get_active_bed_reservation_for_bed(
+        bed_id,
+    )
+
+    return jsonify({
+        "data": (
+            _serialize_reservation(reservation)
+            if reservation
+            else None
+        ),
+    }), 200
+
+
+@ward_bp.post(
+    "/reservations/<int:reservation_id>/cancel"
+)
+@jwt_required()
+@role_required(*CLINICAL_ROLES)
+def cancel_bed_reservation_route(
+    reservation_id: int,
+):
+    payload = BedReservationCancelSchema.model_validate(
+        request.get_json() or {}
+    )
+
+    reservation = cancel_bed_reservation(
+        reservation_id=reservation_id,
+        reason=payload.reason,
+    )
+
+    return jsonify({
+        "message": "Bed reservation cancelled successfully",
+        "data": _serialize_reservation(reservation),
+    }), 200
+
+
+@ward_bp.post(
+    "/reservations/<int:reservation_id>/admit"
+)
+@jwt_required()
+@role_required(*CLINICAL_ROLES)
+def admit_patient_from_reservation_route(
+    reservation_id: int,
+):
+    payload = AdmissionFromReservationSchema.model_validate(
+        request.get_json() or {}
+    )
+
+    admission = admit_patient_from_reservation(
+        reservation_id=reservation_id,
+        admitted_by_id=payload.admitted_by_id,
+        reason=payload.reason,
+    )
+
+    return jsonify({
+        "message": "Patient admitted from reservation successfully",
+        "data": _serialize_admission(admission),
+    }), 201
+
+
+# ---------------------------------------------------------------------------
 # ADMISSIONS
 # ---------------------------------------------------------------------------
 
@@ -343,10 +541,14 @@ def get_admission_route(admission_id: int):
     }), 200
 
 
-@ward_bp.get("/patients/<int:patient_id>/admissions")
+@ward_bp.get(
+    "/patients/<int:patient_id>/admissions"
+)
 @jwt_required()
 @role_required(*VIEW_ROLES)
-def list_patient_admissions_route(patient_id: int):
+def list_patient_admissions_route(
+    patient_id: int,
+):
     admissions = list_admissions_for_patient(
         patient_id,
     )
@@ -359,10 +561,14 @@ def list_patient_admissions_route(patient_id: int):
     }), 200
 
 
-@ward_bp.post("/admissions/<int:admission_id>/transfer")
+@ward_bp.post(
+    "/admissions/<int:admission_id>/transfer"
+)
 @jwt_required()
 @role_required(*CLINICAL_ROLES)
-def transfer_admission_route(admission_id: int):
+def transfer_admission_route(
+    admission_id: int,
+):
     payload = AdmissionTransferSchema.model_validate(
         request.get_json() or {}
     )
@@ -379,10 +585,14 @@ def transfer_admission_route(admission_id: int):
     }), 200
 
 
-@ward_bp.post("/admissions/<int:admission_id>/discharge")
+@ward_bp.post(
+    "/admissions/<int:admission_id>/discharge"
+)
 @jwt_required()
 @role_required(*CLINICAL_ROLES)
-def discharge_patient_route(admission_id: int):
+def discharge_patient_route(
+    admission_id: int,
+):
     payload = AdmissionDischargeSchema.model_validate(
         request.get_json() or {}
     )

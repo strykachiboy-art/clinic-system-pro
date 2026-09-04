@@ -1,77 +1,263 @@
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, Field
 
-from app.core.enums.lab_enums import LabOrderStatus, LabResultFlag, SampleType
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.core.enums.lab_enums import (
+    LabOrderStatus,
+    LabResultFlag,
+    SampleType,
+)
+
+
+# ---------------------------------------------------------------------
+# Lab test catalog
+# ---------------------------------------------------------------------
 
 
 class LabTestCreateSchema(BaseModel):
-    clinic_id: Optional[int] = Field(None, description="Null for a clinic-agnostic/global test catalog entry")
-    loinc_code: Optional[str] = Field(None, max_length=20)
-    name: str = Field(..., max_length=150)
-    code: Optional[str] = Field(None, max_length=50)
-    sample_type: SampleType = Field(default=SampleType.BLOOD)
-    reference_range: Optional[str] = Field(None, max_length=150)
-    unit: Optional[str] = Field(None, max_length=30)
-    price: Optional[Decimal] = Field(None, ge=0)
+    name: str = Field(..., min_length=1, max_length=150)
 
-    # NEW
-    critical_low: Optional[Decimal] = Field(None, description="Value at/below which a result auto-flags CRITICAL")
-    critical_high: Optional[Decimal] = Field(None, description="Value at/above which a result auto-flags CRITICAL")
+    loinc_code: Optional[str] = Field(
+        None,
+        max_length=20,
+    )
 
-    class Config:
-        from_attributes = True
+    code: Optional[str] = Field(
+        None,
+        max_length=50,
+    )
+
+    sample_type: SampleType = Field(
+        default=SampleType.BLOOD,
+    )
+
+    reference_range: Optional[str] = Field(
+        None,
+        max_length=150,
+    )
+
+    unit: Optional[str] = Field(
+        None,
+        max_length=30,
+    )
+
+    price: Optional[Decimal] = Field(
+        None,
+        ge=0,
+        decimal_places=2,
+    )
+
+    critical_low: Optional[Decimal] = Field(
+        None,
+        decimal_places=3,
+    )
+
+    critical_high: Optional[Decimal] = Field(
+        None,
+        decimal_places=3,
+    )
+
+    is_active: bool = Field(
+        default=True,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def validate_critical_range(self):
+        if (
+            self.critical_low is not None
+            and self.critical_high is not None
+            and self.critical_low >= self.critical_high
+        ):
+            raise ValueError(
+                "critical_low must be less than critical_high"
+            )
+
+        return self
 
 
 class LabTestUpdateSchema(BaseModel):
-    loinc_code: Optional[str] = Field(None, max_length=20)
-    name: Optional[str] = Field(None, max_length=150)
-    code: Optional[str] = Field(None, max_length=50)
-    sample_type: Optional[SampleType] = Field(None)
-    reference_range: Optional[str] = Field(None, max_length=150)
-    unit: Optional[str] = Field(None, max_length=30)
-    price: Optional[Decimal] = Field(None, ge=0)
-    is_active: Optional[bool] = Field(None)
+    loinc_code: Optional[str] = Field(
+        None,
+        max_length=20,
+    )
 
-    critical_low: Optional[Decimal] = Field(None)
-    critical_high: Optional[Decimal] = Field(None)
+    code: Optional[str] = Field(
+        None,
+        max_length=50,
+    )
 
-    class Config:
-        from_attributes = True
+    sample_type: Optional[SampleType] = None
+
+    reference_range: Optional[str] = Field(
+        None,
+        max_length=150,
+    )
+
+    unit: Optional[str] = Field(
+        None,
+        max_length=30,
+    )
+
+    price: Optional[Decimal] = Field(
+        None,
+        ge=0,
+        decimal_places=2,
+    )
+
+    critical_low: Optional[Decimal] = Field(
+        None,
+        decimal_places=3,
+    )
+
+    critical_high: Optional[Decimal] = Field(
+        None,
+        decimal_places=3,
+    )
+
+    is_active: Optional[bool] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def validate_critical_range(self):
+        if (
+            self.critical_low is not None
+            and self.critical_high is not None
+            and self.critical_low >= self.critical_high
+        ):
+            raise ValueError(
+                "critical_low must be less than critical_high"
+            )
+
+        return self
 
 
-class LabOrderItemInputSchema(BaseModel):
-    test_id: int = Field(..., description="ID of the LabTest being ordered")
+class LabTestListQuerySchema(BaseModel):
+    clinic_id: Optional[int] = Field(
+        None,
+        gt=0,
+    )
+
+    active_only: bool = Field(
+        default=True,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------
+# Lab orders
+# ---------------------------------------------------------------------
 
 
 class LabOrderCreateSchema(BaseModel):
-    clinic_id: int = Field(..., description="ID of the clinic")
-    patient_id: int = Field(..., description="ID of the patient")
-    consultation_id: Optional[int] = Field(None, description="Linked consultation, if ordered during one")
-    ordered_by_id: int = Field(..., description="ID of the staff member ordering the tests")
+    clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
 
-    tests: list[LabOrderItemInputSchema] = Field(..., min_length=1, description="Tests to include in this order")
+    patient_id: int = Field(
+        ...,
+        gt=0,
+    )
 
-    class Config:
-        from_attributes = True
+    ordered_by_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    test_ids: list[int] = Field(
+        ...,
+        min_length=1,
+    )
+
+    consultation_id: Optional[int] = Field(
+        None,
+        gt=0,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def validate_test_ids(self):
+        if any(test_id <= 0 for test_id in self.test_ids):
+            raise ValueError(
+                "All test_ids must be greater than zero"
+            )
+
+        if len(self.test_ids) != len(set(self.test_ids)):
+            raise ValueError(
+                "Duplicate test_ids are not allowed"
+            )
+
+        return self
 
 
-class LabOrderCollectSampleSchema(BaseModel):
-    """Marks a sample as physically collected — moves status to SAMPLE_COLLECTED."""
-    qr_code: Optional[str] = Field(None, max_length=150, description="Sample tracking code, if used")
+class LabSampleCollectionSchema(BaseModel):
+    scanned_qr_code: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=150,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class LabOrderEquipmentLinkSchema(BaseModel):
-    """Links an order to an external machine/LIS reference once it starts processing."""
-    equipment_reference_id: str = Field(..., max_length=150)
+class LabEquipmentLinkSchema(BaseModel):
+    equipment_reference_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=150,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LabOrderCancelSchema(BaseModel):
-    reason: Optional[str] = Field(None, max_length=255)
+    reason: Optional[str] = Field(
+        None,
+        max_length=255,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class LabResultEntrySchema(BaseModel):
-    result_value: str = Field(..., max_length=150)
-    flag: Optional[LabResultFlag] = Field(None)
-    result_notes: Optional[str] = Field(None)
-    result_file_url: Optional[str] = Field(None, max_length=255)
+# ---------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------
+
+
+class LabResultCreateSchema(BaseModel):
+    result_value: str = Field(
+        ...,
+        min_length=1,
+        max_length=150,
+    )
+
+    flag: Optional[LabResultFlag] = None
+
+    result_notes: Optional[str] = None
+
+    result_file_url: Optional[str] = Field(
+        None,
+        max_length=255,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------
+# Query schemas
+# ---------------------------------------------------------------------
+
+
+class LabOrderListQuerySchema(BaseModel):
+    patient_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    model_config = ConfigDict(from_attributes=True)

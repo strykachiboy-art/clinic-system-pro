@@ -264,6 +264,7 @@ def create_appointment(
     scheduled_end,
     appointment_type: AppointmentType = AppointmentType.IN_PERSON,
     reason: str | None = None,
+    notes: str | None = None,
 ):
     """
     Create a new appointment.
@@ -310,6 +311,7 @@ def create_appointment(
         appointment_type=appointment_type,
         status=AppointmentStatus.SCHEDULED,
         reason=reason,
+        notes=notes,
     )
 
     db.session.add(appointment)
@@ -332,6 +334,7 @@ def create_appointment(
             "appointment_type": appointment.appointment_type.value,
             "status": appointment.status.value,
             "reason": reason,
+            "notes": notes,
         },
     )
 

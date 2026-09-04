@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.extensions import db
 from app.core.enums.ward_enums import (
     AdmissionStatus,
     BedStatus,
+    ReservationStatus,
     WardType,
 )
 
@@ -82,7 +85,10 @@ class Ward(db.Model):
     )
 
     def __repr__(self):
-        return f"<Ward {self.name} ({self.ward_type.value})>"
+        return (
+            f"<Ward {self.name} "
+            f"({self.ward_type.value})>"
+        )
 
 
 class Bed(db.Model):
@@ -143,6 +149,12 @@ class Bed(db.Model):
         back_populates="bed",
     )
 
+    reservations = db.relationship(
+        "BedReservation",
+        back_populates="bed",
+        cascade="all, delete-orphan",
+    )
+
     from_transfers = db.relationship(
         "WardTransfer",
         foreign_keys="WardTransfer.from_bed_id",
@@ -156,7 +168,123 @@ class Bed(db.Model):
     )
 
     def __repr__(self):
-        return f"<Bed {self.bed_number} - {self.status.value}>"
+        return (
+            f"<Bed {self.bed_number} "
+            f"- {self.status.value}>"
+        )
+
+
+class BedReservation(db.Model):
+    """
+    Represents a reservation of a specific bed for a patient.
+
+    A reservation does not create an admission. The reservation
+    must be fulfilled through the admission workflow.
+    """
+
+    __tablename__ = "bed_reservations"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "expires_at IS NULL OR expires_at > reserved_at",
+            name="ck_bed_reservations_valid_expiry",
+        ),
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    patient_id = db.Column(
+        db.Integer,
+        db.ForeignKey("patients.id"),
+        nullable=False,
+        index=True,
+    )
+
+    bed_id = db.Column(
+        db.Integer,
+        db.ForeignKey("beds.id"),
+        nullable=False,
+        index=True,
+    )
+
+    reserved_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("staff.id"),
+        nullable=False,
+        index=True,
+    )
+
+    status = db.Column(
+        db.Enum(ReservationStatus),
+        default=ReservationStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+
+    reason = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    reserved_at = db.Column(
+        db.DateTime,
+        default=_utcnow,
+        nullable=False,
+    )
+
+    expires_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    cancelled_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    fulfilled_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=_utcnow,
+        nullable=False,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
+    )
+
+    patient = db.relationship(
+        "Patient",
+        back_populates="bed_reservations",
+    )
+
+    bed = db.relationship(
+        "Bed",
+        back_populates="reservations",
+    )
+
+    reserved_by = db.relationship(
+        "Staff",
+        back_populates="bed_reservations",
+    )
+
+    def __repr__(self):
+        return (
+            f"<BedReservation "
+            f"Patient {self.patient_id} "
+            f"- Bed {self.bed_id} "
+            f"({self.status.value})>"
+        )
 
 
 class Admission(db.Model):
@@ -185,6 +313,13 @@ class Admission(db.Model):
         db.Integer,
         db.ForeignKey("staff.id"),
         nullable=False,
+        index=True,
+    )
+
+    reservation_id = db.Column(
+        db.Integer,
+        db.ForeignKey("bed_reservations.id"),
+        nullable=True,
         index=True,
     )
 
@@ -239,6 +374,14 @@ class Admission(db.Model):
         back_populates="admissions",
     )
 
+    reservation = db.relationship(
+        "BedReservation",
+        backref=db.backref(
+            "admission",
+            uselist=False,
+        ),
+    )
+
     ambulance_trips = db.relationship(
         "AmbulanceTrip",
         back_populates="admission",
@@ -253,7 +396,8 @@ class Admission(db.Model):
     def __repr__(self):
         return (
             f"<Admission Patient {self.patient_id} "
-            f"- Bed {self.bed_id} ({self.status.value})>"
+            f"- Bed {self.bed_id} "
+            f"({self.status.value})>"
         )
 
 
@@ -267,7 +411,8 @@ class WardTransfer(db.Model):
 
     __table_args__ = (
         db.CheckConstraint(
-            "from_bed_id IS NULL OR from_bed_id != to_bed_id",
+            "from_bed_id IS NULL "
+            "OR from_bed_id != to_bed_id",
             name="ck_ward_transfers_distinct_beds",
         ),
     )
@@ -334,6 +479,7 @@ class WardTransfer(db.Model):
 
     def __repr__(self):
         return (
-            f"<WardTransfer Admission {self.admission_id} "
+            f"<WardTransfer "
+            f"Admission {self.admission_id} "
             f"-> Bed {self.to_bed_id}>"
         )

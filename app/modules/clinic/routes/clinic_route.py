@@ -1,9 +1,15 @@
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 
 from app.modules.clinic.schemas.clinic_schema import (
     ClinicAICreditsUpdateSchema,
@@ -28,9 +34,9 @@ from app.modules.clinic.services.clinic_service import (
 )
 
 
-# ============================================================
+# ============================================================================
 # BLUEPRINT
-# ============================================================
+# ============================================================================
 
 clinic_bp = Blueprint(
     "clinic",
@@ -39,11 +45,11 @@ clinic_bp = Blueprint(
 )
 
 
-# ============================================================
-# ROLE GROUPS
-# ============================================================
+# ============================================================================
+# ROLES
+# ============================================================================
 
-CLINIC_READ_ROLES = (
+CLINIC_VIEW_ROLES = (
     Role.ADMIN,
     Role.DOCTOR,
     Role.NURSE,
@@ -57,41 +63,89 @@ CLINIC_READ_ROLES = (
     Role.AMBULANCE_COORDINATOR,
 )
 
-CLINIC_ADMIN_ROLES = (
+CLINIC_MANAGEMENT_ROLES = (
     Role.ADMIN,
 )
 
 
-# ============================================================
-# VALIDATION HELPERS
-# ============================================================
+# ============================================================================
+# SERIALIZATION
+# ============================================================================
 
-def _payload(schema):
+def _serialize_clinic(clinic):
+    return {
+        "id": clinic.id,
+        "name": clinic.name,
+        "clinic_type": clinic.clinic_type.value,
+        "status": clinic.status.value,
+        "parent_clinic_id": clinic.parent_clinic_id,
+        "is_headquarters": clinic.is_headquarters,
+        "address": clinic.address,
+        "city": clinic.city,
+        "country": clinic.country,
+        "phone": clinic.phone,
+        "email": clinic.email,
+        "timezone": clinic.timezone,
+        "opening_time": (
+            clinic.opening_time.isoformat()
+            if clinic.opening_time
+            else None
+        ),
+        "closing_time": (
+            clinic.closing_time.isoformat()
+            if clinic.closing_time
+            else None
+        ),
+        "ai_credits": clinic.ai_credits,
+        "ai_requests_this_month": clinic.ai_requests_this_month,
+        "created_at": (
+            clinic.created_at.isoformat()
+            if clinic.created_at
+            else None
+        ),
+        "updated_at": (
+            clinic.updated_at.isoformat()
+            if clinic.updated_at
+            else None
+        ),
+    }
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+def _validate_json(schema):
     """
-    Validate JSON request body using a Pydantic schema.
+    Validate request JSON using the supplied Pydantic schema.
 
     Returns:
-        Pydantic model on success.
-        Flask JSON response on validation failure.
+        (payload, None) on success
+        (None, response) on validation failure
     """
     try:
-        return schema.model_validate(
+        payload = schema.model_validate(
             request.get_json(silent=True) or {}
         )
+        return payload, None
+
     except PydanticValidationError as exc:
-        return jsonify({
-            "success": False,
-            "error": exc.errors(),
-        }), 422
+        return None, (
+            jsonify({
+                "error": "Validation error",
+                "details": exc.errors(),
+            }),
+            400,
+        )
 
 
-def _query_status():
+def _parse_status():
     """
-    Parse optional clinic status query parameter.
+    Parse ?status=... query parameter.
 
-    Example:
-
-        GET /api/clinics?status=active
+    Returns:
+        ClinicStatus | None
+        or a Flask error response tuple.
     """
     raw_status = request.args.get("status")
 
@@ -100,249 +154,347 @@ def _query_status():
 
     try:
         return ClinicStatus(raw_status)
+
     except ValueError:
+        return (
+            jsonify({
+                "error": f"Invalid clinic status '{raw_status}'",
+            }),
+            400,
+        )
+
+
+# ============================================================================
+# CLINICS
+# ============================================================================
+
+@clinic_bp.post("")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def create_clinic_route():
+    payload, error = _validate_json(ClinicCreateSchema)
+
+    if error:
+        return error
+
+    try:
+        clinic = create_clinic(
+            name=payload.name,
+            clinic_type=payload.clinic_type,
+            parent_clinic_id=payload.parent_clinic_id,
+            is_headquarters=payload.is_headquarters,
+            address=payload.address,
+            city=payload.city,
+            country=payload.country,
+            phone=payload.phone,
+            email=payload.email,
+            timezone=payload.timezone,
+            opening_time=payload.opening_time,
+            closing_time=payload.closing_time,
+        )
+
         return jsonify({
-            "success": False,
-            "error": (
-                "Invalid clinic status. "
-                "Allowed values: active, inactive, suspended"
-            ),
-        }), 422
+            "message": "Clinic created successfully",
+            "data": _serialize_clinic(clinic),
+        }), 201
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
 
-# ============================================================
-# CREATE CLINIC
-# ============================================================
+@clinic_bp.get("")
+@jwt_required()
+@role_required(*CLINIC_VIEW_ROLES)
+def list_clinics_route():
+    parsed_status = _parse_status()
 
-@clinic_bp.post("/")
-@role_required(*CLINIC_ADMIN_ROLES)
-def create():
-    payload = _payload(ClinicCreateSchema)
+    if isinstance(parsed_status, tuple):
+        return parsed_status
 
-    if isinstance(payload, tuple):
-        return payload
+    try:
+        clinics = list_clinics(
+            status=parsed_status,
+        )
 
-    clinic = create_clinic(
-        **payload.model_dump()
-    )
+        return jsonify({
+            "data": [
+                _serialize_clinic(clinic)
+                for clinic in clinics
+            ],
+        }), 200
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 201
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
-
-# ============================================================
-# LIST CLINICS
-# ============================================================
-
-@clinic_bp.get("/")
-@role_required(*CLINIC_READ_ROLES)
-def list_all():
-    status = _query_status()
-
-    if isinstance(status, tuple):
-        return status
-
-    clinics = list_clinics(
-        status=status
-    )
-
-    return jsonify({
-        "success": True,
-        "data": clinics,
-    }), 200
-
-
-# ============================================================
-# GET CLINIC
-# ============================================================
 
 @clinic_bp.get("/<int:clinic_id>")
-@role_required(*CLINIC_READ_ROLES)
-def get(clinic_id: int):
-    clinic = get_clinic(
-        clinic_id=clinic_id
-    )
+@jwt_required()
+@role_required(*CLINIC_VIEW_ROLES)
+def get_clinic_route(clinic_id: int):
+    try:
+        clinic = get_clinic(clinic_id)
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 200
+        return jsonify({
+            "data": _serialize_clinic(clinic),
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
 
 
-# ============================================================
-# LIST BRANCHES
-# ============================================================
+# ============================================================================
+# BRANCHES
+# ============================================================================
 
 @clinic_bp.get("/<int:clinic_id>/branches")
-@role_required(*CLINIC_READ_ROLES)
-def branches(clinic_id: int):
-    clinics = list_branches(
-        clinic_id=clinic_id
-    )
+@jwt_required()
+@role_required(*CLINIC_VIEW_ROLES)
+def list_clinic_branches_route(clinic_id: int):
+    try:
+        branches = list_branches(
+            clinic_id=clinic_id,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": clinics,
-    }), 200
+        return jsonify({
+            "data": [
+                _serialize_clinic(branch)
+                for branch in branches
+            ],
+        }), 200
 
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
 
-# ============================================================
-# CREATE BRANCH
-# ============================================================
 
 @clinic_bp.post("/<int:clinic_id>/branches")
-@role_required(*CLINIC_ADMIN_ROLES)
-def create_clinic_branch(clinic_id: int):
-    payload = _payload(
-        ClinicBranchCreateSchema
-    )
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def create_clinic_branch_route(clinic_id: int):
+    payload, error = _validate_json(ClinicBranchCreateSchema)
 
-    if isinstance(payload, tuple):
-        return payload
+    if error:
+        return error
 
-    clinic = create_branch(
-        parent_clinic_id=clinic_id,
-        **payload.model_dump(),
-    )
+    try:
+        branch = create_branch(
+            parent_clinic_id=clinic_id,
+            name=payload.name,
+            clinic_type=payload.clinic_type,
+            address=payload.address,
+            city=payload.city,
+            country=payload.country,
+            phone=payload.phone,
+            email=payload.email,
+            timezone=payload.timezone,
+            opening_time=payload.opening_time,
+            closing_time=payload.closing_time,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 201
+        return jsonify({
+            "message": "Clinic branch created successfully",
+            "data": _serialize_clinic(branch),
+        }), 201
 
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
 
-# ============================================================
-# UPDATE CLINIC PROFILE
-# ============================================================
-
-@clinic_bp.patch("/<int:clinic_id>")
-@role_required(*CLINIC_ADMIN_ROLES)
-def update(clinic_id: int):
-    payload = _payload(
-        ClinicUpdateSchema
-    )
-
-    if isinstance(payload, tuple):
-        return payload
-
-    fields = payload.model_dump(
-        exclude_unset=True
-    )
-
-    clinic = update_clinic(
-        clinic_id=clinic_id,
-        **fields,
-    )
-
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 200
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
 
-# ============================================================
-# UPDATE BRANCH CONFIGURATION
-# ============================================================
-
-@clinic_bp.patch(
-    "/<int:clinic_id>/branch-configuration"
-)
-@role_required(*CLINIC_ADMIN_ROLES)
-def update_branch(clinic_id: int):
-    payload = _payload(
+@clinic_bp.patch("/<int:clinic_id>/branch-configuration")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def update_clinic_branch_configuration_route(clinic_id: int):
+    payload, error = _validate_json(
         ClinicBranchConfigurationSchema
     )
 
-    if isinstance(payload, tuple):
-        return payload
+    if error:
+        return error
 
-    fields = payload.model_dump(
-        exclude_unset=True
-    )
+    try:
+        fields = payload.model_dump(
+            exclude_unset=True,
+        )
 
-    clinic = update_branch_configuration(
-        clinic_id=clinic_id,
-        **fields,
-    )
+        clinic = update_branch_configuration(
+            clinic_id=clinic_id,
+            **fields,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 200
+        return jsonify({
+            "message": "Clinic branch configuration updated successfully",
+            "data": _serialize_clinic(clinic),
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
 
-# ============================================================
-# CHANGE CLINIC STATUS
-# ============================================================
+# ============================================================================
+# CLINIC UPDATE
+# ============================================================================
 
-@clinic_bp.patch(
-    "/<int:clinic_id>/status"
-)
-@role_required(*CLINIC_ADMIN_ROLES)
-def status(clinic_id: int):
-    payload = _payload(
+@clinic_bp.patch("/<int:clinic_id>")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def update_clinic_route(clinic_id: int):
+    payload, error = _validate_json(ClinicUpdateSchema)
+
+    if error:
+        return error
+
+    try:
+        fields = payload.model_dump(
+            exclude_unset=True,
+        )
+
+        clinic = update_clinic(
+            clinic_id=clinic_id,
+            **fields,
+        )
+
+        return jsonify({
+            "message": "Clinic updated successfully",
+            "data": _serialize_clinic(clinic),
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
+
+
+# ============================================================================
+# STATUS
+# ============================================================================
+
+@clinic_bp.patch("/<int:clinic_id>/status")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def update_clinic_status_route(clinic_id: int):
+    payload, error = _validate_json(
         ClinicStatusUpdateSchema
     )
 
-    if isinstance(payload, tuple):
-        return payload
+    if error:
+        return error
 
-    clinic = change_status(
-        clinic_id=clinic_id,
-        new_status=payload.status,
-    )
+    try:
+        clinic = change_status(
+            clinic_id=clinic_id,
+            new_status=payload.status,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 200
+        return jsonify({
+            "message": "Clinic status updated successfully",
+            "data": _serialize_clinic(clinic),
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
 
-# ============================================================
-# ADD AI CREDITS
-# ============================================================
+# ============================================================================
+# AI CREDITS
+# ============================================================================
 
-@clinic_bp.patch(
-    "/<int:clinic_id>/ai-credits"
-)
-@role_required(*CLINIC_ADMIN_ROLES)
-def ai_credits(clinic_id: int):
-    payload = _payload(
+@clinic_bp.patch("/<int:clinic_id>/ai-credits")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def update_clinic_ai_credits_route(clinic_id: int):
+    payload, error = _validate_json(
         ClinicAICreditsUpdateSchema
     )
 
-    if isinstance(payload, tuple):
-        return payload
+    if error:
+        return error
 
-    clinic = add_ai_credits(
-        clinic_id=clinic_id,
-        amount=payload.amount,
-    )
+    try:
+        clinic = add_ai_credits(
+            clinic_id=clinic_id,
+            amount=payload.amount,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": clinic,
-    }), 200
+        return jsonify({
+            "message": "Clinic AI credits updated successfully",
+            "data": _serialize_clinic(clinic),
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
 
 
-# ============================================================
-# REGENERATE API TOKEN
-# ============================================================
+# ============================================================================
+# API TOKEN
+# ============================================================================
 
-@clinic_bp.post(
-    "/<int:clinic_id>/api-token/regenerate"
-)
-@role_required(*CLINIC_ADMIN_ROLES)
-def regenerate_token(clinic_id: int):
-    token = regenerate_api_token(
-        clinic_id=clinic_id
-    )
+@clinic_bp.post("/<int:clinic_id>/api-token/regenerate")
+@jwt_required()
+@role_required(*CLINIC_MANAGEMENT_ROLES)
+def regenerate_clinic_api_token_route(clinic_id: int):
+    try:
+        token = regenerate_api_token(
+            clinic_id=clinic_id,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": {
-            "api_token": token,
-        },
-    }), 200
+        return jsonify({
+            "message": "Clinic API token regenerated successfully",
+            "data": {
+                "api_token": token,
+            },
+        }), 200
+
+    except NotFoundError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 404
+
+    except (ValidationError, ConflictError) as exc:
+        return jsonify({
+            "error": str(exc),
+        }), 400
