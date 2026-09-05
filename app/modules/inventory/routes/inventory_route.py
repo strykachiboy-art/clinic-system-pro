@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.role_enums import Role
@@ -90,19 +91,66 @@ def _json_body() -> dict:
     return payload
 
 
+def _sanitize_pydantic_errors(
+    exc: PydanticValidationError,
+) -> list[dict]:
+    """
+    Convert Pydantic validation errors into JSON-safe dictionaries.
+
+    Pydantic can place non-JSON-serializable exception objects such as
+    ValueError inside the `ctx` field. Flask's jsonify cannot serialize
+    those objects directly.
+    """
+    sanitized = []
+
+    for error in exc.errors():
+        item = dict(error)
+
+        if "ctx" in item:
+            ctx = item["ctx"]
+
+            if isinstance(ctx, dict):
+                item["ctx"] = {
+                    key: str(value)
+                    for key, value in ctx.items()
+                }
+            else:
+                item["ctx"] = str(ctx)
+
+        if "input" in item:
+            input_value = item["input"]
+
+            try:
+                json.dumps(input_value)
+            except (TypeError, ValueError):
+                item["input"] = str(input_value)
+
+        sanitized.append(item)
+
+    return sanitized
+
+
+def _validation_response(
+    exc: PydanticValidationError,
+):
+    return (
+        jsonify(
+            {
+                "error": "Validation error",
+                "details": _sanitize_pydantic_errors(exc),
+            }
+        ),
+        400,
+    )
+
+
 def _validate_json(schema):
     try:
         return schema.model_validate(_json_body()), None
+
     except PydanticValidationError as exc:
-        return None, (
-            jsonify(
-                {
-                    "error": "Validation error",
-                    "details": exc.errors(),
-                }
-            ),
-            400,
-        )
+        return None, _validation_response(exc)
+
     except ValidationError as exc:
         return None, (
             jsonify(
@@ -219,12 +267,7 @@ def list_items():
         ), 200
 
     except PydanticValidationError as exc:
-        return jsonify(
-            {
-                "error": "Validation error",
-                "details": exc.errors(),
-            }
-        ), 400
+        return _validation_response(exc)
 
     except (ValidationError, ConflictError, NotFoundError) as exc:
         return _service_error_response(exc)
@@ -282,7 +325,9 @@ def get_item(item_id: int):
 @inventory_bp.post("/items")
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def create_item():
-    payload, error = _validate_json(InventoryItemCreateSchema)
+    payload, error = _validate_json(
+        InventoryItemCreateSchema
+    )
 
     if error:
         return error
@@ -425,12 +470,7 @@ def list_batches(item_id: int):
         ), 200
 
     except PydanticValidationError as exc:
-        return jsonify(
-            {
-                "error": "Validation error",
-                "details": exc.errors(),
-            }
-        ), 400
+        return _validation_response(exc)
 
     except (ValidationError, ConflictError, NotFoundError) as exc:
         return _service_error_response(exc)
@@ -553,12 +593,7 @@ def expiring_batches():
         ), 200
 
     except PydanticValidationError as exc:
-        return jsonify(
-            {
-                "error": "Validation error",
-                "details": exc.errors(),
-            }
-        ), 400
+        return _validation_response(exc)
 
     except (ValidationError, ConflictError, NotFoundError) as exc:
         return _service_error_response(exc)
@@ -656,12 +691,7 @@ def list_inventory_suppliers():
         ), 200
 
     except PydanticValidationError as exc:
-        return jsonify(
-            {
-                "error": "Validation error",
-                "details": exc.errors(),
-            }
-        ), 400
+        return _validation_response(exc)
 
     except (ValidationError, ConflictError, NotFoundError) as exc:
         return _service_error_response(exc)
@@ -839,12 +869,7 @@ def list_transfers():
         ), 200
 
     except PydanticValidationError as exc:
-        return jsonify(
-            {
-                "error": "Validation error",
-                "details": exc.errors(),
-            }
-        ), 400
+        return _validation_response(exc)
 
     except (ValidationError, ConflictError, NotFoundError) as exc:
         return _service_error_response(exc)

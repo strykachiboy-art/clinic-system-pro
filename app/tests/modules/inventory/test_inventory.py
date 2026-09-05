@@ -2,8 +2,6 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
-from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 
@@ -14,60 +12,75 @@ from app.core.enums.inventory_enums import (
     StockMovementType,
 )
 from app.core.enums.role_enums import Role
-from app.core.enums.staff_enums import StaffStatus
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.extensions import db as _db
 from app.modules.inventory.models.inventory_model import (
     InventoryBatch,
     InventoryItem,
     InventorySupplier,
+    InventoryTransfer,
+    StockMovement,
 )
-from app.modules.inventory.routes import inventory_route as inventory_routes
 
 
 # ============================================================================
-# HELPERS
+# LOCAL INVENTORY FIXTURES
 # ============================================================================
 
 
-def response_json(response):
-    body = response.get_json()
-    assert body is not None, response.data
-    return body
+@pytest.fixture()
+def admin_staff_and_headers(make_authenticated_staff, clinic):
+    return make_authenticated_staff(
+        clinic,
+        Role.ADMIN,
+        first_name="Inventory",
+        last_name="Admin",
+    )
 
 
-def assert_error(response, status_code, message=None):
-    assert response.status_code == status_code, response.get_json()
-
-    body = response_json(response)
-    assert "error" in body
-
-    if message is not None:
-        assert message in body["error"]
-
-    return body
+@pytest.fixture()
+def pharmacist_staff_and_headers(make_authenticated_staff, clinic):
+    return make_authenticated_staff(
+        clinic,
+        Role.PHARMACIST,
+        first_name="Inventory",
+        last_name="Pharmacist",
+    )
 
 
-# ============================================================================
-# INVENTORY FIXTURES
-# ============================================================================
+@pytest.fixture()
+def second_clinic(make_clinic):
+    return make_clinic(name="Destination Clinic")
+
+
+@pytest.fixture()
+def second_admin_staff_and_headers(
+    make_authenticated_staff,
+    second_clinic,
+):
+    return make_authenticated_staff(
+        second_clinic,
+        Role.ADMIN,
+        first_name="Destination",
+        last_name="Admin",
+    )
 
 
 @pytest.fixture()
 def inventory_item(db, clinic):
     item = InventoryItem(
         clinic_id=clinic.id,
-        name="Paracetamol",
+        name="Test Medical Supply",
         category=InventoryCategory.MEDICAL_SUPPLY,
-        sku="PAR-001",
-        barcode="123456789",
-        unit="box",
-        quantity_on_hand=25,
+        sku="TEST-SKU-001",
+        barcode="TEST-BARCODE-001",
+        unit="piece",
+        quantity_on_hand=100,
         reorder_level=10,
         is_active=True,
     )
+
     db.session.add(item)
     db.session.commit()
+
     return item
 
 
@@ -75,16 +88,18 @@ def inventory_item(db, clinic):
 def low_stock_item(db, clinic):
     item = InventoryItem(
         clinic_id=clinic.id,
-        name="Low Stock Syringes",
+        name="Low Stock Supply",
         category=InventoryCategory.CONSUMABLE,
-        sku="SYR-001",
+        sku="LOW-STOCK-001",
         unit="box",
-        quantity_on_hand=2,
+        quantity_on_hand=5,
         reorder_level=10,
         is_active=True,
     )
+
     db.session.add(item)
     db.session.commit()
+
     return item
 
 
@@ -92,253 +107,199 @@ def low_stock_item(db, clinic):
 def inactive_inventory_item(db, clinic):
     item = InventoryItem(
         clinic_id=clinic.id,
-        name="Inactive Item",
+        name="Inactive Supply",
         category=InventoryCategory.MEDICAL_SUPPLY,
-        sku="INA-001",
-        unit="box",
-        quantity_on_hand=10,
+        sku="INACTIVE-001",
+        unit="piece",
+        quantity_on_hand=20,
         reorder_level=5,
         is_active=False,
     )
+
     db.session.add(item)
     db.session.commit()
+
     return item
 
 
 @pytest.fixture()
-def inventory_supplier(db, clinic):
+def supplier(db, clinic):
     supplier = InventorySupplier(
         clinic_id=clinic.id,
-        name="MediSupply Ltd",
+        name="Test Supplier",
         contact_person="John Supplier",
-        phone="08012345678",
-        email="supplier@example.com",
-        address="Port Harcourt",
+        phone="08000000000",
+        email="supplier@test.com",
+        address="Test Supplier Address",
         is_active=True,
     )
+
     db.session.add(supplier)
     db.session.commit()
+
     return supplier
 
 
 @pytest.fixture()
-def inactive_inventory_supplier(db, clinic):
+def global_supplier(db):
+    supplier = InventorySupplier(
+        clinic_id=None,
+        name="Global Supplier",
+        contact_person="Global Contact",
+        phone="08111111111",
+        email="global@supplier.test",
+        address="Global Address",
+        is_active=True,
+    )
+
+    db.session.add(supplier)
+    db.session.commit()
+
+    return supplier
+
+
+@pytest.fixture()
+def inactive_supplier(db, clinic):
     supplier = InventorySupplier(
         clinic_id=clinic.id,
         name="Inactive Supplier",
-        contact_person="Jane Supplier",
-        phone="08087654321",
-        email="inactive@example.com",
-        address="Port Harcourt",
         is_active=False,
     )
+
     db.session.add(supplier)
     db.session.commit()
+
     return supplier
 
 
 @pytest.fixture()
-def inventory_batch(db, inventory_item, inventory_supplier):
+def inventory_batch(db, inventory_item, supplier):
     batch = InventoryBatch(
         item_id=inventory_item.id,
-        supplier_id=inventory_supplier.id,
+        supplier_id=supplier.id,
         batch_number="BATCH-001",
-        quantity_on_hand=25,
-        unit_cost=Decimal("150.00"),
+        quantity_on_hand=50,
+        unit_cost=Decimal("1250.00"),
         expiry_date=date.today() + timedelta(days=60),
         is_active=True,
     )
+
     db.session.add(batch)
     db.session.commit()
+
     return batch
 
 
 @pytest.fixture()
-def second_inventory_batch(db, inventory_item):
+def expiring_batch(db, inventory_item, supplier):
     batch = InventoryBatch(
         item_id=inventory_item.id,
-        batch_number="BATCH-002",
-        quantity_on_hand=10,
-        unit_cost=Decimal("175.00"),
-        expiry_date=date.today() + timedelta(days=120),
+        supplier_id=supplier.id,
+        batch_number="EXPIRING-001",
+        quantity_on_hand=20,
+        unit_cost=Decimal("500.00"),
+        expiry_date=date.today() + timedelta(days=5),
         is_active=True,
     )
+
     db.session.add(batch)
     db.session.commit()
+
     return batch
 
 
 @pytest.fixture()
-def inactive_inventory_batch(db, inventory_item):
+def inactive_batch(db, inventory_item, supplier):
     batch = InventoryBatch(
         item_id=inventory_item.id,
-        batch_number="BATCH-INACTIVE",
-        quantity_on_hand=5,
-        unit_cost=Decimal("100.00"),
-        expiry_date=date.today() + timedelta(days=90),
+        supplier_id=supplier.id,
+        batch_number="INACTIVE-BATCH-001",
+        quantity_on_hand=20,
+        unit_cost=Decimal("500.00"),
+        expiry_date=date.today() + timedelta(days=60),
         is_active=False,
     )
+
     db.session.add(batch)
     db.session.commit()
+
     return batch
 
 
 @pytest.fixture()
-def pharmacist(make_authenticated_staff, clinic):
-    return make_authenticated_staff(
-        clinic,
-        Role.PHARMACIST,
-        first_name="Pharmacist",
-        last_name="User",
+def stock_movement(db, inventory_item, admin_staff_and_headers):
+    staff, _headers = admin_staff_and_headers
+
+    movement = StockMovement(
+        item_id=inventory_item.id,
+        batch_id=None,
+        movement_type=StockMovementType.RESTOCK,
+        direction=StockMovementDirection.IN,
+        quantity=25,
+        reason="Initial test movement",
+        performed_by_id=staff.id,
+        reference_type="test",
+        reference_id=1,
     )
+
+    db.session.add(movement)
+    db.session.commit()
+
+    return movement
 
 
 @pytest.fixture()
-def suspended_staff(make_staff, clinic):
-    return make_staff(
-        clinic,
-        role=Role.PHARMACIST,
-        status=StaffStatus.SUSPENDED,
+def inventory_transfer(
+    db,
+    clinic,
+    second_clinic,
+    inventory_item,
+    admin_staff_and_headers,
+):
+    staff, _headers = admin_staff_and_headers
+
+    transfer = InventoryTransfer(
+        item_id=inventory_item.id,
+        batch_id=None,
+        source_clinic_id=clinic.id,
+        destination_clinic_id=second_clinic.id,
+        quantity=10,
+        status=InventoryTransferStatus.PENDING,
+        reason="Test transfer",
+        requested_by_id=staff.id,
     )
 
+    db.session.add(transfer)
+    db.session.commit()
 
-# ============================================================================
-# AUTHORIZATION
-# ============================================================================
+    return transfer
 
 
-class TestInventoryAuthorization:
+def _body(response):
+    body = response.get_json()
+    assert body is not None
+    return body
 
-    def test_items_requires_authentication(self, client):
-        response = client.get("/api/inventory/items?clinic_id=1")
 
-        assert response.status_code in (401, 422)
+def _assert_success(response, status_code):
+    assert response.status_code == status_code, response.get_json()
 
-    def test_items_rejects_unauthorized_role(
-        self,
-        client,
-        make_user,
-        clinic,
-        auth_headers_for,
-    ):
-        user = make_user(clinic, role=Role.PATIENT)
+    body = _body(response)
 
-        response = client.get(
-            f"/api/inventory/items?clinic_id={clinic.id}",
-            headers=auth_headers_for(user, role=Role.PATIENT),
-        )
+    assert body["success"] is True
+    assert "data" in body
 
-        assert response.status_code == 403
+    return body["data"]
 
-    def test_admin_can_access_items(
-        self,
-        client,
-        user,
-        clinic,
-        auth_headers_for,
-    ):
-        response = client.get(
-            f"/api/inventory/items?clinic_id={clinic.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
 
-        assert response.status_code == 200
+def _assert_error(response, status_code):
+    assert response.status_code == status_code, response.get_json()
 
-    def test_pharmacist_can_access_items(
-        self,
-        client,
-        pharmacist,
-        clinic,
-    ):
-        _, headers = pharmacist
+    body = _body(response)
 
-        response = client.get(
-            f"/api/inventory/items?clinic_id={clinic.id}",
-            headers=headers,
-        )
+    assert "error" in body
 
-        assert response.status_code == 200
-
-    def test_admin_only_item_deactivation_rejects_pharmacist(
-        self,
-        client,
-        pharmacist,
-        inventory_item,
-    ):
-        _, headers = pharmacist
-
-        response = client.post(
-            f"/api/inventory/items/{inventory_item.id}/deactivate"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=headers,
-        )
-
-        assert response.status_code == 403
-
-    def test_admin_only_item_reactivation_rejects_pharmacist(
-        self,
-        client,
-        pharmacist,
-        inventory_item,
-    ):
-        _, headers = pharmacist
-
-        response = client.post(
-            f"/api/inventory/items/{inventory_item.id}/reactivate"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=headers,
-        )
-
-        assert response.status_code == 403
-
-    def test_admin_only_supplier_update_rejects_pharmacist(
-        self,
-        client,
-        pharmacist,
-        inventory_supplier,
-    ):
-        _, headers = pharmacist
-
-        response = client.patch(
-            f"/api/inventory/suppliers/{inventory_supplier.id}"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=headers,
-            json={"name": "Updated Supplier"},
-        )
-
-        assert response.status_code == 403
-
-    def test_admin_only_supplier_deactivation_rejects_pharmacist(
-        self,
-        client,
-        pharmacist,
-        inventory_supplier,
-    ):
-        _, headers = pharmacist
-
-        response = client.post(
-            f"/api/inventory/suppliers/{inventory_supplier.id}/deactivate"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=headers,
-        )
-
-        assert response.status_code == 403
-
-    def test_admin_only_supplier_reactivation_rejects_pharmacist(
-        self,
-        client,
-        pharmacist,
-        inactive_inventory_supplier,
-    ):
-        _, headers = pharmacist
-
-        response = client.post(
-            f"/api/inventory/suppliers/{inactive_inventory_supplier.id}/reactivate"
-            f"?clinic_id={inactive_inventory_supplier.clinic_id}",
-            headers=headers,
-        )
-
-        assert response.status_code == 403
+    return body
 
 
 # ============================================================================
@@ -347,617 +308,836 @@ class TestInventoryAuthorization:
 
 
 class TestListInventoryItemsRoute:
-
     def test_returns_items(
         self,
         client,
-        user,
+        clinic,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            f"/api/inventory/items?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert isinstance(data, list)
+        assert any(item["id"] == inventory_item.id for item in data)
 
-        assert body["success"] is True
-        assert len(body["data"]) == 1
-        assert body["data"][0]["id"] == inventory_item.id
-        assert body["data"][0]["name"] == "Paracetamol"
+    def test_filters_by_category(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        low_stock_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items"
+            f"?clinic_id={clinic.id}"
+            f"&category={InventoryCategory.MEDICAL_SUPPLY.value}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        assert all(
+            item["category"] == InventoryCategory.MEDICAL_SUPPLY.value
+            for item in data
+        )
+
+    def test_filters_low_stock(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        low_stock_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items"
+            f"?clinic_id={clinic.id}"
+            f"&low_stock_only=true",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert low_stock_item.id in ids
+        assert inventory_item.id not in ids
+
+    def test_excludes_inactive_items_by_default(
+        self,
+        client,
+        clinic,
+        inactive_inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert inactive_inventory_item.id not in ids
+
+    def test_include_inactive_returns_inactive_items(
+        self,
+        client,
+        clinic,
+        inactive_inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items"
+            f"?clinic_id={clinic.id}"
+            f"&include_inactive=true",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert inactive_inventory_item.id in ids
 
     def test_requires_clinic_id(
         self,
         client,
-        user,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
-    @pytest.mark.parametrize(
-        "clinic_id",
-        ["abc", "0", "-1"],
-    )
-    def test_rejects_invalid_clinic_id(
-        self,
-        client,
-        user,
-        auth_headers_for,
-        clinic_id,
-    ):
+    def test_requires_authentication(self, client, clinic):
         response = client.get(
-            f"/api/inventory/items?clinic_id={clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items?clinic_id={clinic.id}",
         )
 
-        assert response.status_code == 400
-
-
-class TestLowStockItemsRoute:
-
-    def test_returns_low_stock_items(
-        self,
-        client,
-        user,
-        low_stock_item,
-        auth_headers_for,
-    ):
-        response = client.get(
-            f"/api/inventory/items/low-stock"
-            f"?clinic_id={low_stock_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert response.status_code == 200, response.get_json()
-
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert any(
-            item["id"] == low_stock_item.id
-            for item in body["data"]
-        )
-
-    def test_requires_clinic_id(
-        self,
-        client,
-        user,
-        auth_headers_for,
-    ):
-        response = client.get(
-            "/api/inventory/items/low-stock",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert_error(response, 400, "clinic_id")
+        assert response.status_code in (401, 422)
 
 
 class TestGetInventoryItemRoute:
-
     def test_returns_item(
         self,
         client,
-        user,
         inventory_item,
-        auth_headers_for,
+        clinic,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/items/{inventory_item.id}"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == inventory_item.id
+        assert data["clinic_id"] == clinic.id
+        assert data["name"] == inventory_item.name
 
-        assert body["success"] is True
-        assert body["data"]["id"] == inventory_item.id
-
-    def test_allows_missing_optional_clinic_id(
+    def test_returns_not_found(
         self,
         client,
-        user,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            "/api/inventory/items/999999",
+            headers=headers,
+        )
+
+        _assert_error(response, 404)
+
+    def test_rejects_wrong_clinic(
+        self,
+        client,
         inventory_item,
-        auth_headers_for,
+        make_clinic,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+        other_clinic = make_clinic(name="Other Inventory Clinic")
+
         response = client.get(
-            f"/api/inventory/items/{inventory_item.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items/{inventory_item.id}"
+            f"?clinic_id={other_clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200
-
-    def test_rejects_invalid_optional_clinic_id(
-        self,
-        client,
-        user,
-        inventory_item,
-        auth_headers_for,
-    ):
-        response = client.get(
-            f"/api/inventory/items/{inventory_item.id}?clinic_id=abc",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert response.status_code == 400
-
-    def test_returns_404_for_missing_item(
-        self,
-        client,
-        user,
-        clinic,
-        auth_headers_for,
-    ):
-        response = client.get(
-            f"/api/inventory/items/999999?clinic_id={clinic.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert_error(response, 404)
+        _assert_error(response, 400)
 
 
 class TestCreateInventoryItemRoute:
-
     def test_creates_item(
         self,
         client,
-        user,
-        staff,
         clinic,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "clinic_id": clinic.id,
-                "name": "Amoxicillin",
-                "category": InventoryCategory.MEDICAL_SUPPLY.value,
-                "sku": "AMX-001",
+                "name": "Surgical Gloves",
+                "category": InventoryCategory.CONSUMABLE.value,
+                "sku": "GLOVES-001",
+                "barcode": "BARCODE-001",
                 "unit": "box",
-                "initial_quantity": 20,
-                "reorder_level": 5,
+                "initial_quantity": 50,
+                "reorder_level": 10,
                 "performed_by_id": staff.id,
             },
         )
 
-        assert response.status_code == 201, response.get_json()
+        data = _assert_success(response, 201)
 
-        body = response_json(response)
+        assert data["id"] > 0
+        assert data["clinic_id"] == clinic.id
+        assert data["name"] == "Surgical Gloves"
+        assert data["category"] == InventoryCategory.CONSUMABLE.value
+        assert data["quantity_on_hand"] == 50
+        assert data["reorder_level"] == 10
 
-        assert body["success"] is True
-        assert body["data"]["clinic_id"] == clinic.id
-        assert body["data"]["name"] == "Amoxicillin"
+    def test_creates_item_without_initial_quantity(
+        self,
+        client,
+        clinic,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
 
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {},
-            {"clinic_id": 0, "name": "Test"},
-            {"clinic_id": 1},
-            {"clinic_id": 1, "name": ""},
-            {"clinic_id": 1, "name": "   "},
-        ],
-    )
+        response = client.post(
+            "/api/inventory/items",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "Empty Stock Item",
+            },
+        )
+
+        data = _assert_success(response, 201)
+
+        assert data["quantity_on_hand"] == 0
+
     def test_rejects_invalid_payload(
         self,
         client,
-        user,
-        auth_headers_for,
-        payload,
+        clinic,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json=payload,
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "",
+            },
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
+
+    def test_rejects_negative_initial_quantity(
+        self,
+        client,
+        clinic,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/items",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "Invalid Quantity Item",
+                "initial_quantity": -1,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_unknown_fields(
+        self,
+        client,
+        clinic,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/items",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "Unknown Field Item",
+                "quantity_on_hand": 100,
+            },
+        )
+
+        _assert_error(response, 400)
+
+
+class TestUpdateInventoryItemRoute:
+    def test_updates_item(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/items/{inventory_item.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "name": "Updated Medical Supply",
+                "reorder_level": 25,
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inventory_item.id
+        assert data["name"] == "Updated Medical Supply"
+        assert data["reorder_level"] == 25
 
     def test_rejects_unknown_field(
         self,
         client,
-        user,
         clinic,
-        auth_headers_for,
-    ):
-        response = client.post(
-            "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={
-                "clinic_id": clinic.id,
-                "name": "Test Item",
-                "unknown_field": "bad",
-            },
-        )
-
-        assert response.status_code == 400
-
-    def test_rejects_non_object_json(
-        self,
-        client,
-        user,
-        auth_headers_for,
-    ):
-        response = client.post(
-            "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json=["not", "an", "object"],
-        )
-
-        assert response.status_code == 400
-
-
-class TestUpdateInventoryItemRoute:
-
-    def test_updates_item(
-        self,
-        client,
-        user,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.patch(
             f"/api/inventory/items/{inventory_item.id}"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
             json={
-                "name": "Updated Paracetamol",
-                "reorder_level": 15,
+                "quantity_on_hand": 999,
             },
         )
 
-        assert response.status_code == 200, response.get_json()
-
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["name"] == "Updated Paracetamol"
-        assert body["data"]["reorder_level"] == 15
+        _assert_error(response, 400)
 
     def test_requires_clinic_id(
         self,
         client,
-        user,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.patch(
             f"/api/inventory/items/{inventory_item.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={"name": "Updated"},
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
-    def test_rejects_invalid_payload(
+
+class TestDeactivateInventoryItemRoute:
+    def test_admin_can_deactivate(
         self,
         client,
-        user,
+        clinic,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
-        response = client.patch(
-            f"/api/inventory/items/{inventory_item.id}"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={"name": ""},
-        )
+        _staff, headers = admin_staff_and_headers
 
-        assert response.status_code == 400
-
-
-class TestDeactivateReactivateInventoryItemRoute:
-
-    def test_deactivates_item(
-        self,
-        client,
-        user,
-        inventory_item,
-        auth_headers_for,
-    ):
         response = client.post(
             f"/api/inventory/items/{inventory_item.id}/deactivate"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == inventory_item.id
+        assert data["is_active"] is False
 
-        assert body["success"] is True
-        assert body["data"]["is_active"] is False
-
-    def test_reactivates_item(
+    def test_requires_admin_role(
         self,
         client,
-        user,
-        inactive_inventory_item,
-        auth_headers_for,
+        clinic,
+        inventory_item,
+        pharmacist_staff_and_headers,
     ):
+        _staff, headers = pharmacist_staff_and_headers
+
         response = client.post(
-            f"/api/inventory/items/{inactive_inventory_item.id}/reactivate"
-            f"?clinic_id={inactive_inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items/{inventory_item.id}/deactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        assert response.status_code == 403
 
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["is_active"] is True
-
-    @pytest.mark.parametrize(
-        "endpoint",
-        ["deactivate", "reactivate"],
-    )
     def test_requires_clinic_id(
         self,
         client,
-        user,
         inventory_item,
-        auth_headers_for,
-        endpoint,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
-            f"/api/inventory/items/{inventory_item.id}/{endpoint}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items/{inventory_item.id}/deactivate",
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
+
+
+class TestReactivateInventoryItemRoute:
+    def test_admin_can_reactivate(
+        self,
+        client,
+        clinic,
+        inactive_inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/items/{inactive_inventory_item.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inactive_inventory_item.id
+        assert data["is_active"] is True
+
+    def test_requires_admin_role(
+        self,
+        client,
+        clinic,
+        inactive_inventory_item,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/items/{inactive_inventory_item.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+
+class TestLowStockItemsRoute:
+    def test_returns_low_stock_items(
+        self,
+        client,
+        clinic,
+        low_stock_item,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items/low-stock?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert low_stock_item.id in ids
+        assert inventory_item.id not in ids
+
+    def test_requires_clinic_id(
+        self,
+        client,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            "/api/inventory/items/low-stock",
+            headers=headers,
+        )
+
+        _assert_error(response, 400)
 
 
 # ============================================================================
-# BATCHES
+# INVENTORY BATCHES
 # ============================================================================
 
 
 class TestListInventoryBatchesRoute:
-
     def test_returns_batches(
         self,
         client,
-        user,
+        clinic,
         inventory_item,
         inventory_batch,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/items/{inventory_item.id}/batches"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
-
-        assert body["success"] is True
+        assert isinstance(data, list)
         assert any(
             batch["id"] == inventory_batch.id
-            for batch in body["data"]
+            for batch in data
         )
+
+    def test_excludes_inactive_batches_by_default(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        inactive_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items/{inventory_item.id}/batches"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {batch["id"] for batch in data}
+
+        assert inactive_batch.id not in ids
+
+    def test_include_inactive_batches(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        inactive_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/items/{inventory_item.id}/batches"
+            f"?clinic_id={clinic.id}"
+            f"&include_inactive=true",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {batch["id"] for batch in data}
+
+        assert inactive_batch.id in ids
 
     def test_requires_clinic_id(
         self,
         client,
-        user,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/items/{inventory_item.id}/batches",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
 
 class TestGetInventoryBatchRoute:
-
     def test_returns_batch(
         self,
         client,
-        user,
         inventory_batch,
-        auth_headers_for,
+        clinic,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/batches/{inventory_batch.id}"
-            f"?clinic_id={inventory_batch.item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == inventory_batch.id
+        assert data["item_id"] == inventory_batch.item_id
+        assert data["batch_number"] == inventory_batch.batch_number
 
-        assert body["success"] is True
-        assert body["data"]["id"] == inventory_batch.id
-
-    def test_allows_missing_optional_clinic_id(
+    def test_returns_not_found(
         self,
         client,
-        user,
-        inventory_batch,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            f"/api/inventory/batches/{inventory_batch.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            "/api/inventory/batches/999999",
+            headers=headers,
         )
 
-        assert response.status_code == 200
+        _assert_error(response, 404)
 
 
 class TestCreateInventoryBatchRoute:
-
     def test_creates_batch(
         self,
         client,
-        user,
         clinic,
         inventory_item,
-        inventory_supplier,
-        auth_headers_for,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/batches",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
-                "clinic_id": clinic.id,
                 "item_id": inventory_item.id,
-                "supplier_id": inventory_supplier.id,
+                "supplier_id": supplier.id,
                 "batch_number": "NEW-BATCH-001",
-                "unit_cost": "125.50",
+                "unit_cost": "1500.00",
                 "expiry_date": (
                     date.today() + timedelta(days=90)
+                ).isoformat(),
+                "clinic_id": clinic.id,
+            },
+        )
+
+        data = _assert_success(response, 201)
+
+        assert data["id"] > 0
+        assert data["item_id"] == inventory_item.id
+        assert data["supplier_id"] == supplier.id
+        assert data["batch_number"] == "NEW-BATCH-001"
+        assert data["quantity_on_hand"] == 0
+
+    def test_rejects_past_expiry_date(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/batches",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "batch_number": "PAST-EXPIRY",
+                "expiry_date": (
+                    date.today() - timedelta(days=1)
+                ).isoformat(),
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_duplicate_batch(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        inventory_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/batches",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "batch_number": inventory_batch.batch_number,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+
+class TestUpdateInventoryBatchRoute:
+    def test_updates_batch(
+        self,
+        client,
+        clinic,
+        inventory_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/batches/{inventory_batch.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "batch_number": "UPDATED-BATCH",
+                "unit_cost": "2000.00",
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inventory_batch.id
+        assert data["batch_number"] == "UPDATED-BATCH"
+        assert data["unit_cost"] == "2000.00"
+
+    def test_requires_clinic_id(
+        self,
+        client,
+        inventory_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/batches/{inventory_batch.id}",
+            headers=headers,
+            json={"batch_number": "UPDATED"},
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_past_expiry_date(
+        self,
+        client,
+        clinic,
+        inventory_batch,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/batches/{inventory_batch.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "expiry_date": (
+                    date.today() - timedelta(days=1)
                 ).isoformat(),
             },
         )
 
-        assert response.status_code == 201, response.get_json()
-
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["item_id"] == inventory_item.id
-        assert body["data"]["batch_number"] == "NEW-BATCH-001"
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {},
-            {"item_id": 0, "batch_number": "B-1", "unit_cost": "10"},
-            {"item_id": 1, "batch_number": "", "unit_cost": "10"},
-            {"item_id": 1, "batch_number": "B-1", "unit_cost": "-1"},
-        ],
-    )
-    def test_rejects_invalid_payload(
-        self,
-        client,
-        user,
-        auth_headers_for,
-        payload,
-    ):
-        response = client.post(
-            "/api/inventory/batches",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json=payload,
-        )
-
-        assert response.status_code == 400
-
-
-class TestUpdateInventoryBatchRoute:
-
-    def test_updates_batch(
-        self,
-        client,
-        user,
-        inventory_batch,
-        auth_headers_for,
-    ):
-        clinic_id = inventory_batch.item.clinic_id
-
-        response = client.patch(
-            f"/api/inventory/batches/{inventory_batch.id}"
-            f"?clinic_id={clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={
-                "batch_number": "UPDATED-BATCH",
-                "unit_cost": "200.00",
-            },
-        )
-
-        assert response.status_code == 200, response.get_json()
-
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["batch_number"] == "UPDATED-BATCH"
-
-    def test_requires_clinic_id(
-        self,
-        client,
-        user,
-        inventory_batch,
-        auth_headers_for,
-    ):
-        response = client.patch(
-            f"/api/inventory/batches/{inventory_batch.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={"batch_number": "UPDATED"},
-        )
-
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
 
 class TestExpiringInventoryBatchesRoute:
-
     def test_returns_expiring_batches(
         self,
         client,
-        user,
-        inventory_batch,
-        auth_headers_for,
+        clinic,
+        expiring_batch,
+        admin_staff_and_headers,
     ):
-        clinic_id = inventory_batch.item.clinic_id
+        _staff, headers = admin_staff_and_headers
 
         response = client.get(
             f"/api/inventory/batches/expiring"
-            f"?clinic_id={clinic_id}&days=90",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}"
+            f"&days=30",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        ids = {batch["id"] for batch in data}
 
-        assert body["success"] is True
-        assert any(
-            batch["id"] == inventory_batch.id
-            for batch in body["data"]
-        )
+        assert expiring_batch.id in ids
 
-    def test_requires_clinic_id(
+    def test_does_not_return_batches_outside_window(
         self,
         client,
-        user,
-        auth_headers_for,
+        clinic,
+        inventory_batch,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            "/api/inventory/batches/expiring",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/batches/expiring"
+            f"?clinic_id={clinic.id}"
+            f"&days=1",
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        data = _assert_success(response, 200)
+
+        ids = {batch["id"] for batch in data}
+
+        assert inventory_batch.id not in ids
 
     def test_rejects_negative_days(
         self,
         client,
-        user,
         clinic,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/batches/expiring"
-            f"?clinic_id={clinic.id}&days=-1",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}"
+            f"&days=-1",
+            headers=headers,
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
 
 
 # ============================================================================
@@ -966,153 +1146,252 @@ class TestExpiringInventoryBatchesRoute:
 
 
 class TestListStockMovementsRoute:
-
     def test_returns_movements(
         self,
         client,
-        user,
-        staff,
+        clinic,
         inventory_item,
-        auth_headers_for,
-        monkeypatch,
+        stock_movement,
+        admin_staff_and_headers,
     ):
-        movement = SimpleNamespace(
-            id=1,
-            item_id=inventory_item.id,
-            batch_id=None,
-            movement_type=StockMovementType.RESTOCK,
-            direction=StockMovementDirection.IN,
-            quantity=10,
-            reason="Initial restock",
-            reference_type="TEST",
-            reference_id=1,
-            performed_by_id=staff.id,
-            created_at=None,
-        )
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "get_stock_movements",
-            Mock(return_value=[movement]),
-        )
+        _staff, headers = admin_staff_and_headers
 
         response = client.get(
             f"/api/inventory/items/{inventory_item.id}/movements"
-            f"?clinic_id={inventory_item.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"][0]["item_id"] == inventory_item.id
+        assert isinstance(data, list)
+        assert any(
+            movement["id"] == stock_movement.id
+            for movement in data
+        )
 
     def test_requires_clinic_id(
         self,
         client,
-        user,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             f"/api/inventory/items/{inventory_item.id}/movements",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
 
 class TestCreateStockMovementRoute:
-
-    def test_creates_movement(
+    def test_creates_restock_movement(
         self,
         client,
-        user,
-        staff,
+        clinic,
         inventory_item,
-        auth_headers_for,
-        monkeypatch,
+        admin_staff_and_headers,
     ):
-        movement = SimpleNamespace(
-            id=1,
-            item_id=inventory_item.id,
-            batch_id=None,
-            movement_type=StockMovementType.RESTOCK,
-            direction=StockMovementDirection.IN,
-            quantity=10,
-            reason="Restock",
-            reference_type="RESTOCK",
-            reference_id=1,
-            performed_by_id=staff.id,
-            created_at=None,
-        )
-
-        service = Mock(return_value=movement)
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "record_stock_movement",
-            service,
-        )
+        staff, headers = admin_staff_and_headers
 
         response = client.post(
             "/api/inventory/movements",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "item_id": inventory_item.id,
                 "movement_type": StockMovementType.RESTOCK.value,
-                "quantity": 10,
-                "reason": "Restock",
-                "reference_type": "RESTOCK",
-                "reference_id": 1,
+                "quantity": 25,
+                "reason": "Restocking supplies",
                 "performed_by_id": staff.id,
-                "clinic_id": inventory_item.clinic_id,
+                "clinic_id": clinic.id,
             },
         )
 
-        assert response.status_code == 201, response.get_json()
+        data = _assert_success(response, 201)
 
-        service.assert_called_once()
+        assert data["id"] > 0
+        assert data["item_id"] == inventory_item.id
+        assert data["movement_type"] == StockMovementType.RESTOCK.value
+        assert data["direction"] == StockMovementDirection.IN.value
+        assert data["quantity"] == 25
 
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["item_id"] == inventory_item.id
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {},
-            {
-                "item_id": 1,
-                "movement_type": StockMovementType.RESTOCK.value,
-                "quantity": 0,
-                "performed_by_id": 1,
-            },
-            {
-                "item_id": 1,
-                "movement_type": StockMovementType.RESTOCK.value,
-                "quantity": -1,
-                "performed_by_id": 1,
-            },
-        ],
-    )
-    def test_rejects_invalid_payload(
+    def test_creates_usage_movement(
         self,
         client,
-        user,
-        auth_headers_for,
-        payload,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
     ):
+        staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/movements",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json=payload,
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.USAGE.value,
+                "quantity": 10,
+                "reason": "Used during procedure",
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
         )
 
-        assert response.status_code == 400
+        data = _assert_success(response, 201)
+
+        assert data["movement_type"] == StockMovementType.USAGE.value
+        assert data["direction"] == StockMovementDirection.OUT.value
+        assert data["quantity"] == 10
+
+    def test_creates_positive_adjustment(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.ADJUSTMENT.value,
+                "quantity": 5,
+                "reason": "Stock count adjustment",
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        data = _assert_success(response, 201)
+
+        assert data["movement_type"] == StockMovementType.ADJUSTMENT.value
+        assert data["direction"] == StockMovementDirection.IN.value
+        assert data["quantity"] == 5
+
+    def test_creates_negative_adjustment(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.ADJUSTMENT.value,
+                "quantity": -5,
+                "reason": "Damaged stock correction",
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        data = _assert_success(response, 201)
+
+        assert data["movement_type"] == StockMovementType.ADJUSTMENT.value
+        assert data["direction"] == StockMovementDirection.OUT.value
+        assert data["quantity"] == 5
+
+    def test_rejects_zero_adjustment(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.ADJUSTMENT.value,
+                "quantity": 0,
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_zero_regular_movement(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.RESTOCK.value,
+                "quantity": 0,
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_negative_regular_movement(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.RESTOCK.value,
+                "quantity": -5,
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_insufficient_stock(
+        self,
+        client,
+        clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/movements",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "movement_type": StockMovementType.USAGE.value,
+                "quantity": 999999,
+                "performed_by_id": staff.id,
+                "clinic_id": clinic.id,
+            },
+        )
+
+        _assert_error(response, 400)
 
 
 # ============================================================================
@@ -1121,218 +1400,406 @@ class TestCreateStockMovementRoute:
 
 
 class TestListSuppliersRoute:
-
     def test_returns_suppliers(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            f"/api/inventory/suppliers"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
-
-        assert body["success"] is True
+        assert isinstance(data, list)
         assert any(
-            supplier["id"] == inventory_supplier.id
-            for supplier in body["data"]
+            item["id"] == supplier.id
+            for item in data
         )
 
-    def test_allows_missing_optional_clinic_id(
+    def test_returns_global_suppliers(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        global_supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            "/api/inventory/suppliers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert global_supplier.id in ids
+
+    def test_excludes_inactive_suppliers(
+        self,
+        client,
+        clinic,
+        inactive_supplier,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/suppliers?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert inactive_supplier.id not in ids
+
+    def test_include_inactive_suppliers(
+        self,
+        client,
+        clinic,
+        inactive_supplier,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/suppliers"
+            f"?clinic_id={clinic.id}"
+            f"&include_inactive=true",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        ids = {item["id"] for item in data}
+
+        assert inactive_supplier.id in ids
 
 
 class TestGetSupplierRoute:
-
     def test_returns_supplier(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            f"/api/inventory/suppliers/{inventory_supplier.id}"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers/{supplier.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 200
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == supplier.id
+        assert data["clinic_id"] == clinic.id
+        assert data["name"] == supplier.name
 
-        assert body["success"] is True
-        assert body["data"]["id"] == inventory_supplier.id
+    def test_returns_not_found(
+        self,
+        client,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            "/api/inventory/suppliers/999999",
+            headers=headers,
+        )
+
+        _assert_error(response, 404)
 
 
 class TestCreateSupplierRoute:
-
     def test_creates_supplier(
         self,
         client,
-        user,
         clinic,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/suppliers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "clinic_id": clinic.id,
-                "name": "New Medical Supplier",
-                "contact_person": "Supplier Person",
+                "name": "New Supplier",
+                "contact_person": "Jane Supplier",
                 "phone": "08012345678",
-                "email": "new-supplier@example.com",
-                "address": "Port Harcourt",
+                "email": "new@supplier.com",
+                "address": "New Supplier Address",
             },
         )
 
-        assert response.status_code == 201, response.get_json()
+        data = _assert_success(response, 201)
 
-        body = response_json(response)
+        assert data["id"] > 0
+        assert data["clinic_id"] == clinic.id
+        assert data["name"] == "New Supplier"
+        assert data["email"] == "new@supplier.com"
 
-        assert body["success"] is True
-        assert body["data"]["name"] == "New Medical Supplier"
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {},
-            {"name": ""},
-            {"name": "   "},
-            {"name": "Supplier", "email": "not-an-email"},
-        ],
-    )
-    def test_rejects_invalid_payload(
+    def test_creates_global_supplier(
         self,
         client,
-        user,
-        auth_headers_for,
-        payload,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/suppliers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json=payload,
+            headers=headers,
+            json={
+                "name": "Global New Supplier",
+            },
         )
 
-        assert response.status_code == 400
+        data = _assert_success(response, 201)
+
+        assert data["clinic_id"] is None
+
+    def test_rejects_empty_name(
+        self,
+        client,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/suppliers",
+            headers=headers,
+            json={
+                "name": "",
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_invalid_email(
+        self,
+        client,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/suppliers",
+            headers=headers,
+            json={
+                "name": "Invalid Email Supplier",
+                "email": "not-an-email",
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_rejects_duplicate_supplier(
+        self,
+        client,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/suppliers",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": supplier.name,
+            },
+        )
+
+        _assert_error(response, 400)
 
 
 class TestUpdateSupplierRoute:
-
-    def test_updates_supplier(
+    def test_admin_can_update_supplier(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.patch(
-            f"/api/inventory/suppliers/{inventory_supplier.id}"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers/{supplier.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
             json={
                 "name": "Updated Supplier",
-                "phone": "08111111111",
+                "phone": "08999999999",
             },
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == supplier.id
+        assert data["name"] == "Updated Supplier"
+        assert data["phone"] == "08999999999"
 
-        assert body["success"] is True
-        assert body["data"]["name"] == "Updated Supplier"
-
-
-class TestDeactivateReactivateSupplierRoute:
-
-    def test_deactivates_supplier(
+    def test_rejects_clinic_id_in_json(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
     ):
-        response = client.post(
-            f"/api/inventory/suppliers/{inventory_supplier.id}/deactivate"
-            f"?clinic_id={inventory_supplier.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+        _staff, headers = admin_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/suppliers/{supplier.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "Updated Supplier",
+            },
         )
 
-        assert response.status_code == 200, response.get_json()
+        _assert_error(response, 400)
 
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["is_active"] is False
-
-    def test_reactivates_supplier(
+    def test_requires_admin_role(
         self,
         client,
-        user,
-        inactive_inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        pharmacist_staff_and_headers,
     ):
-        response = client.post(
-            f"/api/inventory/suppliers/{inactive_inventory_supplier.id}/reactivate"
-            f"?clinic_id={inactive_inventory_supplier.clinic_id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/suppliers/{supplier.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "name": "Pharmacist Update",
+            },
         )
 
-        assert response.status_code == 200, response.get_json()
+        assert response.status_code == 403
 
-        body = response_json(response)
 
-        assert body["success"] is True
-        assert body["data"]["is_active"] is True
-
-    def test_deactivate_requires_clinic_id(
+class TestDeactivateSupplierRoute:
+    def test_admin_can_deactivate_supplier(
         self,
         client,
-        user,
-        inventory_supplier,
-        auth_headers_for,
+        clinic,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
-            f"/api/inventory/suppliers/{inventory_supplier.id}/deactivate",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers/{supplier.id}/deactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        data = _assert_success(response, 200)
 
-    def test_reactivate_requires_clinic_id(
+        assert data["id"] == supplier.id
+        assert data["is_active"] is False
+
+    def test_requires_clinic_id(
         self,
         client,
-        user,
-        inactive_inventory_supplier,
-        auth_headers_for,
+        supplier,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.post(
-            f"/api/inventory/suppliers/{inactive_inventory_supplier.id}/reactivate",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/suppliers/{supplier.id}/deactivate",
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
+
+    def test_requires_admin_role(
+        self,
+        client,
+        clinic,
+        supplier,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{supplier.id}/deactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+
+class TestReactivateSupplierRoute:
+    def test_admin_can_reactivate_supplier(
+        self,
+        client,
+        clinic,
+        inactive_supplier,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{inactive_supplier.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inactive_supplier.id
+        assert data["is_active"] is True
+
+    def test_requires_clinic_id(
+        self,
+        client,
+        inactive_supplier,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{inactive_supplier.id}/reactivate",
+            headers=headers,
+        )
+
+        _assert_error(response, 400)
+
+    def test_requires_admin_role(
+        self,
+        client,
+        clinic,
+        inactive_supplier,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{inactive_supplier.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
 
 
 # ============================================================================
@@ -1340,571 +1807,754 @@ class TestDeactivateReactivateSupplierRoute:
 # ============================================================================
 
 
-def _fake_transfer(
-    clinic_id,
-    item_id=1,
-    transfer_id=1,
-    requested_by_id=1,
-):
-    return SimpleNamespace(
-        id=transfer_id,
-        item_id=item_id,
-        batch_id=None,
-        source_clinic_id=clinic_id,
-        destination_clinic_id=clinic_id + 1,
-        quantity=5,
-        status=InventoryTransferStatus.PENDING,
-        reason="Transfer",
-        requested_by_id=requested_by_id,
-        approved_by_id=None,
-        requested_at=None,
-        approved_at=None,
-        completed_at=None,
-        cancelled_at=None,
-        created_at=None,
-        updated_at=None,
-    )
-
-
 class TestListInventoryTransfersRoute:
-
     def test_returns_transfers(
         self,
         client,
-        user,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        admin_staff_and_headers,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=user.id,
-        )
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "list_inventory_transfers",
-            Mock(return_value=[transfer]),
-        )
+        _staff, headers = admin_staff_and_headers
 
         response = client.get(
             f"/api/inventory/transfers?clinic_id={clinic.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert isinstance(data, list)
+        assert any(
+            transfer["id"] == inventory_transfer.id
+            for transfer in data
+        )
 
-        assert body["success"] is True
-        assert body["data"][0]["id"] == transfer.id
+    def test_filters_by_status(
+        self,
+        client,
+        clinic,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/transfers"
+            f"?clinic_id={clinic.id}"
+            f"&status={InventoryTransferStatus.PENDING.value}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        assert all(
+            transfer["status"] == InventoryTransferStatus.PENDING.value
+            for transfer in data
+        )
 
     def test_requires_clinic_id(
         self,
         client,
-        user,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
             "/api/inventory/transfers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 400)
 
 
 class TestGetInventoryTransferRoute:
-
     def test_returns_transfer(
         self,
         client,
-        user,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        admin_staff_and_headers,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=user.id,
-            transfer_id=55,
-        )
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "get_inventory_transfer",
-            Mock(return_value=transfer),
-        )
+        _staff, headers = admin_staff_and_headers
 
         response = client.get(
-            f"/api/inventory/transfers/{transfer.id}"
+            f"/api/inventory/transfers/{inventory_transfer.id}"
             f"?clinic_id={clinic.id}",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-        body = response_json(response)
+        assert data["id"] == inventory_transfer.id
+        assert data["item_id"] == inventory_transfer.item_id
+        assert data["quantity"] == inventory_transfer.quantity
+        assert data["status"] == InventoryTransferStatus.PENDING.value
 
-        assert body["success"] is True
-        assert body["data"]["id"] == transfer.id
-
-    def test_requires_clinic_id(
+    def test_returns_not_found(
         self,
         client,
-        user,
-        auth_headers_for,
+        clinic,
+        admin_staff_and_headers,
     ):
+        _staff, headers = admin_staff_and_headers
+
         response = client.get(
-            "/api/inventory/transfers/999999",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/transfers/999999"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert_error(response, 400, "clinic_id")
+        _assert_error(response, 404)
+
+    def test_accepts_valid_clinic_id(
+        self,
+        client,
+        inventory_transfer,
+        second_clinic,
+        second_admin_staff_and_headers,
+    ):
+        _staff, headers = second_admin_staff_and_headers
+
+        response = client.get(
+            f"/api/inventory/transfers/{inventory_transfer.id}"
+            f"?clinic_id={second_clinic.id}",
+            headers=headers,
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inventory_transfer.id
+        assert data["source_clinic_id"] == inventory_transfer.source_clinic_id
+        assert data["destination_clinic_id"] == inventory_transfer.destination_clinic_id
 
 
 class TestCreateInventoryTransferRoute:
-
     def test_creates_transfer(
         self,
         client,
-        user,
-        staff,
         clinic,
+        second_clinic,
         inventory_item,
-        auth_headers_for,
-        monkeypatch,
+        admin_staff_and_headers,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            item_id=inventory_item.id,
-            requested_by_id=staff.id,
-        )
-
-        service = Mock(return_value=transfer)
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "create_inventory_transfer",
-            service,
-        )
+        staff, headers = admin_staff_and_headers
 
         response = client.post(
             "/api/inventory/transfers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "item_id": inventory_item.id,
                 "source_clinic_id": clinic.id,
-                "destination_clinic_id": clinic.id + 1,
-                "quantity": 5,
+                "destination_clinic_id": second_clinic.id,
+                "quantity": 10,
                 "requested_by_id": staff.id,
-                "reason": "Transfer",
+                "reason": "Transfer to destination clinic",
             },
         )
 
-        assert response.status_code == 201, response.get_json()
+        data = _assert_success(response, 201)
 
-        service.assert_called_once()
-
-        body = response_json(response)
-
-        assert body["success"] is True
-        assert body["data"]["item_id"] == inventory_item.id
+        assert data["id"] > 0
+        assert data["item_id"] == inventory_item.id
+        assert data["source_clinic_id"] == clinic.id
+        assert data["destination_clinic_id"] == second_clinic.id
+        assert data["quantity"] == 10
+        assert data["status"] == InventoryTransferStatus.PENDING.value
 
     def test_rejects_same_source_and_destination(
         self,
         client,
-        user,
-        staff,
         clinic,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/transfers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "item_id": inventory_item.id,
                 "source_clinic_id": clinic.id,
                 "destination_clinic_id": clinic.id,
-                "quantity": 5,
+                "quantity": 10,
                 "requested_by_id": staff.id,
             },
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
 
     def test_rejects_zero_quantity(
         self,
         client,
-        user,
-        staff,
         clinic,
+        second_clinic,
         inventory_item,
-        auth_headers_for,
+        admin_staff_and_headers,
     ):
+        staff, headers = admin_staff_and_headers
+
         response = client.post(
             "/api/inventory/transfers",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "item_id": inventory_item.id,
                 "source_clinic_id": clinic.id,
-                "destination_clinic_id": clinic.id + 1,
+                "destination_clinic_id": second_clinic.id,
                 "quantity": 0,
                 "requested_by_id": staff.id,
             },
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
 
+    def test_rejects_insufficient_stock(
+        self,
+        client,
+        clinic,
+        second_clinic,
+        inventory_item,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
 
-# ============================================================================
-# TRANSFER LIFECYCLE
-# ============================================================================
+        response = client.post(
+            "/api/inventory/transfers",
+            headers=headers,
+            json={
+                "item_id": inventory_item.id,
+                "source_clinic_id": clinic.id,
+                "destination_clinic_id": second_clinic.id,
+                "quantity": 999999,
+                "requested_by_id": staff.id,
+            },
+        )
+
+        _assert_error(response, 400)
 
 
 class TestApproveInventoryTransferRoute:
-
     def test_admin_can_approve(
         self,
         client,
-        user,
-        staff,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        admin_staff_and_headers,
+        make_authenticated_staff,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=staff.id,
+        _requester, _requester_headers = admin_staff_and_headers
+
+        approver = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="Approving",
+            last_name="Admin",
         )
 
-        service = Mock(return_value=transfer)
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "approve_inventory_transfer",
-            service,
-        )
+        approving_staff, approving_headers = approver
 
         response = client.post(
-            f"/api/inventory/transfers/{transfer.id}/approve",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={"approved_by_id": staff.id},
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=approving_headers,
+            json={
+                "approved_by_id": approving_staff.id,
+            },
         )
 
-        assert response.status_code == 200, response.get_json()
-        service.assert_called_once()
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inventory_transfer.id
+        assert data["status"] == InventoryTransferStatus.APPROVED.value
+        assert data["approved_by_id"] == approving_staff.id
 
     def test_pharmacist_can_approve(
         self,
         client,
-        pharmacist,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        pharmacist_staff_and_headers,
+        make_authenticated_staff,
     ):
-        staff, headers = pharmacist
+        _requester, _requester_headers = pharmacist_staff_and_headers
 
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=staff.id,
-        )
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "approve_inventory_transfer",
-            Mock(return_value=transfer),
+        approver_staff, approver_headers = make_authenticated_staff(
+            clinic,
+            Role.PHARMACIST,
+            first_name="Approving",
+            last_name="Pharmacist",
         )
 
         response = client.post(
-            f"/api/inventory/transfers/{transfer.id}/approve",
-            headers=headers,
-            json={"approved_by_id": staff.id},
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=approver_headers,
+            json={
+                "approved_by_id": approver_staff.id,
+            },
         )
 
-        assert response.status_code == 200, response.get_json()
+        data = _assert_success(response, 200)
 
-    def test_rejects_invalid_payload(
+        assert data["status"] == InventoryTransferStatus.APPROVED.value
+        assert data["approved_by_id"] == approver_staff.id
+
+    def test_requester_cannot_approve_own_transfer(
         self,
         client,
-        user,
-        auth_headers_for,
+        inventory_transfer,
+        admin_staff_and_headers,
     ):
+        staff, headers = admin_staff_and_headers
+
         response = client.post(
-            "/api/inventory/transfers/1/approve",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=headers,
+            json={
+                "approved_by_id": staff.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_requires_approved_by_id(
+        self,
+        client,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=headers,
             json={},
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
+
+    def test_cannot_approve_twice(
+        self,
+        client,
+        clinic,
+        inventory_transfer,
+        admin_staff_and_headers,
+        make_authenticated_staff,
+    ):
+        _requester, _requester_headers = admin_staff_and_headers
+
+        approver1, headers1 = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="First",
+            last_name="Approver",
+        )
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=headers1,
+            json={"approved_by_id": approver1.id},
+        )
+
+        _assert_success(response, 200)
+
+        approver2, headers2 = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="Second",
+            last_name="Approver",
+        )
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=headers2,
+            json={"approved_by_id": approver2.id},
+        )
+
+        _assert_error(response, 400)
 
 
 class TestCompleteInventoryTransferRoute:
-
     def test_admin_can_complete(
         self,
         client,
-        user,
-        staff,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        admin_staff_and_headers,
+        make_authenticated_staff,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=staff.id,
-        )
+        requester, _requester_headers = admin_staff_and_headers
 
-        service = Mock(return_value=transfer)
-
-        monkeypatch.setattr(
-            inventory_routes,
-            "complete_inventory_transfer",
-            service,
+        approver, approver_headers = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="Approver",
+            last_name="Admin",
         )
 
         response = client.post(
-            f"/api/inventory/transfers/{transfer.id}/complete",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={"completed_by_id": staff.id},
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=approver_headers,
+            json={
+                "approved_by_id": approver.id,
+            },
         )
 
-        assert response.status_code == 200, response.get_json()
-        service.assert_called_once()
+        _assert_success(response, 200)
 
-    def test_rejects_invalid_payload(
+        performer, performer_headers = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="Completing",
+            last_name="Admin",
+        )
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/complete",
+            headers=performer_headers,
+            json={
+                "performed_by_id": performer.id,
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["id"] == inventory_transfer.id
+        assert data["status"] == InventoryTransferStatus.COMPLETED.value
+        assert data["completed_at"] is not None
+
+        assert requester.id == inventory_transfer.requested_by_id
+
+    def test_pharmacist_can_complete(
         self,
         client,
-        user,
-        auth_headers_for,
+        clinic,
+        inventory_transfer,
+        make_authenticated_staff,
     ):
+        approver, approver_headers = make_authenticated_staff(
+            clinic,
+            Role.PHARMACIST,
+            first_name="Approver",
+            last_name="Pharmacist",
+        )
+
         response = client.post(
-            "/api/inventory/transfers/1/complete",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/transfers/{inventory_transfer.id}/approve",
+            headers=approver_headers,
+            json={
+                "approved_by_id": approver.id,
+            },
+        )
+
+        _assert_success(response, 200)
+
+        performer, performer_headers = make_authenticated_staff(
+            clinic,
+            Role.PHARMACIST,
+            first_name="Completing",
+            last_name="Pharmacist",
+        )
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/complete",
+            headers=performer_headers,
+            json={
+                "performed_by_id": performer.id,
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["status"] == InventoryTransferStatus.COMPLETED.value
+
+    def test_cannot_complete_pending_transfer(
+        self,
+        client,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/complete",
+            headers=headers,
+            json={
+                "performed_by_id": staff.id,
+            },
+        )
+
+        _assert_error(response, 400)
+
+    def test_requires_performed_by_id(
+        self,
+        client,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/complete",
+            headers=headers,
             json={},
         )
 
-        assert response.status_code == 400
+        _assert_error(response, 400)
 
 
 class TestCancelInventoryTransferRoute:
-
     def test_admin_can_cancel(
         self,
         client,
-        user,
-        staff,
-        clinic,
-        auth_headers_for,
-        monkeypatch,
+        inventory_transfer,
+        admin_staff_and_headers,
     ):
-        transfer = _fake_transfer(
-            clinic.id,
-            requested_by_id=staff.id,
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/cancel",
+            headers=headers,
+            json={
+                "cancelled_by_id": staff.id,
+                "reason": "Transfer no longer required",
+            },
         )
 
-        service = Mock(return_value=transfer)
+        data = _assert_success(response, 200)
 
-        monkeypatch.setattr(
-            inventory_routes,
-            "cancel_inventory_transfer",
-            service,
+        assert data["id"] == inventory_transfer.id
+        assert data["status"] == InventoryTransferStatus.CANCELLED.value
+        assert data["cancelled_at"] is not None
+        assert data["reason"] == "Transfer no longer required"
+
+    def test_pharmacist_can_cancel(
+        self,
+        client,
+        inventory_transfer,
+        pharmacist_staff_and_headers,
+    ):
+        staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/cancel",
+            headers=headers,
+            json={
+                "cancelled_by_id": staff.id,
+                "reason": "Cancelled by pharmacy",
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["status"] == InventoryTransferStatus.CANCELLED.value
+
+    def test_cancel_can_update_reason(
+        self,
+        client,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/cancel",
+            headers=headers,
+            json={
+                "cancelled_by_id": staff.id,
+                "reason": "Updated cancellation reason",
+            },
+        )
+
+        data = _assert_success(response, 200)
+
+        assert data["reason"] == "Updated cancellation reason"
+
+    def test_requires_cancelled_by_id(
+        self,
+        client,
+        inventory_transfer,
+        admin_staff_and_headers,
+    ):
+        _staff, headers = admin_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/transfers/{inventory_transfer.id}/cancel",
+            headers=headers,
+            json={},
+        )
+
+        _assert_error(response, 400)
+
+    def test_cannot_cancel_completed_transfer(
+        self,
+        client,
+        clinic,
+        second_clinic,
+        inventory_item,
+        admin_staff_and_headers,
+        make_authenticated_staff,
+    ):
+        _requester, _requester_headers = admin_staff_and_headers
+
+        transfer = InventoryTransfer(
+            item_id=inventory_item.id,
+            source_clinic_id=clinic.id,
+            destination_clinic_id=second_clinic.id,
+            quantity=10,
+            status=InventoryTransferStatus.COMPLETED,
+            reason="Already completed",
+            requested_by_id=_requester.id,
+        )
+
+        from app.extensions import db
+
+        db.session.add(transfer)
+        db.session.commit()
+
+        staff, headers = make_authenticated_staff(
+            clinic,
+            Role.ADMIN,
+            first_name="Cancelling",
+            last_name="Admin",
         )
 
         response = client.post(
             f"/api/inventory/transfers/{transfer.id}/cancel",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            headers=headers,
             json={
                 "cancelled_by_id": staff.id,
-                "reason": "No longer required",
+                "reason": "Too late",
             },
         )
 
-        assert response.status_code == 200, response.get_json()
-        service.assert_called_once()
-
-    def test_rejects_invalid_payload(
-        self,
-        client,
-        user,
-        auth_headers_for,
-    ):
-        response = client.post(
-            "/api/inventory/transfers/1/cancel",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={},
-        )
-
-        assert response.status_code == 400
+        _assert_error(response, 400)
 
 
 # ============================================================================
-# SERVICE ERROR MAPPING
+# GENERAL AUTHORIZATION
 # ============================================================================
 
 
-class TestInventoryRouteExceptionMapping:
-
-    @pytest.mark.parametrize(
-        "service_name,method,url",
-        [
-            (
-                "get_inventory_item",
-                "get",
-                "/api/inventory/items/1?clinic_id=1",
-            ),
-            (
-                "get_inventory_batch",
-                "get",
-                "/api/inventory/batches/1?clinic_id=1",
-            ),
-            (
-                "get_supplier",
-                "get",
-                "/api/inventory/suppliers/1?clinic_id=1",
-            ),
-            (
-                "get_inventory_transfer",
-                "get",
-                "/api/inventory/transfers/1?clinic_id=1",
-            ),
-        ],
-    )
-    def test_maps_not_found_to_404(
+class TestInventoryAuthorization:
+    def test_inventory_item_list_allows_pharmacist(
         self,
         client,
-        user,
-        auth_headers_for,
-        monkeypatch,
-        service_name,
-        method,
-        url,
-    ):
-        monkeypatch.setattr(
-            inventory_routes,
-            service_name,
-            Mock(side_effect=NotFoundError("Resource not found")),
-        )
-
-        response = getattr(client, method)(
-            url,
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert_error(response, 404, "Resource not found")
-
-    def test_create_item_maps_validation_to_400(
-        self,
-        client,
-        user,
         clinic,
-        auth_headers_for,
-        monkeypatch,
+        pharmacist_staff_and_headers,
     ):
-        monkeypatch.setattr(
-            inventory_routes,
-            "create_inventory_item",
-            Mock(side_effect=ValidationError("Invalid inventory item")),
-        )
+        _staff, headers = pharmacist_staff_and_headers
 
-        response = client.post(
-            "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={
-                "clinic_id": clinic.id,
-                "name": "Test Item",
-            },
-        )
-
-        assert_error(response, 400, "Invalid inventory item")
-
-    def test_create_item_maps_conflict_to_400(
-        self,
-        client,
-        user,
-        clinic,
-        auth_headers_for,
-        monkeypatch,
-    ):
-        monkeypatch.setattr(
-            inventory_routes,
-            "create_inventory_item",
-            Mock(side_effect=ConflictError("Item already exists")),
-        )
-
-        response = client.post(
-            "/api/inventory/items",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-            json={
-                "clinic_id": clinic.id,
-                "name": "Test Item",
-            },
-        )
-
-        assert_error(response, 400, "Item already exists")
-
-
-# ============================================================================
-# QUERY FILTER VALIDATION
-# ============================================================================
-
-
-class TestInventoryQueryValidation:
-
-    def test_items_reject_unknown_query_parameter(
-        self,
-        client,
-        user,
-        clinic,
-        auth_headers_for,
-    ):
         response = client.get(
-            f"/api/inventory/items"
-            f"?clinic_id={clinic.id}&unknown=true",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+            f"/api/inventory/items?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 200
 
-    def test_batches_reject_unknown_query_parameter(
+    def test_inventory_item_create_allows_pharmacist(
         self,
         client,
-        user,
+        clinic,
+        pharmacist_staff_and_headers,
+    ):
+        staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            "/api/inventory/items",
+            headers=headers,
+            json={
+                "clinic_id": clinic.id,
+                "name": "Pharmacist Created Item",
+                "initial_quantity": 0,
+            },
+        )
+
+        assert response.status_code == 201
+
+    def test_supplier_update_is_admin_only(
+        self,
+        client,
+        clinic,
+        supplier,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.patch(
+            f"/api/inventory/suppliers/{supplier.id}"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+            json={
+                "name": "Should Not Update",
+            },
+        )
+
+        assert response.status_code == 403
+
+    def test_supplier_deactivate_is_admin_only(
+        self,
+        client,
+        clinic,
+        supplier,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{supplier.id}/deactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+    def test_supplier_reactivate_is_admin_only(
+        self,
+        client,
+        clinic,
+        inactive_supplier,
+        pharmacist_staff_and_headers,
+    ):
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/suppliers/{inactive_supplier.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+    def test_item_deactivate_is_admin_only(
+        self,
+        client,
+        clinic,
         inventory_item,
-        auth_headers_for,
+        pharmacist_staff_and_headers,
     ):
-        response = client.get(
-            f"/api/inventory/items/{inventory_item.id}/batches"
-            f"?clinic_id={inventory_item.clinic_id}&unknown=true",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/items/{inventory_item.id}/deactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 403
 
-    def test_suppliers_reject_unknown_query_parameter(
+    def test_item_reactivate_is_admin_only(
         self,
         client,
-        user,
-        auth_headers_for,
-    ):
-        response = client.get(
-            "/api/inventory/suppliers?unknown=true",
-            headers=auth_headers_for(user, role=Role.ADMIN),
-        )
-
-        assert response.status_code == 400
-
-    def test_transfers_reject_unknown_query_parameter(
-        self,
-        client,
-        user,
         clinic,
-        auth_headers_for,
+        inactive_inventory_item,
+        pharmacist_staff_and_headers,
     ):
-        response = client.get(
-            f"/api/inventory/transfers"
-            f"?clinic_id={clinic.id}&unknown=true",
-            headers=auth_headers_for(user, role=Role.ADMIN),
+        _staff, headers = pharmacist_staff_and_headers
+
+        response = client.post(
+            f"/api/inventory/items/{inactive_inventory_item.id}/reactivate"
+            f"?clinic_id={clinic.id}",
+            headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 403

@@ -509,3 +509,42 @@ def make_template(db):
         return template
 
     return _make
+
+
+# ============================================================================
+# INVENTORY
+# ============================================================================
+
+@pytest.fixture()
+def inventory_item(db, clinic):
+    from app.core.enums.inventory_enums import InventoryCategory
+    from app.modules.inventory.models.inventory_model import InventoryItem
+
+    item = InventoryItem(
+        clinic_id=clinic.id,
+        name="Test Medical Supply",
+        category=InventoryCategory.MEDICAL_SUPPLY,
+        sku="TEST-SKU-001",
+        barcode="TEST-BARCODE-001",
+        unit="piece",
+        quantity_on_hand=100,
+        reorder_level=10,
+        is_active=True,
+    )
+
+    db.session.add(item)
+    db.session.commit()
+
+    return item
+
+
+@pytest.fixture()
+def pharmacist(make_staff, clinic):
+    from app.core.enums.role_enums import Role
+
+    return make_staff(
+        clinic,
+        role=Role.PHARMACIST,
+        first_name="Test",
+        last_name="Pharmacist",
+    )
