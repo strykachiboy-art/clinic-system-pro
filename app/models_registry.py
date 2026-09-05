@@ -1,5 +1,3 @@
-
-
 # Core
 from app.core.auth.user.models.user_model import User
 from app.core.audit.models.audit_model import AuditLog
@@ -52,3 +50,6 @@ from app.core.auth.user.models.user_model import User
 
 # Ambulance
 from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle, AmbulanceTrip
+
+# HIE (Health Information Exchange)
+from app.modules.hie.models.hie_model import HIEIntegration, HIESubmission

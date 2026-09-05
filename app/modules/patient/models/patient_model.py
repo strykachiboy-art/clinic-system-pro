@@ -221,6 +221,16 @@ class Patient(db.Model):
         back_populates="patient",
     )
 
+    bed_reservations = db.relationship(
+        "BedReservation",
+        back_populates="patient",
+    )
+
+    hie_submissions = db.relationship(
+        "HIESubmission",
+        back_populates="patient",
+    )
+
     ambulance_trips = db.relationship(
         "AmbulanceTrip",
         back_populates="patient",

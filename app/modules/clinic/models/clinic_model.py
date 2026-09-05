@@ -203,6 +203,21 @@ class Clinic(db.Model):
         back_populates="clinic",
     )
 
+    inventory_suppliers = db.relationship(
+        "InventorySupplier",
+        back_populates="clinic",
+    )
+
+    hie_integrations = db.relationship(
+        "HIEIntegration",
+        back_populates="clinic",
+    )
+
+    hie_submissions = db.relationship(
+        "HIESubmission",
+        back_populates="clinic",
+    )
+
     consultations = db.relationship(
         "Consultation",
         back_populates="clinic",
