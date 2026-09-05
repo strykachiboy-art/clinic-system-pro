@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
 
 from app.core.enums.role_enums import Role
 from app.core.enums.ward_enums import BedStatus
@@ -207,7 +206,6 @@ def _serialize_transfer(transfer):
 # ---------------------------------------------------------------------------
 
 @ward_bp.post("")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def create_ward_route():
     payload = WardCreateSchema.model_validate(
@@ -228,7 +226,6 @@ def create_ward_route():
 
 
 @ward_bp.get("")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_wards_route():
     clinic_id = request.args.get(
@@ -249,7 +246,6 @@ def list_wards_route():
 
 
 @ward_bp.get("/<int:ward_id>")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_ward_route(ward_id: int):
     ward = get_ward(ward_id)
@@ -260,7 +256,6 @@ def get_ward_route(ward_id: int):
 
 
 @ward_bp.get("/<int:ward_id>/occupancy")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_ward_occupancy_route(ward_id: int):
     occupancy = get_ward_occupancy(ward_id)
@@ -275,7 +270,6 @@ def get_ward_occupancy_route(ward_id: int):
 # ---------------------------------------------------------------------------
 
 @ward_bp.post("/<int:ward_id>/beds")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def add_bed_route(ward_id: int):
     payload = BedCreateSchema.model_validate({
@@ -295,7 +289,6 @@ def add_bed_route(ward_id: int):
 
 
 @ward_bp.get("/<int:ward_id>/beds")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_beds_route(ward_id: int):
     status = request.args.get("status")
@@ -319,7 +312,6 @@ def list_beds_route(ward_id: int):
 
 
 @ward_bp.get("/beds/<int:bed_id>")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_bed_route(bed_id: int):
     bed = get_bed(bed_id)
@@ -330,7 +322,6 @@ def get_bed_route(bed_id: int):
 
 
 @ward_bp.patch("/beds/<int:bed_id>/maintenance")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def set_bed_maintenance_route(bed_id: int):
     payload = BedMaintenanceSchema.model_validate(
@@ -353,7 +344,6 @@ def set_bed_maintenance_route(bed_id: int):
 # ---------------------------------------------------------------------------
 
 @ward_bp.post("/reservations")
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def reserve_bed_route():
     payload = BedReservationCreateSchema.model_validate(
@@ -375,7 +365,6 @@ def reserve_bed_route():
 
 
 @ward_bp.get("/reservations")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_bed_reservations_route():
     clinic_id = request.args.get(
@@ -408,7 +397,6 @@ def list_bed_reservations_route():
 
 
 @ward_bp.get("/reservations/<int:reservation_id>")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_bed_reservation_route(reservation_id: int):
     reservation = get_bed_reservation(
@@ -423,7 +411,6 @@ def get_bed_reservation_route(reservation_id: int):
 @ward_bp.get(
     "/patients/<int:patient_id>/reservation"
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_patient_active_reservation_route(patient_id: int):
     reservation = get_active_bed_reservation_for_patient(
@@ -442,7 +429,6 @@ def get_patient_active_reservation_route(patient_id: int):
 @ward_bp.get(
     "/beds/<int:bed_id>/reservation"
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_bed_active_reservation_route(bed_id: int):
     reservation = get_active_bed_reservation_for_bed(
@@ -461,7 +447,6 @@ def get_bed_active_reservation_route(bed_id: int):
 @ward_bp.post(
     "/reservations/<int:reservation_id>/cancel"
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def cancel_bed_reservation_route(
     reservation_id: int,
@@ -484,7 +469,6 @@ def cancel_bed_reservation_route(
 @ward_bp.post(
     "/reservations/<int:reservation_id>/admit"
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def admit_patient_from_reservation_route(
     reservation_id: int,
@@ -510,7 +494,6 @@ def admit_patient_from_reservation_route(
 # ---------------------------------------------------------------------------
 
 @ward_bp.post("/admissions")
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def admit_patient_route():
     payload = AdmissionCreateSchema.model_validate(
@@ -531,7 +514,6 @@ def admit_patient_route():
 
 
 @ward_bp.get("/admissions/<int:admission_id>")
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_admission_route(admission_id: int):
     admission = get_admission(admission_id)
@@ -544,7 +526,6 @@ def get_admission_route(admission_id: int):
 @ward_bp.get(
     "/patients/<int:patient_id>/admissions"
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_patient_admissions_route(
     patient_id: int,
@@ -564,7 +545,6 @@ def list_patient_admissions_route(
 @ward_bp.post(
     "/admissions/<int:admission_id>/transfer"
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def transfer_admission_route(
     admission_id: int,
@@ -588,7 +568,6 @@ def transfer_admission_route(
 @ward_bp.post(
     "/admissions/<int:admission_id>/discharge"
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def discharge_patient_route(
     admission_id: int,

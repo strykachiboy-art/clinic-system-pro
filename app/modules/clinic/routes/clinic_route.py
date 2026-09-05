@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.clinic_enums import ClinicStatus
@@ -207,7 +206,6 @@ def _parse_status():
 # ============================================================================
 
 @clinic_bp.post("")
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def create_clinic_route():
     payload, error = _validate_json(ClinicCreateSchema)
@@ -254,7 +252,6 @@ def create_clinic_route():
 
 
 @clinic_bp.get("")
-@jwt_required()
 @role_required(*CLINIC_VIEW_ROLES)
 def list_clinics_route():
     parsed_status = _parse_status()
@@ -285,7 +282,6 @@ def list_clinics_route():
 
 
 @clinic_bp.get("/<int:clinic_id>")
-@jwt_required()
 @role_required(*CLINIC_VIEW_ROLES)
 def get_clinic_route(clinic_id: int):
     try:
@@ -310,7 +306,6 @@ def get_clinic_route(clinic_id: int):
 # ============================================================================
 
 @clinic_bp.get("/<int:clinic_id>/branches")
-@jwt_required()
 @role_required(*CLINIC_VIEW_ROLES)
 def list_clinic_branches_route(clinic_id: int):
     try:
@@ -336,7 +331,6 @@ def list_clinic_branches_route(clinic_id: int):
 
 
 @clinic_bp.post("/<int:clinic_id>/branches")
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def create_clinic_branch_route(clinic_id: int):
     payload, error = _validate_json(
@@ -388,7 +382,6 @@ def create_clinic_branch_route(clinic_id: int):
 @clinic_bp.patch(
     "/<int:clinic_id>/branch-configuration"
 )
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def update_clinic_branch_configuration_route(
     clinic_id: int,
@@ -440,7 +433,6 @@ def update_clinic_branch_configuration_route(
 # ============================================================================
 
 @clinic_bp.patch("/<int:clinic_id>")
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def update_clinic_route(clinic_id: int):
     payload, error = _validate_json(
@@ -487,7 +479,6 @@ def update_clinic_route(clinic_id: int):
 # ============================================================================
 
 @clinic_bp.patch("/<int:clinic_id>/status")
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def update_clinic_status_route(clinic_id: int):
     payload, error = _validate_json(
@@ -530,7 +521,6 @@ def update_clinic_status_route(clinic_id: int):
 # ============================================================================
 
 @clinic_bp.patch("/<int:clinic_id>/ai-credits")
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def update_clinic_ai_credits_route(clinic_id: int):
     payload, error = _validate_json(
@@ -577,7 +567,6 @@ def update_clinic_ai_credits_route(clinic_id: int):
 @clinic_bp.post(
     "/<int:clinic_id>/api-token/regenerate"
 )
-@jwt_required()
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def regenerate_clinic_api_token_route(
     clinic_id: int,

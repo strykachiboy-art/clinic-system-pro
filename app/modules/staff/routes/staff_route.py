@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
 
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
@@ -165,7 +164,6 @@ def _serialize_payroll(record):
 
 
 @staff_bp.post("")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def create_staff_route():
     payload = StaffCreateSchema.model_validate(
@@ -190,7 +188,6 @@ def create_staff_route():
 
 
 @staff_bp.get("")
-@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def list_staff_route():
     payload = StaffListQuerySchema.model_validate(
@@ -212,7 +209,6 @@ def list_staff_route():
 
 
 @staff_bp.get("/<int:staff_id>")
-@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def get_staff_route(staff_id: int):
     staff = get_staff(staff_id)
@@ -223,7 +219,6 @@ def get_staff_route(staff_id: int):
 
 
 @staff_bp.patch("/<int:staff_id>")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def update_staff_route(staff_id: int):
     payload = StaffUpdateSchema.model_validate(
@@ -246,7 +241,6 @@ def update_staff_route(staff_id: int):
 
 
 @staff_bp.patch("/<int:staff_id>/status")
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def change_staff_status_route(staff_id: int):
     payload = StaffStatusUpdateSchema.model_validate(
@@ -270,7 +264,6 @@ def change_staff_status_route(staff_id: int):
 
 
 @staff_bp.post("/leaves")
-@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def request_leave_route():
     payload = LeaveRequestCreateSchema.model_validate(
@@ -292,7 +285,6 @@ def request_leave_route():
 
 
 @staff_bp.get("/leaves")
-@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def list_leave_requests_route():
     payload = LeaveListQuerySchema.model_validate(
@@ -313,7 +305,6 @@ def list_leave_requests_route():
 
 
 @staff_bp.get("/leaves/<int:leave_id>")
-@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def get_leave_request_route(leave_id: int):
     leave = get_leave_request(leave_id)
@@ -324,7 +315,6 @@ def get_leave_request_route(leave_id: int):
 
 
 @staff_bp.post("/leaves/<int:leave_id>/approve")
-@jwt_required()
 @role_required(*LEAVE_MANAGEMENT_ROLES)
 def approve_leave_request_route(leave_id: int):
     payload = LeaveReviewSchema.model_validate(
@@ -343,7 +333,6 @@ def approve_leave_request_route(leave_id: int):
 
 
 @staff_bp.post("/leaves/<int:leave_id>/reject")
-@jwt_required()
 @role_required(*LEAVE_MANAGEMENT_ROLES)
 def reject_leave_request_route(leave_id: int):
     payload = LeaveRejectSchema.model_validate(
@@ -368,7 +357,6 @@ def reject_leave_request_route(leave_id: int):
 
 
 @staff_bp.post("/payroll")
-@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def create_payroll_record_route():
     payload = PayrollCreateSchema.model_validate(
@@ -391,7 +379,6 @@ def create_payroll_record_route():
 
 
 @staff_bp.post("/payroll/generate")
-@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def generate_payroll_route():
     payload = PayrollGenerateSchema.model_validate(
@@ -416,7 +403,6 @@ def generate_payroll_route():
 
 
 @staff_bp.get("/payroll")
-@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def list_payroll_route():
     payload = PayrollListQuerySchema.model_validate(
@@ -441,7 +427,6 @@ def list_payroll_route():
 
 
 @staff_bp.get("/payroll/<int:record_id>")
-@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def get_payroll_record_route(record_id: int):
     record = get_payroll_record(record_id)
@@ -452,7 +437,6 @@ def get_payroll_record_route(record_id: int):
 
 
 @staff_bp.post("/payroll/<int:record_id>/pay")
-@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def mark_payroll_paid_route(record_id: int):
     record = mark_payroll_paid(

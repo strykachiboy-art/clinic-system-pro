@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity
 
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
@@ -188,7 +188,6 @@ def _serialize_lab_order(order):
 
 
 @lab_bp.post("/tests")
-@jwt_required()
 @role_required(*LAB_MANAGEMENT_ROLES)
 def create_lab_test_route():
     data = LabTestCreateSchema.model_validate(
@@ -216,7 +215,6 @@ def create_lab_test_route():
 
 
 @lab_bp.get("/tests")
-@jwt_required()
 @role_required(*LAB_VIEW_ROLES)
 def list_lab_tests_route():
     data = LabTestListQuerySchema.model_validate(
@@ -238,7 +236,6 @@ def list_lab_tests_route():
 
 
 @lab_bp.get("/tests/<int:test_id>")
-@jwt_required()
 @role_required(*LAB_VIEW_ROLES)
 def get_lab_test_route(test_id: int):
     test = get_lab_test(test_id)
@@ -250,7 +247,6 @@ def get_lab_test_route(test_id: int):
 
 
 @lab_bp.patch("/tests/<int:test_id>")
-@jwt_required()
 @role_required(*LAB_MANAGEMENT_ROLES)
 def update_lab_test_route(test_id: int):
     data = LabTestUpdateSchema.model_validate(
@@ -279,7 +275,6 @@ def update_lab_test_route(test_id: int):
 
 
 @lab_bp.post("/orders")
-@jwt_required()
 @role_required(*LAB_CLINICAL_ROLES)
 def create_lab_order_route():
     data = LabOrderCreateSchema.model_validate(
@@ -302,7 +297,6 @@ def create_lab_order_route():
 
 
 @lab_bp.get("/orders/<int:order_id>")
-@jwt_required()
 @role_required(*LAB_VIEW_ROLES)
 def get_lab_order_route(order_id: int):
     order = get_lab_order(order_id)
@@ -314,7 +308,6 @@ def get_lab_order_route(order_id: int):
 
 
 @lab_bp.get("/orders")
-@jwt_required()
 @role_required(*LAB_VIEW_ROLES)
 def list_orders_for_patient_route():
     data = LabOrderListQuerySchema.model_validate(
@@ -340,7 +333,6 @@ def list_orders_for_patient_route():
 
 
 @lab_bp.post("/orders/<int:order_id>/collect-sample")
-@jwt_required()
 @role_required(*LAB_TECHNICIAN_ROLES)
 def collect_sample_route(order_id: int):
     data = LabSampleCollectionSchema.model_validate(
@@ -365,7 +357,6 @@ def collect_sample_route(order_id: int):
 
 
 @lab_bp.post("/orders/<int:order_id>/equipment")
-@jwt_required()
 @role_required(*LAB_TECHNICIAN_ROLES)
 def link_equipment_route(order_id: int):
     data = LabEquipmentLinkSchema.model_validate(
@@ -390,7 +381,6 @@ def link_equipment_route(order_id: int):
 
 
 @lab_bp.post("/order-items/<int:order_item_id>/result")
-@jwt_required()
 @role_required(*LAB_TECHNICIAN_ROLES)
 def enter_result_route(order_item_id: int):
     data = LabResultCreateSchema.model_validate(
@@ -418,7 +408,6 @@ def enter_result_route(order_item_id: int):
 
 
 @lab_bp.post("/orders/<int:order_id>/cancel")
-@jwt_required()
 @role_required(*LAB_CLINICAL_ROLES)
 def cancel_order_route(order_id: int):
     data = LabOrderCancelSchema.model_validate(

@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
 
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
@@ -103,7 +102,6 @@ def _serialize_drug_interaction(interaction):
 # =====================================================================
 
 @prescription_bp.post("")
-@jwt_required()
 @role_required(*PRESCRIPTION_WRITE_ROLES)
 def create_prescription_route():
     payload = PrescriptionCreateSchema.model_validate(
@@ -134,7 +132,6 @@ def create_prescription_route():
 
 
 @prescription_bp.get("/<int:prescription_id>")
-@jwt_required()
 @role_required(*PRESCRIPTION_VIEW_ROLES)
 def get_prescription_route(prescription_id: int):
     prescription = get_prescription(prescription_id)
@@ -148,7 +145,6 @@ def get_prescription_route(prescription_id: int):
 
 
 @prescription_bp.get("/patients/<int:patient_id>")
-@jwt_required()
 @role_required(*PRESCRIPTION_VIEW_ROLES)
 def list_patient_prescriptions_route(patient_id: int):
     active_only = (
@@ -172,7 +168,6 @@ def list_patient_prescriptions_route(patient_id: int):
 
 
 @prescription_bp.post("/<int:prescription_id>/cancel")
-@jwt_required()
 @role_required(*PRESCRIPTION_WRITE_ROLES)
 def cancel_prescription_route(prescription_id: int):
     payload = PrescriptionCancelSchema.model_validate(
@@ -194,7 +189,6 @@ def cancel_prescription_route(prescription_id: int):
 
 
 @prescription_bp.post("/<int:prescription_id>/complete")
-@jwt_required()
 @role_required(*PRESCRIPTION_LIFECYCLE_ROLES)
 def complete_prescription_route(prescription_id: int):
     prescription = complete_prescription(
@@ -215,7 +209,6 @@ def complete_prescription_route(prescription_id: int):
 # =====================================================================
 
 @prescription_bp.post("/interactions/check")
-@jwt_required()
 @role_required(*PRESCRIPTION_VIEW_ROLES)
 def check_drug_interactions_route():
     payload = DrugInteractionCheckSchema.model_validate(
@@ -239,7 +232,6 @@ def check_drug_interactions_route():
 
 
 @prescription_bp.post("/interactions")
-@jwt_required()
 @role_required(*DRUG_INTERACTION_MANAGEMENT_ROLES)
 def create_drug_interaction_route():
     payload = DrugInteractionCreateSchema.model_validate(
