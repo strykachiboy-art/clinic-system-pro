@@ -127,7 +127,7 @@ class Patient(db.Model):
     # -------------------------------------------------------------
 
     ai_risk_score = db.Column(
-        db.Float,
+        db.String(20),
         nullable=True,
     )
 

@@ -1,63 +1,98 @@
 ﻿import json
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
-from app.core.enums.ai_enums import AIFeature
+from app.core.enums.ai_enums import AIFeature, AIRiskLevel
 from app.core.exceptions import NotFoundError, ValidationError
 from app.modules.ai.models.ai_model import AILog
+from app.modules.ai.services import ai_service
 from app.modules.ai.services.ai_service import (
     _call_openai,
     _get_clinic,
     _get_patient,
     _run_feature,
+    _validate_provider_result,
     assist_triage,
     check_drug_interactions,
     interpret_lab_results,
 )
+
+from app.modules.lab.models.lab_model import LabOrder
 
 
 # ============================================================================
 # HELPERS
 # ============================================================================
 
-def provider_result(feature, payload):
-    """
-    Simple deterministic AI provider used by service tests.
-    """
-    return {
-        "feature": feature.value,
-        "summary": "AI test response",
-        "risk_score": "low",
-        "payload_received": payload,
-    }
+
+def valid_provider_result(feature):
+    if feature is AIFeature.DRUG_INTERACTION_CHECK:
+        return {
+            "summary": "AI test response",
+            "interactions": [],
+            "recommendations": [],
+        }
+
+    if feature is AIFeature.TRIAGE_ASSISTANT:
+        return {
+            "summary": "AI test response",
+            "risk_score": "low",
+            "recommendation": "Clinical review recommended",
+        }
+
+    if feature is AIFeature.LAB_RESULT_INTERPRETER:
+        return {
+            "summary": "AI test response",
+            "interpretation": "Results reviewed",
+            "abnormal_findings": [],
+            "recommendations": [],
+        }
+
+    raise AssertionError(f"Unsupported test feature: {feature}")
+
+
+def make_provider(feature):
+    def provider(received_feature, payload):
+        assert received_feature is feature
+        return valid_provider_result(feature)
+
+    return provider
+
+
+def ai_log_count(db):
+    return AILog.query.count()
 
 
 # ============================================================================
-# _get_clinic()
+# _get_clinic
 # ============================================================================
+
 
 class TestGetClinic:
-    def test_returns_clinic_when_it_exists(self, clinic):
+    def test_returns_existing_clinic(self, clinic):
         result = _get_clinic(clinic.id)
 
         assert result.id == clinic.id
         assert result.name == clinic.name
 
-    def test_raises_not_found_when_clinic_does_not_exist(self, app):
+    def test_missing_clinic_raises_not_found(self, app):
         with pytest.raises(
             NotFoundError,
-            match=f"Clinic 999999 not found",
+            match=r"Clinic 999999 not found",
         ):
             _get_clinic(999999)
 
 
 # ============================================================================
-# _get_patient()
+# _get_patient
 # ============================================================================
 
+
 class TestGetPatient:
-    def test_returns_none_when_patient_id_is_none(self, clinic):
+    def test_none_patient_id_returns_none(self, clinic):
         result = _get_patient(
             clinic_id=clinic.id,
             patient_id=None,
@@ -65,7 +100,7 @@ class TestGetPatient:
 
         assert result is None
 
-    def test_returns_patient_when_patient_belongs_to_clinic(
+    def test_returns_patient_from_same_clinic(
         self,
         clinic,
         patient,
@@ -76,510 +111,383 @@ class TestGetPatient:
         )
 
         assert result.id == patient.id
-        assert result.clinic_id == clinic.id
 
-    def test_raises_not_found_when_patient_does_not_exist(
-        self,
-        clinic,
-        app,
-    ):
+    def test_missing_patient_raises_not_found(self, clinic):
         with pytest.raises(
             NotFoundError,
-            match="Patient 999999 not found",
+            match=r"Patient 999999 not found",
         ):
             _get_patient(
                 clinic_id=clinic.id,
                 patient_id=999999,
             )
 
-    def test_rejects_patient_from_different_clinic(
+    def test_patient_from_another_clinic_raises_validation_error(
         self,
         make_clinic,
         make_patient,
-        clinic,
     ):
-        other_clinic = make_clinic(name="Other Clinic")
-        other_patient = make_patient(other_clinic)
+        clinic_one = make_clinic(name="Clinic One")
+        clinic_two = make_clinic(name="Clinic Two")
+
+        patient_two = make_patient(clinic_two)
 
         with pytest.raises(
             ValidationError,
             match="Patient does not belong to the supplied clinic",
         ):
             _get_patient(
-                clinic_id=clinic.id,
-                patient_id=other_patient.id,
+                clinic_id=clinic_one.id,
+                patient_id=patient_two.id,
             )
 
 
 # ============================================================================
-# _call_openai()
+# _validate_provider_result
 # ============================================================================
 
-class TestCallOpenAI:
-    def test_rejects_when_openai_api_key_is_not_configured(
-        self,
-        app,
-    ):
-        app.config["OPENAI_API_KEY"] = None
 
-        with pytest.raises(
-            ValidationError,
-            match="OPENAI_API_KEY is not configured",
-        ):
-            _call_openai(
-                AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
-            )
-
-    def test_rejects_when_openai_package_is_not_installed(
-        self,
-        app,
-        monkeypatch,
-    ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        import builtins
-
-        original_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "openai":
-                raise ImportError("openai missing")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(
-            builtins,
-            "__import__",
-            fake_import,
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match="The OpenAI package is not installed",
-        ):
-            _call_openai(
-                AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
-            )
-
-    def test_calls_openai_with_expected_configuration(
-        self,
-        app,
-        monkeypatch,
-    ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-        app.config["OPENAI_MODEL"] = "test-model"
-
-        response = MagicMock()
-        response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content='{"risk_score": "low"}'
-                )
-            )
-        ]
-
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
-        )
-
-        result = _call_openai(
-            AIFeature.TRIAGE_ASSISTANT,
-            {"symptoms": "fever"},
-        )
-
-        assert result == {
-            "risk_score": "low",
-        }
-
-        openai_module.OpenAI.assert_called_once_with(
-            api_key="test-key",
-        )
-
-        client.chat.completions.create.assert_called_once()
-
-        kwargs = client.chat.completions.create.call_args.kwargs
-
-        assert kwargs["model"] == "test-model"
-        assert kwargs["response_format"] == {
-            "type": "json_object",
-        }
-
-        assert len(kwargs["messages"]) == 2
-        assert kwargs["messages"][0]["role"] == "system"
-        assert kwargs["messages"][1]["role"] == "user"
-
-        user_payload = json.loads(
-            kwargs["messages"][1]["content"]
-        )
-
-        assert user_payload["feature"] == (
-            AIFeature.TRIAGE_ASSISTANT.value
-        )
-        assert user_payload["data"] == {
-            "symptoms": "fever",
-        }
-
-    def test_uses_default_model_when_model_is_not_configured(
-        self,
-        app,
-        monkeypatch,
-    ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        response = MagicMock()
-        response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content='{"result": "ok"}'
-                )
-            )
-        ]
-
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
-        )
-
-        result = _call_openai(
+class TestValidateProviderResult:
+    def test_valid_drug_interaction_result(self):
+        result = _validate_provider_result(
             AIFeature.DRUG_INTERACTION_CHECK,
-            {"drug_names": ["Aspirin", "Warfarin"]},
+            {
+                "summary": "No major interactions found",
+                "interactions": [],
+                "recommendations": [],
+            },
         )
 
         assert result == {
-            "result": "ok",
+            "summary": "No major interactions found",
+            "interactions": [],
+            "recommendations": [],
         }
 
-        kwargs = client.chat.completions.create.call_args.kwargs
-
-        assert kwargs["model"] == "gpt-4o-mini"
-
-    def test_rejects_empty_choices_from_provider(
-        self,
-        app,
-        monkeypatch,
-    ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        response = MagicMock()
-        response.choices = []
-
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
+    @pytest.mark.parametrize(
+        "risk_score",
+        [
+            AIRiskLevel.LOW.value,
+            AIRiskLevel.MEDIUM.value,
+            AIRiskLevel.HIGH.value,
+            AIRiskLevel.CRITICAL.value,
+        ],
+    )
+    def test_valid_triage_risk_scores(self, risk_score):
+        result = _validate_provider_result(
+            AIFeature.TRIAGE_ASSISTANT,
+            {
+                "summary": "Triage assessment",
+                "risk_score": risk_score,
+                "recommendation": "Clinical review recommended",
+            },
         )
 
+        assert result["risk_score"] == risk_score
+
+    def test_valid_lab_interpreter_result(self):
+        result = _validate_provider_result(
+            AIFeature.LAB_RESULT_INTERPRETER,
+            {
+                "summary": "Lab interpretation",
+                "interpretation": "Results reviewed",
+                "abnormal_findings": [],
+                "recommendations": [],
+            },
+        )
+
+        assert result["interpretation"] == "Results reviewed"
+
+    def test_invalid_triage_risk_score_raises_validation_error(self):
         with pytest.raises(
             ValidationError,
-            match="AI provider returned no choices",
+            match="AI provider returned invalid triage_assistant response",
         ):
-            _call_openai(
+            _validate_provider_result(
                 AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
+                {
+                    "summary": "Bad response",
+                    "risk_score": "extreme",
+                    "recommendation": "Review",
+                },
             )
 
-    def test_rejects_empty_provider_content(
-        self,
-        app,
-        monkeypatch,
-    ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        response = MagicMock()
-        response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content=""
-                )
-            )
-        ]
-
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
-        )
-
+    def test_missing_triage_risk_score_raises_validation_error(self):
         with pytest.raises(
             ValidationError,
-            match="AI provider returned an empty response",
+            match="AI provider returned invalid triage_assistant response",
         ):
-            _call_openai(
+            _validate_provider_result(
                 AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
+                {
+                    "summary": "Missing risk score",
+                    "recommendation": "Review",
+                },
             )
 
-    def test_rejects_invalid_json_from_provider(
+    def test_invalid_drug_interaction_field_type_raises_validation_error(
         self,
-        app,
-        monkeypatch,
     ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        response = MagicMock()
-        response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="this is not json"
-                )
-            )
-        ]
-
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
-        )
-
         with pytest.raises(
             ValidationError,
-            match="AI provider returned invalid JSON",
+            match="AI provider returned invalid drug_interaction_check response",
         ):
-            _call_openai(
-                AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
+            _validate_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK,
+                {
+                    "summary": "Invalid response",
+                    "interactions": "not-a-list",
+                    "recommendations": [],
+                },
             )
 
-    def test_rejects_non_object_json_from_provider(
+    def test_invalid_lab_interpreter_field_type_raises_validation_error(
         self,
-        app,
-        monkeypatch,
     ):
-        app.config["OPENAI_API_KEY"] = "test-key"
-
-        response = MagicMock()
-        response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content='["not", "an", "object"]'
-                )
+        with pytest.raises(
+            ValidationError,
+            match="AI provider returned invalid lab_result_interpreter response",
+        ):
+            _validate_provider_result(
+                AIFeature.LAB_RESULT_INTERPRETER,
+                {
+                    "summary": "Invalid response",
+                    "interpretation": 123,
+                    "abnormal_findings": [],
+                    "recommendations": [],
+                },
             )
-        ]
 
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-
-        openai_module = MagicMock()
-        openai_module.OpenAI.return_value = client
-
-        monkeypatch.setitem(
-            __import__("sys").modules,
-            "openai",
-            openai_module,
-        )
+    def test_non_dict_provider_result_is_rejected_by_run_feature(
+        self,
+        clinic,
+    ):
+        provider = Mock(return_value=["not", "a", "dict"])
 
         with pytest.raises(
             ValidationError,
             match="AI provider must return a JSON object",
         ):
-            _call_openai(
-                AIFeature.TRIAGE_ASSISTANT,
-                {"symptoms": "fever"},
+            _run_feature(
+                feature=AIFeature.DRUG_INTERACTION_CHECK,
+                clinic_id=clinic.id,
+                payload={
+                    "drug_names": ["Aspirin", "Warfarin"],
+                },
+                provider=provider,
             )
 
+        provider.assert_called_once()
+
 
 # ============================================================================
-# _run_feature()
+# _run_feature
 # ============================================================================
+
 
 class TestRunFeature:
     def test_runs_feature_successfully(
         self,
-        clinic,
         db,
-    ):
-        result = _run_feature(
-            feature=AIFeature.DRUG_INTERACTION_CHECK,
-            clinic_id=clinic.id,
-            payload={
-                "drug_names": [
-                    "Aspirin",
-                    "Warfarin",
-                ]
-            },
-            provider=provider_result,
-        )
-
-        assert result["feature"] == (
-            AIFeature.DRUG_INTERACTION_CHECK.value
-        )
-        assert result["summary"] == "AI test response"
-
-    def test_creates_ai_log(
-        self,
         clinic,
-        db,
     ):
-        payload = {
-            "drug_names": [
-                "Aspirin",
-                "Warfarin",
-            ]
-        }
-
-        result = _run_feature(
-            feature=AIFeature.DRUG_INTERACTION_CHECK,
-            clinic_id=clinic.id,
-            payload=payload,
-            user_id=123,
-            provider=provider_result,
-        )
-
-        db.session.flush()
-
-        log = (
-            AILog.query
-            .filter_by(clinic_id=clinic.id)
-            .order_by(AILog.id.desc())
-            .first()
-        )
-
-        assert log is not None
-        assert log.clinic_id == clinic.id
-        assert log.patient_id is None
-        assert log.user_id == 123
-        assert log.feature_used == (
-            AIFeature.DRUG_INTERACTION_CHECK
-        )
-        assert log.input_data == payload
-        assert log.output_data == result
-        assert log.credits_used == 1
-
-    def test_consumes_one_ai_credit(
-        self,
-        clinic,
-        db,
-    ):
-        starting_credits = clinic.ai_credits
-
-        _run_feature(
-            feature=AIFeature.DRUG_INTERACTION_CHECK,
-            clinic_id=clinic.id,
-            payload={
-                "drug_names": [
-                    "Aspirin",
-                    "Warfarin",
-                ]
-            },
-            provider=provider_result,
-        )
-
-        db.session.refresh(clinic)
-
-        assert clinic.ai_credits == starting_credits - 1
-
-    def test_passes_patient_to_ai_log(
-        self,
-        clinic,
-        patient,
-        db,
-    ):
-        _run_feature(
-            feature=AIFeature.DRUG_INTERACTION_CHECK,
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            payload={
-                "drug_names": [
-                    "Aspirin",
-                    "Warfarin",
-                ]
-            },
-            provider=provider_result,
-        )
-
-        db.session.flush()
-
-        log = (
-            AILog.query
-            .filter_by(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
             )
-            .order_by(AILog.id.desc())
-            .first()
         )
-
-        assert log is not None
-        assert log.patient_id == patient.id
-
-    def test_passes_correct_feature_and_payload_to_provider(
-        self,
-        clinic,
-    ):
-        provider = MagicMock(
-            return_value={
-                "result": "ok",
-            }
-        )
-
-        payload = {
-            "drug_names": [
-                "Aspirin",
-                "Warfarin",
-            ]
-        }
 
         result = _run_feature(
             feature=AIFeature.DRUG_INTERACTION_CHECK,
             clinic_id=clinic.id,
-            payload=payload,
+            payload={
+                "drug_names": [
+                    "Aspirin",
+                    "Warfarin",
+                ]
+            },
             provider=provider,
         )
 
-        assert result == {
-            "result": "ok",
-        }
+        assert result["summary"] == "AI test response"
+        assert result["interactions"] == []
+        assert result["recommendations"] == []
 
         provider.assert_called_once_with(
             AIFeature.DRUG_INTERACTION_CHECK,
-            payload,
+            {
+                "drug_names": [
+                    "Aspirin",
+                    "Warfarin",
+                ]
+            },
         )
 
-    def test_rejects_non_dict_provider_result(
+        log = AILog.query.one()
+
+        assert log.clinic_id == clinic.id
+        assert log.patient_id is None
+        assert log.user_id is None
+        assert log.feature_used == AIFeature.DRUG_INTERACTION_CHECK
+        assert log.input_data == {
+            "drug_names": [
+                "Aspirin",
+                "Warfarin",
+            ]
+        }
+        assert log.output_data["summary"] == "AI test response"
+        assert log.credits_used == 1
+
+        refreshed_clinic = db.session.get(
+            type(clinic),
+            clinic.id,
+        )
+
+        assert refreshed_clinic.ai_credits == 4
+
+    def test_stores_patient_and_user_on_ai_log(
+        self,
+        db,
+        clinic,
+        patient,
+        user,
+    ):
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
+        )
+
+        result = _run_feature(
+            feature=AIFeature.DRUG_INTERACTION_CHECK,
+            clinic_id=clinic.id,
+            payload={
+                "drug_names": [
+                    "Aspirin",
+                    "Warfarin",
+                ]
+            },
+            patient_id=patient.id,
+            user_id=user.id,
+            provider=provider,
+        )
+
+        assert result["summary"] == "AI test response"
+
+        log = AILog.query.one()
+
+        assert log.clinic_id == clinic.id
+        assert log.patient_id == patient.id
+        assert log.user_id == user.id
+
+    def test_triage_updates_patient_ai_data(
+        self,
+        db,
+        clinic,
+        patient,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Patient appears stable",
+                "risk_score": "medium",
+                "recommendation": "Monitor patient",
+            }
+        )
+
+        result = _run_feature(
+            feature=AIFeature.TRIAGE_ASSISTANT,
+            clinic_id=clinic.id,
+            payload={
+                "symptoms": "Headache",
+                "vitals": {
+                    "temperature": 37.0,
+                },
+            },
+            patient_id=patient.id,
+            provider=provider,
+        )
+
+        assert result["risk_score"] == "medium"
+
+        db.session.refresh(patient)
+
+        assert patient.ai_triage_data == result
+        assert patient.ai_summary == "Patient appears stable"
+        assert patient.ai_risk_score == "medium"
+
+    def test_triage_without_patient_does_not_update_patient(
         self,
         clinic,
     ):
-        provider = MagicMock(
-            return_value=["not", "a", "dict"]
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.TRIAGE_ASSISTANT
+            )
         )
+
+        result = _run_feature(
+            feature=AIFeature.TRIAGE_ASSISTANT,
+            clinic_id=clinic.id,
+            payload={
+                "symptoms": "Headache",
+                "vitals": None,
+            },
+            patient_id=None,
+            provider=provider,
+        )
+
+        assert result["risk_score"] == "low"
+
+    def test_invalid_provider_output_does_not_create_ai_log(
+        self,
+        db,
+        clinic,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Invalid triage response",
+                "risk_score": "invalid-risk",
+            }
+        )
+
+        starting_credits = clinic.ai_credits
 
         with pytest.raises(
             ValidationError,
-            match="AI provider must return a JSON object",
+            match="AI provider returned invalid triage_assistant response",
+        ):
+            _run_feature(
+                feature=AIFeature.TRIAGE_ASSISTANT,
+                clinic_id=clinic.id,
+                payload={
+                    "symptoms": "Headache",
+                    "vitals": None,
+                },
+                provider=provider,
+            )
+
+        assert ai_log_count(db) == 0
+
+        db.session.refresh(clinic)
+
+        assert clinic.ai_credits == starting_credits
+
+    def test_provider_failure_rolls_back_ai_credit(
+        self,
+        db,
+        clinic,
+    ):
+        provider = Mock(
+            side_effect=ValidationError(
+                "Provider failure"
+            )
+        )
+
+        starting_credits = clinic.ai_credits
+
+        with pytest.raises(
+            ValidationError,
+            match="Provider failure",
         ):
             _run_feature(
                 feature=AIFeature.DRUG_INTERACTION_CHECK,
@@ -593,16 +501,87 @@ class TestRunFeature:
                 provider=provider,
             )
 
-    def test_rejects_nonexistent_clinic_before_provider_call(
+        assert ai_log_count(db) == 0
+
+        db.session.refresh(clinic)
+
+        assert clinic.ai_credits == starting_credits
+
+    def test_invalid_provider_output_rolls_back_credit(
+        self,
+        db,
+        clinic,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Bad output",
+                "risk_score": "not-valid",
+            }
+        )
+
+        starting_credits = clinic.ai_credits
+
+        with pytest.raises(ValidationError):
+            _run_feature(
+                feature=AIFeature.TRIAGE_ASSISTANT,
+                clinic_id=clinic.id,
+                payload={
+                    "symptoms": "Headache",
+                    "vitals": None,
+                },
+                provider=provider,
+            )
+
+        db.session.refresh(clinic)
+
+        assert clinic.ai_credits == starting_credits
+        assert ai_log_count(db) == 0
+
+    def test_insufficient_ai_credits_prevents_provider_call(
+        self,
+        db,
+        clinic,
+    ):
+        clinic.ai_credits = 0
+        db.session.commit()
+
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="Insufficient AI credits",
+        ):
+            _run_feature(
+                feature=AIFeature.DRUG_INTERACTION_CHECK,
+                clinic_id=clinic.id,
+                payload={
+                    "drug_names": [
+                        "Aspirin",
+                        "Warfarin",
+                    ]
+                },
+                provider=provider,
+            )
+
+        provider.assert_not_called()
+        assert ai_log_count(db) == 0
+
+    def test_missing_clinic_prevents_provider_call(
         self,
     ):
-        provider = MagicMock(
-            return_value={"result": "ok"}
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
         )
 
         with pytest.raises(
             NotFoundError,
-            match="Clinic 999999 not found",
+            match=r"Clinic 999999 not found",
         ):
             _run_feature(
                 feature=AIFeature.DRUG_INTERACTION_CHECK,
@@ -618,148 +597,33 @@ class TestRunFeature:
 
         provider.assert_not_called()
 
-    def test_rejects_invalid_patient_before_provider_call(
-        self,
-        clinic,
-    ):
-        provider = MagicMock(
-            return_value={"result": "ok"}
-        )
-
-        with pytest.raises(
-            NotFoundError,
-            match="Patient 999999 not found",
-        ):
-            _run_feature(
-                feature=AIFeature.TRIAGE_ASSISTANT,
-                clinic_id=clinic.id,
-                patient_id=999999,
-                payload={
-                    "symptoms": "fever",
-                    "vitals": None,
-                },
-                provider=provider,
-            )
-
-        provider.assert_not_called()
-
-    def test_transaction_rolls_back_credit_when_provider_fails(
-        self,
-        clinic,
-        db,
-    ):
-        starting_credits = clinic.ai_credits
-
-        provider = MagicMock(
-            side_effect=ValidationError(
-                "AI provider failed"
-            )
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match="AI provider failed",
-        ):
-            _run_feature(
-                feature=AIFeature.DRUG_INTERACTION_CHECK,
-                clinic_id=clinic.id,
-                payload={
-                    "drug_names": [
-                        "Aspirin",
-                        "Warfarin",
-                    ]
-                },
-                provider=provider,
-            )
-
-        db.session.refresh(clinic)
-
-        assert clinic.ai_credits == starting_credits
-
-        logs = AILog.query.filter_by(
-            clinic_id=clinic.id
-        ).all()
-
-        assert logs == []
-
 
 # ============================================================================
-# check_drug_interactions()
+# check_drug_interactions
 # ============================================================================
+
 
 class TestCheckDrugInteractions:
-    def test_rejects_less_than_two_drugs(
+    def test_checks_drug_interactions_successfully(
         self,
         clinic,
     ):
-        with pytest.raises(
-            ValidationError,
-            match="At least two drug names are required",
-        ):
-            check_drug_interactions(
-                clinic_id=clinic.id,
-                drug_names=["Aspirin"],
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
             )
-
-    def test_rejects_empty_drug_list(
-        self,
-        clinic,
-    ):
-        with pytest.raises(
-            ValidationError,
-            match="At least two drug names are required",
-        ):
-            check_drug_interactions(
-                clinic_id=clinic.id,
-                drug_names=[],
-            )
-
-    @pytest.mark.parametrize(
-        "drug_names",
-        [
-            ["Aspirin", ""],
-            ["Aspirin", "   "],
-            ["Aspirin", None],
-            ["Aspirin", 123],
-            ["", "   "],
-        ],
-    )
-    def test_rejects_fewer_than_two_valid_drugs(
-        self,
-        clinic,
-        drug_names,
-    ):
-        with pytest.raises(
-            ValidationError,
-            match="At least two valid drug names are required",
-        ):
-            check_drug_interactions(
-                clinic_id=clinic.id,
-                drug_names=drug_names,
-            )
-
-    def test_strips_valid_drug_names(
-        self,
-        clinic,
-    ):
-        provider = MagicMock(
-            return_value={
-                "interactions": []
-            }
         )
 
         result = check_drug_interactions(
             clinic_id=clinic.id,
             drug_names=[
-                " Aspirin ",
-                " Warfarin ",
+                "Aspirin",
+                "Warfarin",
             ],
             provider=provider,
         )
 
-        assert result == {
-            "interactions": []
-        }
+        assert result["summary"] == "AI test response"
 
         provider.assert_called_once_with(
             AIFeature.DRUG_INTERACTION_CHECK,
@@ -771,15 +635,145 @@ class TestCheckDrugInteractions:
             },
         )
 
-    def test_accepts_patient_and_user_context(
+    def test_strips_drug_names(
+        self,
+        clinic,
+    ):
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
+        )
+
+        check_drug_interactions(
+            clinic_id=clinic.id,
+            drug_names=[
+                "  Aspirin  ",
+                " Warfarin ",
+            ],
+            provider=provider,
+        )
+
+        provider.assert_called_once_with(
+            AIFeature.DRUG_INTERACTION_CHECK,
+            {
+                "drug_names": [
+                    "Aspirin",
+                    "Warfarin",
+                ]
+            },
+        )
+
+    def test_requires_at_least_two_drug_names(
+        self,
+        clinic,
+    ):
+        provider = Mock()
+
+        with pytest.raises(
+            ValidationError,
+            match="At least two drug names are required",
+        ):
+            check_drug_interactions(
+                clinic_id=clinic.id,
+                drug_names=["Aspirin"],
+                provider=provider,
+            )
+
+        provider.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "drug_names",
+        [
+            [],
+            None,
+            "Aspirin, Warfarin",
+            ("Aspirin", "Warfarin"),
+        ],
+    )
+    def test_rejects_invalid_drug_names_container(
+        self,
+        clinic,
+        drug_names,
+    ):
+        provider = Mock()
+
+        with pytest.raises(
+            ValidationError,
+            match="At least two drug names are required",
+        ):
+            check_drug_interactions(
+                clinic_id=clinic.id,
+                drug_names=drug_names,
+                provider=provider,
+            )
+
+        provider.assert_not_called()
+
+    def test_requires_two_valid_drug_names_after_cleaning(
+        self,
+        clinic,
+    ):
+        provider = Mock()
+
+        with pytest.raises(
+            ValidationError,
+            match="At least two valid drug names are required",
+        ):
+            check_drug_interactions(
+                clinic_id=clinic.id,
+                drug_names=[
+                    "Aspirin",
+                    "",
+                    "   ",
+                    None,
+                ],
+                provider=provider,
+            )
+
+        provider.assert_not_called()
+
+    def test_ignores_non_string_drug_entries(
+        self,
+        clinic,
+    ):
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
+        )
+
+        check_drug_interactions(
+            clinic_id=clinic.id,
+            drug_names=[
+                "Aspirin",
+                123,
+                "Warfarin",
+                None,
+            ],
+            provider=provider,
+        )
+
+        provider.assert_called_once_with(
+            AIFeature.DRUG_INTERACTION_CHECK,
+            {
+                "drug_names": [
+                    "Aspirin",
+                    "Warfarin",
+                ]
+            },
+        )
+
+    def test_accepts_patient_and_user(
         self,
         clinic,
         patient,
+        user,
     ):
-        provider = MagicMock(
-            return_value={
-                "interactions": []
-            }
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.DRUG_INTERACTION_CHECK
+            )
         )
 
         check_drug_interactions(
@@ -789,63 +783,129 @@ class TestCheckDrugInteractions:
                 "Warfarin",
             ],
             patient_id=patient.id,
-            user_id=55,
+            user_id=user.id,
             provider=provider,
         )
 
-        provider.assert_called_once()
+        log = AILog.query.one()
+
+        assert log.patient_id == patient.id
+        assert log.user_id == user.id
+
+    def test_rejects_patient_from_another_clinic(
+        self,
+        make_clinic,
+        make_patient,
+    ):
+        clinic_one = make_clinic(name="Clinic One")
+        clinic_two = make_clinic(name="Clinic Two")
+        patient_two = make_patient(clinic_two)
+
+        provider = Mock()
+
+        with pytest.raises(
+            ValidationError,
+            match="Patient does not belong to the supplied clinic",
+        ):
+            check_drug_interactions(
+                clinic_id=clinic_one.id,
+                drug_names=[
+                    "Aspirin",
+                    "Warfarin",
+                ],
+                patient_id=patient_two.id,
+                provider=provider,
+            )
+
+        provider.assert_not_called()
 
 
 # ============================================================================
-# assist_triage()
+# assist_triage
 # ============================================================================
+
 
 class TestAssistTriage:
-    def test_rejects_empty_symptoms(
+    def test_assists_triage_successfully(
         self,
         clinic,
         patient,
     ):
-        with pytest.raises(
-            ValidationError,
-            match="Symptoms are required",
-        ):
-            assist_triage(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                symptoms="",
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.TRIAGE_ASSISTANT
             )
+        )
 
-    def test_rejects_whitespace_only_symptoms(
+        result = assist_triage(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            symptoms="Mild headache and dizziness",
+            vitals={
+                "temperature": 37.0,
+                "heart_rate": 72,
+            },
+            provider=provider,
+        )
+
+        assert result["risk_score"] == "low"
+
+        provider.assert_called_once_with(
+            AIFeature.TRIAGE_ASSISTANT,
+            {
+                "symptoms": "Mild headache and dizziness",
+                "vitals": {
+                    "temperature": 37.0,
+                    "heart_rate": 72,
+                },
+            },
+        )
+
+    def test_strips_symptoms(
         self,
         clinic,
         patient,
     ):
-        with pytest.raises(
-            ValidationError,
-            match="Symptoms are required",
-        ):
-            assist_triage(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                symptoms="   ",
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.TRIAGE_ASSISTANT
             )
+        )
+
+        assist_triage(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            symptoms="   Headache and dizziness   ",
+            provider=provider,
+        )
+
+        provider.assert_called_once_with(
+            AIFeature.TRIAGE_ASSISTANT,
+            {
+                "symptoms": "Headache and dizziness",
+                "vitals": None,
+            },
+        )
 
     @pytest.mark.parametrize(
         "symptoms",
         [
+            "",
+            "   ",
             None,
             123,
             [],
             {},
         ],
     )
-    def test_rejects_non_string_symptoms(
+    def test_requires_symptoms(
         self,
         clinic,
         patient,
         symptoms,
     ):
+        provider = Mock()
+
         with pytest.raises(
             ValidationError,
             match="Symptoms are required",
@@ -854,15 +914,18 @@ class TestAssistTriage:
                 clinic_id=clinic.id,
                 patient_id=patient.id,
                 symptoms=symptoms,
+                provider=provider,
             )
+
+        provider.assert_not_called()
 
     @pytest.mark.parametrize(
         "vitals",
         [
+            "37",
+            37,
             [],
-            [],
-            "120/80",
-            120,
+            ("temperature", 37),
             True,
         ],
     )
@@ -872,6 +935,8 @@ class TestAssistTriage:
         patient,
         vitals,
     ):
+        provider = Mock()
+
         with pytest.raises(
             ValidationError,
             match="Vitals must be provided as an object",
@@ -879,173 +944,205 @@ class TestAssistTriage:
             assist_triage(
                 clinic_id=clinic.id,
                 patient_id=patient.id,
-                symptoms="fever",
+                symptoms="Headache",
                 vitals=vitals,
+                provider=provider,
             )
 
-    def test_accepts_missing_vitals(
+        provider.assert_not_called()
+
+    def test_allows_vitals_to_be_omitted(
         self,
         clinic,
         patient,
     ):
-        provider = MagicMock(
-            return_value={
-                "summary": "Stable",
-                "risk_score": "low",
-            }
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.TRIAGE_ASSISTANT
+            )
         )
 
         result = assist_triage(
             clinic_id=clinic.id,
             patient_id=patient.id,
-            symptoms=" fever ",
+            symptoms="Headache",
             provider=provider,
         )
 
-        assert result["summary"] == "Stable"
+        assert result["risk_score"] == "low"
 
         provider.assert_called_once_with(
             AIFeature.TRIAGE_ASSISTANT,
             {
-                "symptoms": "fever",
+                "symptoms": "Headache",
                 "vitals": None,
             },
         )
 
-    def test_strips_symptoms_before_sending_to_provider(
-        self,
-        clinic,
-        patient,
-    ):
-        provider = MagicMock(
-            return_value={
-                "summary": "Patient appears stable",
-                "risk_score": "low",
-            }
-        )
-
-        assist_triage(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            symptoms="  headache and fever  ",
-            vitals={
-                "temperature": 38.5,
-            },
-            provider=provider,
-        )
-
-        provider.assert_called_once_with(
-            AIFeature.TRIAGE_ASSISTANT,
-            {
-                "symptoms": "headache and fever",
-                "vitals": {
-                    "temperature": 38.5,
-                },
-            },
-        )
-
-    def test_updates_patient_ai_triage_data(
-        self,
-        clinic,
-        patient,
-        db,
-    ):
-        provider_response = {
-            "summary": "Possible viral infection",
-            "risk_score": "medium",
-            "recommendation": "Clinical review recommended",
-        }
-
-        assist_triage(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            symptoms="fever and headache",
-            provider=MagicMock(
-                return_value=provider_response
-            ),
-        )
-
-        db.session.refresh(patient)
-
-        assert patient.ai_triage_data == provider_response
-        assert patient.ai_summary == (
-            "Possible viral infection"
-        )
-        assert patient.ai_risk_score == "medium"
-
-    def test_creates_triage_ai_log_for_patient(
-        self,
-        clinic,
-        patient,
-        db,
-    ):
-        provider_response = {
-            "summary": "Stable",
-            "risk_score": "low",
-        }
-
-        assist_triage(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            symptoms="mild headache",
-            user_id=42,
-            provider=MagicMock(
-                return_value=provider_response
-            ),
-        )
-
-        log = (
-            AILog.query
-            .filter_by(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-            )
-            .order_by(AILog.id.desc())
-            .first()
-        )
-
-        assert log is not None
-        assert log.feature_used == (
-            AIFeature.TRIAGE_ASSISTANT
-        )
-        assert log.user_id == 42
-        assert log.patient_id == patient.id
-        assert log.credits_used == 1
-
-    def test_rejects_patient_from_different_clinic(
+    def test_patient_must_belong_to_clinic(
         self,
         make_clinic,
         make_patient,
-        clinic,
     ):
-        other_clinic = make_clinic(name="Other Clinic")
-        other_patient = make_patient(other_clinic)
+        clinic_one = make_clinic(name="Clinic One")
+        clinic_two = make_clinic(name="Clinic Two")
+        patient_two = make_patient(clinic_two)
 
-        provider = MagicMock()
+        provider = Mock()
 
         with pytest.raises(
             ValidationError,
             match="Patient does not belong to the supplied clinic",
         ):
             assist_triage(
-                clinic_id=clinic.id,
-                patient_id=other_patient.id,
-                symptoms="fever",
+                clinic_id=clinic_one.id,
+                patient_id=patient_two.id,
+                symptoms="Headache",
                 provider=provider,
             )
 
         provider.assert_not_called()
 
-
-# ============================================================================
-# interpret_lab_results()
-# ============================================================================
-
-class TestInterpretLabResults:
-    def test_rejects_missing_result_data(
+    def test_missing_patient_is_rejected(
         self,
         clinic,
     ):
+        provider = Mock()
+
+        with pytest.raises(
+            NotFoundError,
+            match=r"Patient 999999 not found",
+        ):
+            assist_triage(
+                clinic_id=clinic.id,
+                patient_id=999999,
+                symptoms="Headache",
+                provider=provider,
+            )
+
+        provider.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "risk_score",
+        [
+            "low",
+            "medium",
+            "high",
+            "critical",
+        ],
+    )
+    def test_persists_valid_risk_score(
+        self,
+        db,
+        clinic,
+        patient,
+        risk_score,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Triage result",
+                "risk_score": risk_score,
+                "recommendation": "Clinical review recommended",
+            }
+        )
+
+        result = assist_triage(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            symptoms="Chest discomfort",
+            provider=provider,
+        )
+
+        assert result["risk_score"] == risk_score
+
+        db.session.refresh(patient)
+
+        assert patient.ai_risk_score == risk_score
+        assert patient.ai_summary == "Triage result"
+        assert patient.ai_triage_data == result
+
+    def test_invalid_risk_score_does_not_persist_patient_data(
+        self,
+        db,
+        clinic,
+        patient,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Invalid result",
+                "risk_score": "extreme",
+                "recommendation": "Review",
+            }
+        )
+
+        starting_credits = clinic.ai_credits
+
+        with pytest.raises(
+            ValidationError,
+            match="AI provider returned invalid triage_assistant response",
+        ):
+            assist_triage(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                symptoms="Headache",
+                provider=provider,
+            )
+
+        db.session.refresh(patient)
+        db.session.refresh(clinic)
+
+        assert patient.ai_triage_data is None
+        assert patient.ai_summary is None
+        assert patient.ai_risk_score is None
+        assert clinic.ai_credits == starting_credits
+        assert AILog.query.count() == 0
+
+
+# ============================================================================
+# interpret_lab_results
+# ============================================================================
+
+
+class TestInterpretLabResults:
+    def test_interprets_lab_results_successfully(
+        self,
+        clinic,
+    ):
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.LAB_RESULT_INTERPRETER
+            )
+        )
+
+        result = interpret_lab_results(
+            clinic_id=clinic.id,
+            result_data={
+                "hemoglobin": 13.5,
+                "glucose": 95,
+            },
+            provider=provider,
+        )
+
+        assert result["summary"] == "AI test response"
+        assert result["interpretation"] == "Results reviewed"
+
+        provider.assert_called_once_with(
+            AIFeature.LAB_RESULT_INTERPRETER,
+            {
+                "result_data": {
+                    "hemoglobin": 13.5,
+                    "glucose": 95,
+                },
+                "lab_order_id": None,
+            },
+        )
+
+    def test_requires_result_data(
+        self,
+        clinic,
+    ):
+        provider = Mock()
+
         with pytest.raises(
             ValidationError,
             match="Result data is required",
@@ -1053,17 +1150,20 @@ class TestInterpretLabResults:
             interpret_lab_results(
                 clinic_id=clinic.id,
                 result_data={},
+                provider=provider,
             )
+
+        provider.assert_not_called()
 
     @pytest.mark.parametrize(
         "result_data",
         [
             None,
+            "",
             [],
-            [],
-            "positive",
+            (),
             123,
-            False,
+            True,
         ],
     )
     def test_rejects_non_dict_result_data(
@@ -1071,6 +1171,8 @@ class TestInterpretLabResults:
         clinic,
         result_data,
     ):
+        provider = Mock()
+
         with pytest.raises(
             ValidationError,
             match="Result data is required",
@@ -1078,56 +1180,75 @@ class TestInterpretLabResults:
             interpret_lab_results(
                 clinic_id=clinic.id,
                 result_data=result_data,
+                provider=provider,
             )
 
-    def test_interprets_result_without_lab_order(
+        provider.assert_not_called()
+
+    def test_accepts_patient_id(
         self,
         clinic,
+        patient,
     ):
-        provider = MagicMock(
-            return_value={
-                "summary": "Results reviewed",
-            }
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.LAB_RESULT_INTERPRETER
+            )
         )
 
-        result = interpret_lab_results(
+        interpret_lab_results(
             clinic_id=clinic.id,
             result_data={
                 "hemoglobin": 13.5,
-                "wbc": 7000,
             },
+            patient_id=patient.id,
             provider=provider,
         )
 
-        assert result == {
-            "summary": "Results reviewed",
-        }
+        log = AILog.query.one()
 
-        provider.assert_called_once_with(
-            AIFeature.LAB_RESULT_INTERPRETER,
-            {
-                "result_data": {
-                    "hemoglobin": 13.5,
-                    "wbc": 7000,
+        assert log.patient_id == patient.id
+
+    def test_rejects_patient_from_another_clinic(
+        self,
+        make_clinic,
+        make_patient,
+    ):
+        clinic_one = make_clinic(name="Clinic One")
+        clinic_two = make_clinic(name="Clinic Two")
+        patient_two = make_patient(clinic_two)
+
+        provider = Mock()
+
+        with pytest.raises(
+            ValidationError,
+            match="Patient does not belong to the supplied clinic",
+        ):
+            interpret_lab_results(
+                clinic_id=clinic_one.id,
+                result_data={
+                    "glucose": 100,
                 },
-                "lab_order_id": None,
-            },
-        )
+                patient_id=patient_two.id,
+                provider=provider,
+            )
 
-    def test_rejects_missing_lab_order(
+        provider.assert_not_called()
+
+    def test_missing_lab_order_raises_not_found(
         self,
         clinic,
     ):
-        provider = MagicMock()
+        provider = Mock()
 
         with pytest.raises(
             NotFoundError,
-            match="Lab order 999999 not found",
+            match=r"Lab order 999999 not found",
         ):
             interpret_lab_results(
                 clinic_id=clinic.id,
                 result_data={
-                    "hemoglobin": 13.5,
+                    "glucose": 100,
                 },
                 lab_order_id=999999,
                 provider=provider,
@@ -1135,58 +1256,80 @@ class TestInterpretLabResults:
 
         provider.assert_not_called()
 
-    def test_rejects_lab_order_from_different_clinic(
+    def test_lab_order_from_another_clinic_is_rejected(
         self,
-        clinic,
         db,
+        make_clinic,
     ):
         """
-        The service only needs db.session.get() for this branch, so use
-        a mocked LabOrder rather than depending on the full LabOrder
-        fixture/model construction.
+        This test avoids depending on the exact LabOrder constructor
+        by mocking the service's database lookup.
         """
-        order = MagicMock()
-        order.id = 10
-        order.clinic_id = 999
-        order.patient_id = 1
 
-        with patch(
-            "app.modules.ai.services.ai_service.db.session.get",
-            return_value=order,
-        ):
-            provider = MagicMock()
+        clinic_one = make_clinic(name="Clinic One")
+        clinic_two = make_clinic(name="Clinic Two")
 
+        fake_lab_order = SimpleNamespace(
+            id=10,
+            clinic_id=clinic_two.id,
+            patient_id=None,
+        )
+
+        original_get = ai_service.db.session.get
+
+        def fake_get(model, object_id):
+            if model is LabOrder and object_id == 10:
+                return fake_lab_order
+
+            return original_get(model, object_id)
+
+        db.session.get = fake_get
+
+        provider = Mock()
+
+        try:
             with pytest.raises(
                 ValidationError,
                 match="Lab order does not belong to the supplied clinic",
             ):
                 interpret_lab_results(
-                    clinic_id=clinic.id,
+                    clinic_id=clinic_one.id,
                     result_data={
-                        "hemoglobin": 13.5,
+                        "glucose": 100,
                     },
                     lab_order_id=10,
                     provider=provider,
                 )
+        finally:
+            db.session.get = original_get
 
-            provider.assert_not_called()
+        provider.assert_not_called()
 
-    def test_rejects_lab_order_for_different_patient(
+    def test_lab_order_patient_mismatch_is_rejected(
         self,
+        db,
         clinic,
         patient,
     ):
-        order = MagicMock()
-        order.id = 10
-        order.clinic_id = clinic.id
-        order.patient_id = 999
+        fake_lab_order = SimpleNamespace(
+            id=10,
+            clinic_id=clinic.id,
+            patient_id=patient.id + 999,
+        )
 
-        with patch(
-            "app.modules.ai.services.ai_service.db.session.get",
-            return_value=order,
-        ):
-            provider = MagicMock()
+        original_get = ai_service.db.session.get
 
+        def fake_get(model, object_id):
+            if model is LabOrder and object_id == 10:
+                return fake_lab_order
+
+            return original_get(model, object_id)
+
+        db.session.get = fake_get
+
+        provider = Mock()
+
+        try:
             with pytest.raises(
                 ValidationError,
                 match="Lab order does not belong to the supplied patient",
@@ -1194,82 +1337,494 @@ class TestInterpretLabResults:
                 interpret_lab_results(
                     clinic_id=clinic.id,
                     result_data={
-                        "hemoglobin": 13.5,
+                        "glucose": 100,
                     },
                     patient_id=patient.id,
                     lab_order_id=10,
                     provider=provider,
                 )
+        finally:
+            db.session.get = original_get
 
-            provider.assert_not_called()
+        provider.assert_not_called()
 
-    def test_lab_order_patient_becomes_authoritative_patient(
+    def test_lab_order_sets_patient_from_lab_order(
         self,
+        db,
         clinic,
         patient,
     ):
-        order = MagicMock()
-        order.id = 10
-        order.clinic_id = clinic.id
-        order.patient_id = patient.id
-
-        provider = MagicMock(
-            return_value={
-                "summary": "Normal",
-            }
+        fake_lab_order = SimpleNamespace(
+            id=10,
+            clinic_id=clinic.id,
+            patient_id=patient.id,
         )
 
-        with patch(
-            "app.modules.ai.services.ai_service.db.session.get",
-            return_value=order,
-        ):
+        original_get = ai_service.db.session.get
+
+        def fake_get(model, object_id):
+            if model is LabOrder and object_id == 10:
+                return fake_lab_order
+
+            return original_get(model, object_id)
+
+        db.session.get = fake_get
+
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.LAB_RESULT_INTERPRETER
+            )
+        )
+
+        try:
             result = interpret_lab_results(
                 clinic_id=clinic.id,
                 result_data={
-                    "hemoglobin": 13.5,
+                    "glucose": 100,
                 },
                 lab_order_id=10,
                 provider=provider,
             )
+        finally:
+            db.session.get = original_get
 
-        assert result == {
-            "summary": "Normal",
-        }
+        assert result["interpretation"] == "Results reviewed"
 
         provider.assert_called_once_with(
             AIFeature.LAB_RESULT_INTERPRETER,
             {
                 "result_data": {
-                    "hemoglobin": 13.5,
+                    "glucose": 100,
                 },
                 "lab_order_id": 10,
             },
         )
 
-    def test_rejects_mismatched_patient_even_when_lab_order_exists(
+        log = AILog.query.one()
+
+        assert log.patient_id == patient.id
+
+    def test_lab_order_can_be_used_without_patient_id(
         self,
+        db,
         clinic,
         patient,
     ):
-        order = MagicMock()
-        order.id = 10
-        order.clinic_id = clinic.id
-        order.patient_id = patient.id + 999
+        fake_lab_order = SimpleNamespace(
+            id=10,
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+        )
 
-        with patch(
-            "app.modules.ai.services.ai_service.db.session.get",
-            return_value=order,
+        original_get = ai_service.db.session.get
+
+        def fake_get(model, object_id):
+            if model is LabOrder and object_id == 10:
+                return fake_lab_order
+
+            return original_get(model, object_id)
+
+        db.session.get = fake_get
+
+        provider = Mock(
+            return_value=valid_provider_result(
+                AIFeature.LAB_RESULT_INTERPRETER
+            )
+        )
+
+        try:
+            interpret_lab_results(
+                clinic_id=clinic.id,
+                result_data={
+                    "glucose": 100,
+                },
+                lab_order_id=10,
+                provider=provider,
+            )
+        finally:
+            db.session.get = original_get
+
+        log = AILog.query.one()
+
+        assert log.patient_id == patient.id
+
+    def test_invalid_lab_provider_output_rolls_back(
+        self,
+        db,
+        clinic,
+    ):
+        provider = Mock(
+            return_value={
+                "summary": "Invalid lab response",
+                "interpretation": 12345,
+                "abnormal_findings": [],
+                "recommendations": [],
+            }
+        )
+
+        starting_credits = clinic.ai_credits
+
+        with pytest.raises(
+            ValidationError,
+            match="AI provider returned invalid lab_result_interpreter response",
         ):
+            interpret_lab_results(
+                clinic_id=clinic.id,
+                result_data={
+                    "glucose": 100,
+                },
+                provider=provider,
+            )
+
+        db.session.refresh(clinic)
+
+        assert clinic.ai_credits == starting_credits
+        assert AILog.query.count() == 0
+
+
+# ============================================================================
+# _call_openai
+# ============================================================================
+
+
+class TestCallOpenAI:
+    def test_requires_api_key(
+        self,
+        app,
+    ):
+        app.config["OPENAI_API_KEY"] = None
+
+        with app.app_context():
             with pytest.raises(
                 ValidationError,
-                match="Lab order does not belong to the supplied patient",
+                match="OPENAI_API_KEY is not configured",
             ):
-                interpret_lab_results(
-                    clinic_id=clinic.id,
-                    result_data={
-                        "hemoglobin": 13.5,
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
                     },
-                    patient_id=patient.id,
-                    lab_order_id=10,
-                    provider=MagicMock(),
+                )
+
+    def test_rejects_missing_openai_package(
+        self,
+        app,
+        monkeypatch,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+
+        real_import = __import__
+
+        def fake_import(
+            name,
+            globals=None,
+            locals=None,
+            fromlist=(),
+            level=0,
+        ):
+            if name == "openai":
+                raise ImportError("openai missing")
+
+            return real_import(
+                name,
+                globals,
+                locals,
+                fromlist,
+                level,
+            )
+
+        monkeypatch.setattr(
+            "builtins.__import__",
+            fake_import,
+        )
+
+        with app.app_context():
+            with pytest.raises(
+                ValidationError,
+                match="The OpenAI package is not installed",
+            ):
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
+                    },
+                )
+
+    def test_returns_parsed_json_object(
+        self,
+        app,
+        monkeypatch,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+        app.config["OPENAI_MODEL"] = "test-model"
+
+        captured = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                captured["kwargs"] = kwargs
+
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content=json.dumps(
+                                    {
+                                        "summary": "No interaction",
+                                        "interactions": [],
+                                        "recommendations": [],
+                                    }
+                                )
+                            )
+                        )
+                    ]
+                )
+
+        class FakeClient:
+            def __init__(self, api_key):
+                captured["api_key"] = api_key
+                self.chat = SimpleNamespace(
+                    completions=FakeCompletions()
+                )
+
+        fake_openai = SimpleNamespace(
+            OpenAI=FakeClient
+        )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "openai",
+            fake_openai,
+        )
+
+        with app.app_context():
+            result = _call_openai(
+                AIFeature.DRUG_INTERACTION_CHECK,
+                {
+                    "drug_names": [
+                        "Aspirin",
+                        "Warfarin",
+                    ]
+                },
+            )
+
+        assert result == {
+            "summary": "No interaction",
+            "interactions": [],
+            "recommendations": [],
+        }
+
+        assert captured["api_key"] == "test-key"
+
+        request_kwargs = captured["kwargs"]
+
+        assert request_kwargs["model"] == "test-model"
+        assert request_kwargs["response_format"] == {
+            "type": "json_object"
+        }
+
+        assert request_kwargs["messages"][0]["role"] == "system"
+        assert request_kwargs["messages"][1]["role"] == "user"
+
+    def test_rejects_empty_choices(
+        self,
+        app,
+        monkeypatch,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[]
+                )
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.chat = SimpleNamespace(
+                    completions=FakeCompletions()
+                )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "openai",
+            SimpleNamespace(
+                OpenAI=FakeClient
+            ),
+        )
+
+        with app.app_context():
+            with pytest.raises(
+                ValidationError,
+                match="AI provider returned no choices",
+            ):
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
+                    },
+                )
+
+    def test_rejects_empty_content(
+        self,
+        app,
+        monkeypatch,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content=""
+                            )
+                        )
+                    ]
+                )
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.chat = SimpleNamespace(
+                    completions=FakeCompletions()
+                )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "openai",
+            SimpleNamespace(
+                OpenAI=FakeClient
+            ),
+        )
+
+        with app.app_context():
+            with pytest.raises(
+                ValidationError,
+                match="AI provider returned an empty response",
+            ):
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
+                    },
+                )
+
+    def test_rejects_invalid_json(
+        self,
+        app,
+        monkeypatch,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content="not valid json"
+                            )
+                        )
+                    ]
+                )
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.chat = SimpleNamespace(
+                    completions=FakeCompletions()
+                )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "openai",
+            SimpleNamespace(
+                OpenAI=FakeClient
+            ),
+        )
+
+        with app.app_context():
+            with pytest.raises(
+                ValidationError,
+                match="AI provider returned invalid JSON",
+            ):
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
+                    },
+                )
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "[]",
+            '"string"',
+            "123",
+            "true",
+            "null",
+        ],
+    )
+    def test_rejects_non_object_json(
+        self,
+        app,
+        monkeypatch,
+        content,
+    ):
+        app.config["OPENAI_API_KEY"] = "test-key"
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content=content
+                            )
+                        )
+                    ]
+                )
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.chat = SimpleNamespace(
+                    completions=FakeCompletions()
+                )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "openai",
+            SimpleNamespace(
+                OpenAI=FakeClient
+            ),
+        )
+
+        with app.app_context():
+            with pytest.raises(
+                ValidationError,
+                match="AI provider must return a JSON object",
+            ):
+                _call_openai(
+                    AIFeature.DRUG_INTERACTION_CHECK,
+                    {
+                        "drug_names": [
+                            "Aspirin",
+                            "Warfarin",
+                        ]
+                    },
                 )

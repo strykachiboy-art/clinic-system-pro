@@ -3,15 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.enums.clinic_enums import (
-    ClinicStatus,
-    ClinicType,
-)
+from app.core.enums.clinic_enums import ClinicStatus, ClinicType
 
-
-# ============================================================
-# CLINIC CREATE
-# ============================================================
 
 class ClinicCreateSchema(BaseModel):
     name: str = Field(
@@ -88,20 +81,7 @@ class ClinicCreateSchema(BaseModel):
     )
 
 
-# ============================================================
-# CLINIC BRANCH CREATE
-# ============================================================
-
 class ClinicBranchCreateSchema(BaseModel):
-    """
-    Schema used when creating a branch through:
-
-        POST /api/clinics/<clinic_id>/branches
-
-    The parent clinic is determined by the URL and therefore
-    should not be supplied in the request body.
-    """
-
     name: str = Field(
         ...,
         min_length=1,
@@ -166,20 +146,7 @@ class ClinicBranchCreateSchema(BaseModel):
     )
 
 
-# ============================================================
-# CLINIC UPDATE
-# ============================================================
-
 class ClinicUpdateSchema(BaseModel):
-    """
-    Updates general clinic profile information.
-
-    Branch relationships and headquarters configuration are
-    intentionally managed through ClinicBranchConfigurationSchema.
-    Clinic status, AI credits, and API tokens are also managed
-    through dedicated endpoints.
-    """
-
     name: Optional[str] = Field(
         None,
         min_length=1,
@@ -241,36 +208,16 @@ class ClinicUpdateSchema(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )
 
 
-# ============================================================
-# CLINIC BRANCH CONFIGURATION
-# ============================================================
-
 class ClinicBranchConfigurationSchema(BaseModel):
-    """
-    Updates a clinic's branch/headquarters configuration.
-
-    parent_clinic_id:
-        - integer -> attach clinic to another parent
-        - null -> detach clinic from its current parent
-        - omitted -> leave parent unchanged
-
-    is_headquarters:
-        - true -> make clinic a headquarters
-        - false -> make clinic a non-headquarters
-        - omitted -> leave value unchanged
-
-    `exclude_unset=True` should be used by the route so the
-    service can distinguish omitted values from explicit nulls.
-    """
-
     parent_clinic_id: Optional[int] = Field(
         None,
         description=(
-            "Parent clinic ID. Set to null to detach the clinic "
-            "from its current parent."
+            "Parent clinic ID. Set to null to detach "
+            "the clinic from its current parent."
         ),
     )
 
@@ -281,12 +228,9 @@ class ClinicBranchConfigurationSchema(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )
 
-
-# ============================================================
-# CLINIC STATUS
-# ============================================================
 
 class ClinicStatusUpdateSchema(BaseModel):
     status: ClinicStatus = Field(
@@ -299,12 +243,7 @@ class ClinicStatusUpdateSchema(BaseModel):
     )
 
 
-# ============================================================
-# CLINIC AI CREDITS
-# ============================================================
-
 class ClinicAICreditsUpdateSchema(BaseModel):
-
     amount: int = Field(
         ...,
         gt=0,

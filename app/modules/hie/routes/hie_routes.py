@@ -1,11 +1,5 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
 
-from app.core.enums.hie_enums import (
-    HIEIntegrationStatus,
-    HIEOperation,
-    HIESubmissionStatus,
-)
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
 
@@ -36,6 +30,7 @@ HIE_ADMIN_ROLES = (
     Role.ADMIN,
 )
 
+
 HIE_VIEW_ROLES = (
     Role.ADMIN,
     Role.DOCTOR,
@@ -43,10 +38,6 @@ HIE_VIEW_ROLES = (
     Role.LAB_TECHNICIAN,
     Role.PHARMACIST,
 )
-
-
-def _current_user_id() -> int:
-    return int(get_jwt_identity())
 
 
 @hie_bp.post("/integrations")

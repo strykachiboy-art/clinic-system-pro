@@ -620,16 +620,12 @@ def list_hie_submissions(
             HIESubmission.status == status
         )
 
-    pagination = (
+    return (
         query
-        .order_by(
-            HIESubmission.created_at.desc()
-        )
+        .order_by(HIESubmission.created_at.desc())
         .paginate(
             page=page,
             per_page=per_page,
             error_out=False,
         )
     )
-
-    return pagination

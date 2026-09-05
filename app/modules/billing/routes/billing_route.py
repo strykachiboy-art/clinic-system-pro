@@ -1,5 +1,4 @@
 from flask import Blueprint, jsonify, request
-
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.role_enums import Role
@@ -12,6 +11,7 @@ from app.modules.billing.schemas.billing_schema import (
     PaymentResponse,
     RecordPaymentRequest,
 )
+
 from app.modules.billing.services.billing_service import (
     create_invoice,
     get_outstanding_invoices,
@@ -27,53 +27,61 @@ billing_bp = Blueprint(
 )
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
+def _sanitize_pydantic_errors(errors):
+    """
+    Make Pydantic validation errors JSON serializable.
+
+    Pydantic v2 may include non-serializable exception objects
+    inside the `ctx` field, e.g. ValueError instances.
+    """
+    sanitized = []
+
+    for error in errors:
+        item = dict(error)
+
+        if "ctx" in item and isinstance(item["ctx"], dict):
+            item["ctx"] = {
+                key: str(value)
+                for key, value in item["ctx"].items()
+            }
+
+        sanitized.append(item)
+
+    return sanitized
 
 
 def _payload(schema):
-    """
-    Validate and parse the incoming JSON payload with Pydantic.
-    """
-
     try:
-        payload = schema.model_validate(request.get_json(silent=True) or {})
+        payload = schema.model_validate(
+            request.get_json(silent=True) or {}
+        )
+
         return payload, None
 
     except PydanticValidationError as exc:
-        return None, (
-            jsonify(
-                {
-                    "success": False,
-                    "error": exc.errors(),
-                }
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": _sanitize_pydantic_errors(
+                            exc.errors()
+                        ),
+                    }
+                ),
+                422,
             ),
-            422,
         )
 
 
 def _serialize_response(schema, value):
-    """
-    Validate a SQLAlchemy object against its response schema and serialize it
-    into JSON-compatible data.
-    """
-
     return schema.model_validate(value).model_dump(mode="json")
-
-
-# ============================================================================
-# Invoice Routes
-# ============================================================================
 
 
 @billing_bp.route("/invoices", methods=["POST"])
 @role_required(Role.ADMIN)
 def create_invoice_route():
-    """
-    Create a new invoice.
-    """
-
     payload, error = _payload(CreateInvoiceRequest)
 
     if error:
@@ -106,18 +114,9 @@ def create_invoice_route():
     )
 
 
-# ============================================================================
-# Payment Routes
-# ============================================================================
-
-
 @billing_bp.route("/payments", methods=["POST"])
 @role_required(Role.ADMIN)
 def record_payment_route():
-    """
-    Record a successful payment against an invoice.
-    """
-
     payload, error = _payload(RecordPaymentRequest)
 
     if error:
@@ -146,57 +145,41 @@ def record_payment_route():
     )
 
 
-# ============================================================================
-# Outstanding Invoice Routes
-# ============================================================================
-
-
 @billing_bp.route("/invoices/outstanding", methods=["GET"])
 @role_required(Role.ADMIN)
 def get_outstanding_invoices_route():
-    """
-    Return all outstanding invoices.
-    """
-
     invoices = get_outstanding_invoices()
 
-    return jsonify(
-        {
-            "success": True,
-            "data": [
-                _serialize_response(
-                    OutstandingInvoiceResponse,
-                    invoice,
-                )
-                for invoice in invoices
-            ],
-        }
-    ), 200
-
-
-# ============================================================================
-# Overdue Invoice Routes
-# ============================================================================
+    return (
+        jsonify(
+            {
+                "success": True,
+                "data": [
+                    _serialize_response(
+                        OutstandingInvoiceResponse,
+                        invoice,
+                    )
+                    for invoice in invoices
+                ],
+            }
+        ),
+        200,
+    )
 
 
 @billing_bp.route("/invoices/mark-overdue", methods=["POST"])
 @role_required(Role.ADMIN)
 def mark_overdue_invoices_route():
-    """
-    Mark eligible invoices as overdue.
-    """
+    updated_count = mark_overdue_invoices()
 
-    invoices = mark_overdue_invoices()
-
-    return jsonify(
-        {
-            "success": True,
-            "data": [
-                _serialize_response(
-                    InvoiceResponse,
-                    invoice,
-                )
-                for invoice in invoices
-            ],
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "success": True,
+                "data": {
+                    "updated_count": updated_count,
+                },
+            }
+        ),
+        200,
+    )

@@ -3,7 +3,11 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.enums.hie_enums import HIEIntegrationStatus, HIEOperation
+from app.core.enums.hie_enums import (
+    HIEIntegrationStatus,
+    HIEOperation,
+    HIESubmissionStatus,
+)
 
 
 class HIEIntegrationCreateSchema(BaseModel):
@@ -76,7 +80,10 @@ class HIEIntegrationUpdateSchema(BaseModel):
 
     @field_validator("provider")
     @classmethod
-    def validate_provider(cls, value: Optional[str]) -> Optional[str]:
+    def validate_provider(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
         if value is None:
             return value
 
@@ -139,10 +146,10 @@ class HIESubmissionResponseSchema(BaseModel):
     clinic_id: int
     patient_id: Optional[int]
     operation: HIEOperation
+    status: HIESubmissionStatus
     external_reference: Optional[str]
     request_data: Optional[dict[str, Any]]
     response_data: Optional[dict[str, Any]]
-    success: bool
     status_code: Optional[int]
     error_message: Optional[str]
     retry_count: int
@@ -154,15 +161,15 @@ class HIESubmissionResponseSchema(BaseModel):
 
 
 class HIESubmissionQuerySchema(BaseModel):
-    integration_id: Optional[int] = Field(
-        default=None,
-        gt=0,
-        description="Filter by HIE integration",
-    )
     clinic_id: Optional[int] = Field(
         default=None,
         gt=0,
         description="Filter by clinic",
+    )
+    integration_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Filter by HIE integration",
     )
     patient_id: Optional[int] = Field(
         default=None,
@@ -173,9 +180,9 @@ class HIESubmissionQuerySchema(BaseModel):
         default=None,
         description="Filter by HIE operation",
     )
-    success: Optional[bool] = Field(
+    status: Optional[HIESubmissionStatus] = Field(
         default=None,
-        description="Filter by submission success",
+        description="Filter by submission status",
     )
     page: int = Field(
         default=1,

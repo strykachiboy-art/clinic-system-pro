@@ -374,3 +374,138 @@ def assert_unauthorized():
         return body
 
     return _assert
+
+@pytest.fixture()
+def make_appointment(db):
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.enums.appointment_enums import (
+        AppointmentStatus,
+        AppointmentType,
+    )
+    from app.modules.appointment.models.appointment_model import Appointment
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        patient,
+        staff,
+        status=AppointmentStatus.SCHEDULED,
+        appointment_type=AppointmentType.IN_PERSON,
+        scheduled_start=None,
+        scheduled_end=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if scheduled_start is None:
+            scheduled_start = datetime.now(timezone.utc) + timedelta(
+                days=counter["n"]
+            )
+
+        if scheduled_end is None:
+            scheduled_end = scheduled_start + timedelta(hours=1)
+
+        appointment = Appointment(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            status=status,
+            appointment_type=appointment_type,
+            **overrides,
+        )
+
+        db.session.add(appointment)
+        db.session.commit()
+
+        return appointment
+
+    return _make
+
+
+@pytest.fixture()
+def make_consultation(db):
+    from app.core.enums.consultation_enums import (
+        ConsultationStatus,
+        ConsultationType,
+    )
+    from app.modules.consultation.models.consultation_model import Consultation
+
+    def _make(
+        clinic,
+        patient,
+        staff,
+        appointment=None,
+        consultation_type=ConsultationType.GENERAL,
+        status=ConsultationStatus.IN_PROGRESS,
+        template=None,
+        **overrides,
+    ):
+        consultation = Consultation(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+            appointment_id=appointment.id if appointment else None,
+            consultation_type=consultation_type,
+            status=status,
+            template_id=template.id if template else None,
+            **overrides,
+        )
+
+        db.session.add(consultation)
+        db.session.commit()
+
+        return consultation
+
+    return _make
+
+
+@pytest.fixture()
+def make_template(db):
+    from app.modules.consultation.models.consultation_model import (
+        ConsultationTemplate,
+    )
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic=None,
+        name=None,
+        specialty=None,
+        structure=None,
+        is_active=True,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if name is None:
+            name = f"Test Consultation Template {counter['n']}"
+
+        if structure is None:
+            structure = {
+                "sections": [
+                    "chief_complaint",
+                    "symptoms",
+                    "diagnosis",
+                    "treatment_plan",
+                ]
+            }
+
+        template = ConsultationTemplate(
+            clinic_id=clinic.id if clinic else None,
+            name=name,
+            specialty=specialty,
+            structure=structure,
+            is_active=is_active,
+            **overrides,
+        )
+
+        db.session.add(template)
+        db.session.commit()
+
+        return template
+
+    return _make
