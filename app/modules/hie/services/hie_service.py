@@ -391,9 +391,13 @@ def query_patient(
     clinic_id: int,
     patient_identifier: str,
     integration_id: Optional[int] = None,
-) -> dict[str, Any]:
-
+  ) -> dict[str, Any]:
     _get_clinic(clinic_id)
+
+    patient_identifier = patient_identifier.strip()
+
+    if not patient_identifier:
+        raise ValidationError("Patient identifier is required")
 
     integration = _get_integration(
         clinic_id,
@@ -418,7 +422,6 @@ def query_patient(
         response = provider.query_patient(
             patient_identifier
         )
-
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
@@ -432,7 +435,7 @@ def query_patient(
     )
 
     _update_last_sync(
-        integration.id,
+        integration.id
     )
 
     return response

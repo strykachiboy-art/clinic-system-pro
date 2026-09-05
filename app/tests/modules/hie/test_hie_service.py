@@ -1201,7 +1201,7 @@ def test_query_patient_strips_identifier_before_provider_call(
     submission = HIESubmission.query.one()
 
     assert submission.request_data == {
-        "patient_identifier": "  MRN-001  ",
+        "patient_identifier": "MRN-001",
     }
 
 

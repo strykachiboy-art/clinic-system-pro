@@ -404,7 +404,7 @@ def create_inventory_item(
 
         movement = StockMovement(
             item_id=item.id,
-            movement_type=StockMovementType.RECEIPT,
+            movement_type=StockMovementType.RESTOCK,
             direction=StockMovementDirection.IN,
             quantity=initial_quantity,
             reason="Initial inventory quantity",
