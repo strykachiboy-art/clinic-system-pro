@@ -81,7 +81,7 @@ def list_audit_logs(
 
 
 def get_audit_log_by_id(log_id: int) -> AuditLog:
-    log = AuditLog.query.get(log_id)
+    log = db.session.get(AuditLog, log_id)
 
     if not log:
         raise NotFoundError(

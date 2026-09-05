@@ -15,25 +15,64 @@ def _error_response(message, status_code, details=None):
         "success": False,
         "error": message,
     }
+
     if details is not None:
         body["details"] = details
+
     return jsonify(body), status_code
 
 
+def _sanitize_pydantic_errors(errors):
+    sanitized = []
+
+    for error in errors:
+        item = dict(error)
+
+        if "ctx" in item and isinstance(item["ctx"], dict):
+            item["ctx"] = {
+                key: str(value)
+                for key, value in item["ctx"].items()
+            }
+
+        sanitized.append(item)
+
+    return sanitized
+
+
 def register_error_handlers(app: Flask) -> None:
+
     @app.errorhandler(DomainError)
     def handle_domain_error(error: DomainError):
-        return _error_response(str(error), error.status_code)
+        return _error_response(
+            str(error),
+            error.status_code,
+        )
 
     @app.errorhandler(PydanticValidationError)
     def handle_pydantic_error(error: PydanticValidationError):
-        return _error_response("Validation error", 422, error.errors())
+        details = _sanitize_pydantic_errors(error.errors())
+
+        return _error_response(
+            "Validation error",
+            422,
+            details,
+        )
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error: HTTPException):
-        return _error_response(error.description, error.code or 500)
+        return _error_response(
+            error.description,
+            error.code or 500,
+        )
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception):
-        logger.exception("Unhandled application error", exc_info=error)
-        return _error_response("Internal server error", 500)
+        logger.exception(
+            "Unhandled application error",
+            exc_info=error,
+        )
+
+        return _error_response(
+            "Internal server error",
+            500,
+        )
