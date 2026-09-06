@@ -1,11 +1,14 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
 from app.core.auth.user.models.user_model import User
-from app.core.exceptions import ValidationError
+from app.core.exceptions import DomainError, ValidationError
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
+
+from app.modules.patient.models.patient_model import Patient
 
 from app.modules.patient.schemas.patient_schema import (
     PatientCreateSchema,
@@ -49,39 +52,167 @@ patient_bp = Blueprint(
 
 
 # ============================================================================
+# Helpers
+# ============================================================================
+
+def _get_current_user() -> User:
+    """
+    Load the authenticated user from the JWT identity.
+    """
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(User, user_id)
+
+    if user is None:
+        raise ValidationError(
+            "Authenticated user not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "Authenticated user is inactive"
+        )
+
+    return user
+
+
+def _get_current_clinic_id() -> int:
+    """
+    Return the clinic belonging to the authenticated user.
+
+    Patient data is clinic-scoped, so routes must never trust
+    clinic_id supplied by the client.
+    """
+    user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not assigned to a clinic"
+        )
+
+    return user.clinic_id
+
+
+def _get_patient_in_current_clinic(
+    patient_id: int,
+) -> Patient:
+    """
+    Load a patient and ensure the patient belongs to the
+    authenticated user's clinic.
+    """
+    clinic_id = _get_current_clinic_id()
+
+    patient = db.session.get(
+        Patient,
+        patient_id,
+    )
+
+    if patient is None:
+        raise ValidationError(
+            f"Patient {patient_id} not found"
+        )
+
+    if patient.clinic_id != clinic_id:
+        raise ValidationError(
+            "Patient does not belong to the authenticated user's clinic"
+        )
+
+    return patient
+
+
+def _validate_payload(schema_class):
+    """
+    Validate a JSON request body using the supplied Pydantic schema.
+    """
+    payload = request.get_json(
+        silent=True
+    ) or {}
+
+    try:
+        return schema_class.model_validate(
+            payload
+        )
+    except PydanticValidationError as exc:
+        raise exc
+
+
+def _validation_error_response(
+    exc: PydanticValidationError,
+):
+    return jsonify(
+        {
+            "success": False,
+            "error": "Validation failed",
+            "details": exc.errors(),
+        }
+    ), 400
+
+
+def _domain_error_response(
+    exc: DomainError,
+):
+    return jsonify(
+        {
+            "success": False,
+            "error": str(exc),
+        }
+    ), exc.status_code
+
+
+# ============================================================================
 # Patient
 # ============================================================================
 
-@patient_bp.route("", methods=["POST"])
+@patient_bp.route(
+    "",
+    methods=["POST"],
+)
 @role_required(
     Role.ADMIN,
     Role.RECEPTIONIST,
 )
 def create_patient_route():
-    data = PatientCreateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+    try:
+        data = _validate_payload(
+            PatientCreateSchema
+        )
 
-    user = db.session.get(User, int(get_jwt_identity()))
-    if user is None or user.clinic_id is None:
-        raise ValidationError("Authenticated user is not assigned to a clinic")
+        clinic_id = _get_current_clinic_id()
 
-    clinic_id = user.clinic_id
+        patient = create_patient(
+            clinic_id=clinic_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
 
-    patient = create_patient(
-        clinic_id=clinic_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientResponseSchema
+                .model_validate(patient)
+                .model_dump(mode="json"),
+            }
+        ), 201
 
-    return jsonify({
-        "success": True,
-        "data": PatientResponseSchema.model_validate(patient).model_dump(
-            mode="json"
-        ),
-    }), 201
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
-@patient_bp.route("", methods=["GET"])
+@patient_bp.route(
+    "",
+    methods=["GET"],
+)
 @role_required(
     Role.ADMIN,
     Role.DOCTOR,
@@ -93,36 +224,47 @@ def create_patient_route():
     Role.EMT,
 )
 def list_patients_route():
-    clinic_id = request.args.get("clinic_id", type=int)
+    try:
+        clinic_id = _get_current_clinic_id()
 
-    active_only = (
-        request.args.get(
-            "active_only",
-            "false",
-        ).lower()
-        == "true"
-    )
+        active_only = (
+            request.args.get(
+                "active_only",
+                "false",
+            ).lower()
+            == "true"
+        )
 
-    search = request.args.get("search")
+        search = request.args.get(
+            "search"
+        )
 
-    patients = list_patients(
-        clinic_id=clinic_id,
-        active_only=active_only,
-        search=search,
-    )
+        patients = list_patients(
+            clinic_id=clinic_id,
+            active_only=active_only,
+            search=search,
+        )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            PatientResponseSchema.model_validate(patient).model_dump(
-                mode="json"
-            )
-            for patient in patients
-        ],
-    }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": [
+                    PatientResponseSchema
+                    .model_validate(patient)
+                    .model_dump(mode="json")
+                    for patient in patients
+                ],
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
-@patient_bp.route("/<int:patient_id>", methods=["GET"])
+@patient_bp.route(
+    "/<int:patient_id>",
+    methods=["GET"],
+)
 @role_required(
     Role.ADMIN,
     Role.DOCTOR,
@@ -133,61 +275,113 @@ def list_patients_route():
     Role.PARAMEDIC,
     Role.EMT,
 )
-def get_patient_route(patient_id: int):
-    patient = get_patient(patient_id)
+def get_patient_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientResponseSchema.model_validate(patient).model_dump(
-            mode="json"
-        ),
-    }), 200
+        patient = get_patient(
+            patient_id
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientResponseSchema
+                .model_validate(patient)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
-@patient_bp.route("/<int:patient_id>", methods=["PATCH"])
+@patient_bp.route(
+    "/<int:patient_id>",
+    methods=["PATCH"],
+)
 @role_required(
     Role.ADMIN,
     Role.RECEPTIONIST,
 )
-def update_patient_route(patient_id: int):
-    data = PatientUpdateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+def update_patient_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    patient = update_patient(
-        patient_id=patient_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        data = _validate_payload(
+            PatientUpdateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientResponseSchema.model_validate(patient).model_dump(
-            mode="json"
-        ),
-    }), 200
+        patient = update_patient(
+            patient_id=patient_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientResponseSchema
+                .model_validate(patient)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
-@patient_bp.route("/<int:patient_id>/status", methods=["PATCH"])
+@patient_bp.route(
+    "/<int:patient_id>/status",
+    methods=["PATCH"],
+)
 @role_required(
     Role.ADMIN,
     Role.RECEPTIONIST,
 )
-def set_patient_status_route(patient_id: int):
-    data = PatientStatusUpdateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+def set_patient_status_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    patient = set_active_status(
-        patient_id=patient_id,
-        is_active=data.is_active,
-    )
+        data = _validate_payload(
+            PatientStatusUpdateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientResponseSchema.model_validate(patient).model_dump(
-            mode="json"
-        ),
-    }), 200
+        patient = set_active_status(
+            patient_id=patient_id,
+            is_active=data.is_active,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientResponseSchema
+                .model_validate(patient)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 # ============================================================================
@@ -204,18 +398,32 @@ def set_patient_status_route(patient_id: int):
     Role.NURSE,
     Role.RECEPTIONIST,
 )
-def list_family_members_route(patient_id: int):
-    members = list_family_members(patient_id)
+def list_family_members_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            PatientFamilyMemberResponseSchema
-            .model_validate(member)
-            .model_dump(mode="json")
-            for member in members
-        ],
-    }), 200
+        members = list_family_members(
+            patient_id
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": [
+                    PatientFamilyMemberResponseSchema
+                    .model_validate(member)
+                    .model_dump(mode="json")
+                    for member in members
+                ],
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -226,22 +434,39 @@ def list_family_members_route(patient_id: int):
     Role.ADMIN,
     Role.RECEPTIONIST,
 )
-def add_family_member_route(patient_id: int):
-    data = PatientFamilyMemberCreateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+def add_family_member_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    member = add_family_member(
-        patient_id=patient_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        data = _validate_payload(
+            PatientFamilyMemberCreateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientFamilyMemberResponseSchema
-        .model_validate(member)
-        .model_dump(mode="json"),
-    }), 201
+        member = add_family_member(
+            patient_id=patient_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientFamilyMemberResponseSchema
+                .model_validate(member)
+                .model_dump(mode="json"),
+            }
+        ), 201
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -256,22 +481,37 @@ def update_family_member_route(
     patient_id: int,
     family_member_id: int,
 ):
-    data = PatientFamilyMemberUpdateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    member = update_family_member(
-        patient_id=patient_id,
-        family_member_id=family_member_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        data = _validate_payload(
+            PatientFamilyMemberUpdateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientFamilyMemberResponseSchema
-        .model_validate(member)
-        .model_dump(mode="json"),
-    }), 200
+        member = update_family_member(
+            patient_id=patient_id,
+            family_member_id=family_member_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientFamilyMemberResponseSchema
+                .model_validate(member)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -286,15 +526,27 @@ def remove_family_member_route(
     patient_id: int,
     family_member_id: int,
 ):
-    remove_family_member(
-        patient_id=patient_id,
-        family_member_id=family_member_id,
-    )
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "message": "Family member removed successfully",
-    }), 200
+        remove_family_member(
+            patient_id=patient_id,
+            family_member_id=family_member_id,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "message": (
+                    "Family member removed successfully"
+                ),
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 # ============================================================================
@@ -312,18 +564,32 @@ def remove_family_member_route(
     Role.RECEPTIONIST,
     Role.ACCOUNTANT,
 )
-def list_insurances_route(patient_id: int):
-    insurances = list_insurances(patient_id)
+def list_insurances_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            PatientInsuranceResponseSchema
-            .model_validate(insurance)
-            .model_dump(mode="json")
-            for insurance in insurances
-        ],
-    }), 200
+        insurances = list_insurances(
+            patient_id
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": [
+                    PatientInsuranceResponseSchema
+                    .model_validate(insurance)
+                    .model_dump(mode="json")
+                    for insurance in insurances
+                ],
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -334,22 +600,39 @@ def list_insurances_route(patient_id: int):
     Role.ADMIN,
     Role.RECEPTIONIST,
 )
-def add_insurance_route(patient_id: int):
-    data = PatientInsuranceCreateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+def add_insurance_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    insurance = add_insurance(
-        patient_id=patient_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        data = _validate_payload(
+            PatientInsuranceCreateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientInsuranceResponseSchema
-        .model_validate(insurance)
-        .model_dump(mode="json"),
-    }), 201
+        insurance = add_insurance(
+            patient_id=patient_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientInsuranceResponseSchema
+                .model_validate(insurance)
+                .model_dump(mode="json"),
+            }
+        ), 201
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -364,22 +647,37 @@ def update_insurance_route(
     patient_id: int,
     insurance_id: int,
 ):
-    data = PatientInsuranceUpdateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    insurance = update_insurance(
-        patient_id=patient_id,
-        insurance_id=insurance_id,
-        data=data.model_dump(exclude_unset=True),
-    )
+        data = _validate_payload(
+            PatientInsuranceUpdateSchema
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientInsuranceResponseSchema
-        .model_validate(insurance)
-        .model_dump(mode="json"),
-    }), 200
+        insurance = update_insurance(
+            patient_id=patient_id,
+            insurance_id=insurance_id,
+            data=data.model_dump(
+                exclude_unset=True
+            ),
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientInsuranceResponseSchema
+                .model_validate(insurance)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 # ============================================================================
@@ -395,18 +693,32 @@ def update_insurance_route(
     Role.DOCTOR,
     Role.NURSE,
 )
-def get_vitals_history_route(patient_id: int):
-    vitals = get_vitals_history(patient_id)
+def get_vitals_history_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            PatientVitalsResponseSchema
-            .model_validate(record)
-            .model_dump(mode="json")
-            for record in vitals
-        ],
-    }), 200
+        vitals = get_vitals_history(
+            patient_id
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": [
+                    PatientVitalsResponseSchema
+                    .model_validate(record)
+                    .model_dump(mode="json")
+                    for record in vitals
+                ],
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -418,21 +730,37 @@ def get_vitals_history_route(patient_id: int):
     Role.DOCTOR,
     Role.NURSE,
 )
-def get_latest_vitals_route(patient_id: int):
-    vitals = get_latest_vitals(patient_id)
+def get_latest_vitals_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    if vitals is None:
-        return jsonify({
-            "success": True,
-            "data": None,
-        }), 200
+        vitals = get_latest_vitals(
+            patient_id
+        )
 
-    return jsonify({
-        "success": True,
-        "data": PatientVitalsResponseSchema
-        .model_validate(vitals)
-        .model_dump(mode="json"),
-    }), 200
+        if vitals is None:
+            return jsonify(
+                {
+                    "success": True,
+                    "data": None,
+                }
+            ), 200
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientVitalsResponseSchema
+                .model_validate(vitals)
+                .model_dump(mode="json"),
+            }
+        ), 200
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
 
 
 @patient_bp.route(
@@ -444,35 +772,58 @@ def get_latest_vitals_route(patient_id: int):
     Role.DOCTOR,
     Role.NURSE,
 )
-def record_vitals_route(patient_id: int):
-    data = PatientVitalsCreateSchema.model_validate(
-        request.get_json(silent=True) or {}
-    )
+def record_vitals_route(
+    patient_id: int,
+):
+    try:
+        _get_patient_in_current_clinic(
+            patient_id
+        )
 
-    payload = data.model_dump(
-        exclude_unset=True,
-    )
+        data = _validate_payload(
+            PatientVitalsCreateSchema
+        )
 
-    consultation_id = payload.pop(
-        "consultation_id",
-        None,
-    )
+        payload = data.model_dump(
+            exclude_unset=True
+        )
 
-    recorded_by_id = payload.pop(
-        "recorded_by_id",
-        None,
-    )
+        consultation_id = payload.pop(
+            "consultation_id",
+            None,
+        )
 
-    vitals = record_vitals(
-        patient_id=patient_id,
-        data=payload,
-        consultation_id=consultation_id,
-        recorded_by_id=recorded_by_id,
-    )
+        # Do NOT trust recorded_by_id from the client.
+        # The authenticated JWT identity is the recorder.
+        _get_current_user()
 
-    return jsonify({
-        "success": True,
-        "data": PatientVitalsResponseSchema
-        .model_validate(vitals)
-        .model_dump(mode="json"),
-    }), 201
+        recorded_by_id = int(
+            get_jwt_identity()
+        )
+
+        payload.pop(
+            "recorded_by_id",
+            None,
+        )
+
+        vitals = record_vitals(
+            patient_id=patient_id,
+            data=payload,
+            consultation_id=consultation_id,
+            recorded_by_id=recorded_by_id,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": PatientVitalsResponseSchema
+                .model_validate(vitals)
+                .model_dump(mode="json"),
+            }
+        ), 201
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)

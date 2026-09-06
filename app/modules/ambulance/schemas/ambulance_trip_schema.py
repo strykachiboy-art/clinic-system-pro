@@ -1,4 +1,3 @@
-from decimal import Decimal
 from typing import Optional
 
 from pydantic import (
@@ -13,11 +12,15 @@ from app.core.enums.ambulance_enums import (
 )
 
 
+# ============================================================================
+# Ambulance Trip Schemas
+# ============================================================================
+
+
 class AmbulanceTripRequestSchema(BaseModel):
-    clinic_id: int = Field(
-        ...,
-        description="ID of the clinic",
-    )
+    """
+    Request schema for creating an ambulance trip.
+    """
 
     trip_type: TripType = Field(
         ...,
@@ -25,14 +28,16 @@ class AmbulanceTripRequestSchema(BaseModel):
     )
 
     patient_id: Optional[int] = Field(
-        None,
+        default=None,
+        gt=0,
         description=(
             "ID of the patient, if already identified"
         ),
     )
 
     admission_id: Optional[int] = Field(
-        None,
+        default=None,
+        gt=0,
         description=(
             "ID of the admission associated "
             "with the ambulance trip"
@@ -40,41 +45,20 @@ class AmbulanceTripRequestSchema(BaseModel):
     )
 
     pickup_address: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
-    )
-
-    pickup_lat: Optional[Decimal] = Field(
-        None,
-        ge=Decimal("-90"),
-        le=Decimal("90"),
-    )
-
-    pickup_lng: Optional[Decimal] = Field(
-        None,
-        ge=Decimal("-180"),
-        le=Decimal("180"),
+        description="Pickup location/address",
     )
 
     destination_address: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
-    )
-
-    destination_lat: Optional[Decimal] = Field(
-        None,
-        ge=Decimal("-90"),
-        le=Decimal("90"),
-    )
-
-    destination_lng: Optional[Decimal] = Field(
-        None,
-        ge=Decimal("-180"),
-        le=Decimal("180"),
+        description="Destination location/address",
     )
 
     notes: Optional[str] = Field(
-        None,
+        default=None,
+        description="Additional notes for the ambulance trip",
     )
 
     model_config = ConfigDict(
@@ -83,21 +67,26 @@ class AmbulanceTripRequestSchema(BaseModel):
 
 
 class AmbulanceTripDispatchSchema(BaseModel):
+    """
+    Assigns an ambulance vehicle and crew to a requested trip.
+    """
+
     vehicle_id: int = Field(
         ...,
+        gt=0,
         description="ID of the ambulance vehicle",
     )
 
     driver_id: int = Field(
         ...,
+        gt=0,
         description="ID of the driver",
     )
 
     paramedic_id: Optional[int] = Field(
-        None,
-        description=(
-            "ID of the paramedic or EMT"
-        ),
+        default=None,
+        gt=0,
+        description="ID of the paramedic or EMT",
     )
 
     model_config = ConfigDict(
@@ -106,6 +95,11 @@ class AmbulanceTripDispatchSchema(BaseModel):
 
 
 class AmbulanceTripStatusSchema(BaseModel):
+    """
+    Requests the next valid status in the ambulance
+    trip lifecycle.
+    """
+
     status: TripStatus = Field(
         ...,
         description=(
@@ -120,8 +114,13 @@ class AmbulanceTripStatusSchema(BaseModel):
 
 
 class AmbulanceTripPatientSchema(BaseModel):
+    """
+    Links a patient to an ambulance trip.
+    """
+
     patient_id: int = Field(
         ...,
+        gt=0,
         description="ID of the patient",
     )
 
@@ -131,8 +130,13 @@ class AmbulanceTripPatientSchema(BaseModel):
 
 
 class AmbulanceTripInvoiceSchema(BaseModel):
+    """
+    Links an invoice to a completed ambulance trip.
+    """
+
     invoice_id: int = Field(
         ...,
+        gt=0,
         description="ID of the invoice",
     )
 
@@ -142,13 +146,14 @@ class AmbulanceTripInvoiceSchema(BaseModel):
 
 
 class AmbulanceTripCancelSchema(BaseModel):
-    reason: str = Field(
-        ...,
-        min_length=1,
+    """
+    Cancels an ambulance trip.
+    """
+
+    reason: Optional[str] = Field(
+        default=None,
         max_length=255,
-        description=(
-            "Reason for cancelling the ambulance trip"
-        ),
+        description="Reason for cancelling the ambulance trip",
     )
 
     model_config = ConfigDict(

@@ -18,7 +18,9 @@ from app.modules.ai.schemas.ai_response_schema import (
 )
 
 from app.modules.clinic.models.clinic_model import Clinic
-from app.modules.clinic.services.clinic_service import consume_ai_credit
+from app.modules.clinic.services.clinic_service import (
+    consume_ai_credit,
+)
 from app.modules.lab.models.lab_model import LabOrder
 from app.modules.patient.models.patient_model import Patient
 
@@ -33,13 +35,14 @@ AIProvider = Callable[
 # HELPERS
 # ============================================================================
 
+
 def _get_clinic(clinic_id: int) -> Clinic:
     clinic = db.session.get(
         Clinic,
         clinic_id,
     )
 
-    if not clinic:
+    if clinic is None:
         raise NotFoundError(
             f"Clinic {clinic_id} not found"
         )
@@ -59,17 +62,39 @@ def _get_patient(
         patient_id,
     )
 
-    if not patient:
+    if patient is None:
         raise NotFoundError(
             f"Patient {patient_id} not found"
         )
 
     if patient.clinic_id != clinic_id:
         raise ValidationError(
-            "Patient does not belong to the supplied clinic"
+            "Patient does not belong to the authenticated clinic"
         )
 
     return patient
+
+
+def _get_lab_order(
+    clinic_id: int,
+    lab_order_id: int,
+) -> LabOrder:
+    lab_order = db.session.get(
+        LabOrder,
+        lab_order_id,
+    )
+
+    if lab_order is None:
+        raise NotFoundError(
+            f"Lab order {lab_order_id} not found"
+        )
+
+    if lab_order.clinic_id != clinic_id:
+        raise ValidationError(
+            "Lab order does not belong to the authenticated clinic"
+        )
+
+    return lab_order
 
 
 def _call_openai(
@@ -92,40 +117,46 @@ def _call_openai(
             "The OpenAI package is not installed"
         ) from exc
 
-    client = OpenAI(
-        api_key=api_key,
-    )
+    try:
+        client = OpenAI(
+            api_key=api_key,
+        )
 
-    response = client.chat.completions.create(
-        model=current_app.config.get(
-            "OPENAI_MODEL",
-            "gpt-4o-mini",
-        ),
-        response_format={
-            "type": "json_object",
-        },
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a clinical decision-support assistant. "
-                    "Return JSON only. "
-                    "Your output supports clinicians and is not a "
-                    "diagnosis or a substitute for professional "
-                    "medical judgment."
-                ),
+        response = client.chat.completions.create(
+            model=current_app.config.get(
+                "OPENAI_MODEL",
+                "gpt-4o-mini",
+            ),
+            response_format={
+                "type": "json_object",
             },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "feature": feature.value,
-                        "data": payload,
-                    }
-                ),
-            },
-        ],
-    )
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a clinical decision-support assistant. "
+                        "Return JSON only. "
+                        "Your output supports clinicians and is not a "
+                        "diagnosis or a substitute for professional "
+                        "medical judgment."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "feature": feature.value,
+                            "data": payload,
+                        }
+                    ),
+                },
+            ],
+        )
+
+    except Exception as exc:
+        raise ValidationError(
+            "AI provider request failed"
+        ) from exc
 
     if not response.choices:
         raise ValidationError(
@@ -203,6 +234,7 @@ def _validate_provider_result(
 # CORE FEATURE EXECUTION
 # ============================================================================
 
+
 @transactional
 def _run_feature(
     feature: AIFeature,
@@ -213,18 +245,37 @@ def _run_feature(
     provider: Optional[AIProvider] = None,
 ) -> dict[str, Any]:
 
+    # ------------------------------------------------------------------------
+    # Clinic isolation
+    # ------------------------------------------------------------------------
+
     _get_clinic(
         clinic_id
     )
+
+    # ------------------------------------------------------------------------
+    # Patient isolation
+    # ------------------------------------------------------------------------
 
     patient = _get_patient(
         clinic_id=clinic_id,
         patient_id=patient_id,
     )
 
+    # ------------------------------------------------------------------------
+    # Consume one AI credit.
+    #
+    # Because this function is transactional, a provider failure or
+    # validation failure will roll this change back.
+    # ------------------------------------------------------------------------
+
     consume_ai_credit(
         clinic_id
     )
+
+    # ------------------------------------------------------------------------
+    # Execute AI provider
+    # ------------------------------------------------------------------------
 
     ai_provider = (
         provider
@@ -241,10 +292,18 @@ def _run_feature(
             "AI provider must return a JSON object"
         )
 
+    # ------------------------------------------------------------------------
+    # Validate AI output before storing it
+    # ------------------------------------------------------------------------
+
     result = _validate_provider_result(
         feature=feature,
         result=result,
     )
+
+    # ------------------------------------------------------------------------
+    # Persist AI audit/log record
+    # ------------------------------------------------------------------------
 
     log = AILog(
         clinic_id=clinic_id,
@@ -258,9 +317,13 @@ def _run_feature(
 
     db.session.add(log)
 
+    # ------------------------------------------------------------------------
+    # Persist triage information to patient
+    # ------------------------------------------------------------------------
+
     if (
         feature is AIFeature.TRIAGE_ASSISTANT
-        and patient
+        and patient is not None
     ):
         patient.ai_triage_data = result
 
@@ -278,6 +341,7 @@ def _run_feature(
 # ============================================================================
 # DRUG INTERACTION CHECK
 # ============================================================================
+
 
 def check_drug_interactions(
     clinic_id: int,
@@ -325,6 +389,7 @@ def check_drug_interactions(
 # TRIAGE ASSISTANT
 # ============================================================================
 
+
 def assist_triage(
     clinic_id: int,
     patient_id: int,
@@ -369,6 +434,7 @@ def assist_triage(
 # LAB RESULT INTERPRETER
 # ============================================================================
 
+
 def interpret_lab_results(
     clinic_id: int,
     result_data: dict[str, Any],
@@ -387,20 +453,10 @@ def interpret_lab_results(
         )
 
     if lab_order_id is not None:
-        lab_order = db.session.get(
-            LabOrder,
-            lab_order_id,
+        lab_order = _get_lab_order(
+            clinic_id=clinic_id,
+            lab_order_id=lab_order_id,
         )
-
-        if not lab_order:
-            raise NotFoundError(
-                f"Lab order {lab_order_id} not found"
-            )
-
-        if lab_order.clinic_id != clinic_id:
-            raise ValidationError(
-                "Lab order does not belong to the supplied clinic"
-            )
 
         if (
             patient_id is not None
@@ -410,6 +466,7 @@ def interpret_lab_results(
                 "Lab order does not belong to the supplied patient"
             )
 
+        # The lab order is authoritative for the patient.
         patient_id = lab_order.patient_id
 
     payload = {

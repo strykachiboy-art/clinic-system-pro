@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
+from app.core.exceptions import DomainError
 from app.core.utils.decorators import role_required
 
 from app.modules.appointment.schemas.appointment_schema import (
@@ -24,9 +26,9 @@ from app.modules.appointment.services.appointment_service import (
 )
 
 
-# ---------------------------------------------------------------------
+# ============================================================================
 # Blueprint
-# ---------------------------------------------------------------------
+# ============================================================================
 
 
 appointment_bp = Blueprint(
@@ -36,16 +38,9 @@ appointment_bp = Blueprint(
 )
 
 
-# ---------------------------------------------------------------------
+# ============================================================================
 # Permissions
-# ---------------------------------------------------------------------
-#
-# Appointment management is currently restricted to clinical and
-# administrative staff.
-#
-# Clinic activity validation is intentionally NOT performed here.
-# The appointment service owns that business rule.
-# ---------------------------------------------------------------------
+# ============================================================================
 
 
 APPOINTMENT_ROLES = (
@@ -56,30 +51,96 @@ APPOINTMENT_ROLES = (
 )
 
 
+# ============================================================================
+# Authentication / Clinic Helpers
+# ============================================================================
+
+
+def _current_user() -> User:
+    """
+    Return the authenticated user.
+
+    The authentication decorator populates g.current_user_id
+    from the verified JWT.
+    """
+
+    user = db_user = User.query.get(
+        g.current_user_id
+    )
+
+    if user is None:
+        raise DomainError("Authenticated user not found")
+
+    return user
+
+
+def _current_clinic_id() -> int:
+    """
+    Return the authenticated user's clinic ID.
+
+    Clinic ownership is derived server-side and is never
+    accepted from the request payload.
+    """
+
+    user = _current_user()
+
+    if user.clinic_id is None:
+        raise DomainError(
+            "Authenticated user is not assigned to a clinic"
+        )
+
+    return user.clinic_id
+
+
+# ============================================================================
+# Serialization
+# ============================================================================
+
+
 def _serialize_appointment(appointment):
     return {
         "id": appointment.id,
         "clinic_id": appointment.clinic_id,
         "patient_id": appointment.patient_id,
         "staff_id": appointment.staff_id,
-        "scheduled_start": appointment.scheduled_start.isoformat(),
-        "scheduled_end": appointment.scheduled_end.isoformat(),
+        "scheduled_start": (
+            appointment.scheduled_start.isoformat()
+        ),
+        "scheduled_end": (
+            appointment.scheduled_end.isoformat()
+        ),
         "status": appointment.status.value,
         "appointment_type": appointment.appointment_type.value,
         "reason": appointment.reason,
         "notes": appointment.notes,
-        "google_calendar_event_id": appointment.google_calendar_event_id,
+        "google_calendar_event_id": (
+            appointment.google_calendar_event_id
+        ),
         "reminder_sent": appointment.reminder_sent,
-        "created_at": appointment.created_at.isoformat() if appointment.created_at else None,
-        "updated_at": appointment.updated_at.isoformat() if appointment.updated_at else None,
-        "cancelled_at": appointment.cancelled_at.isoformat() if appointment.cancelled_at else None,
-        "cancellation_reason": appointment.cancellation_reason,
+        "created_at": (
+            appointment.created_at.isoformat()
+            if appointment.created_at
+            else None
+        ),
+        "updated_at": (
+            appointment.updated_at.isoformat()
+            if appointment.updated_at
+            else None
+        ),
+        "cancelled_at": (
+            appointment.cancelled_at.isoformat()
+            if appointment.cancelled_at
+            else None
+        ),
+        "cancellation_reason": (
+            appointment.cancellation_reason
+        ),
     }
 
 
-# ---------------------------------------------------------------------
-# Request validation helpers
-# ---------------------------------------------------------------------
+# ============================================================================
+# Request Validation Helpers
+# ============================================================================
 
 
 def _payload(schema):
@@ -87,9 +148,10 @@ def _payload(schema):
     Validate a JSON request body using the supplied Pydantic schema.
 
     Returns:
-        - validated Pydantic model on success
-        - Flask response tuple on validation failure
+        Pydantic model on success.
+        Flask response tuple on validation failure.
     """
+
     try:
         return schema.model_validate(
             request.get_json(silent=True) or {}
@@ -105,10 +167,8 @@ def _payload(schema):
 def _query_payload(schema):
     """
     Validate query parameters using the supplied Pydantic schema.
-
-    Flask's MultiDict is converted to a normal dictionary before
-    Pydantic validation.
     """
+
     try:
         return schema.model_validate(
             request.args.to_dict()
@@ -121,9 +181,9 @@ def _query_payload(schema):
         }), 422
 
 
-# ---------------------------------------------------------------------
-# Create appointment
-# ---------------------------------------------------------------------
+# ============================================================================
+# Create Appointment
+# ============================================================================
 
 
 @appointment_bp.post("/")
@@ -131,6 +191,8 @@ def _query_payload(schema):
 def create():
     """
     Create a new appointment.
+
+    Clinic ID is derived from the authenticated user.
 
     The service validates:
         - clinic existence
@@ -142,6 +204,7 @@ def create():
         - schedule conflicts
         - appointment times
     """
+
     payload = _payload(
         AppointmentCreateSchema
     )
@@ -149,19 +212,36 @@ def create():
     if isinstance(payload, tuple):
         return payload
 
-    appointment = create_appointment(
-        **payload.model_dump()
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 201
+        appointment = create_appointment(
+            clinic_id=clinic_id,
+            patient_id=payload.patient_id,
+            staff_id=payload.staff_id,
+            scheduled_start=payload.scheduled_start,
+            scheduled_end=payload.scheduled_end,
+            appointment_type=payload.appointment_type,
+            reason=payload.reason,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Reschedule appointment
-# ---------------------------------------------------------------------
+# ============================================================================
+# Reschedule Appointment
+# ============================================================================
 
 
 @appointment_bp.post(
@@ -172,12 +252,15 @@ def reschedule(appointment_id: int):
     """
     Reschedule an existing appointment.
 
-    The service validates that:
-        - the appointment exists
-        - the appointment is SCHEDULED or CONFIRMED
-        - the clinic is ACTIVE
-        - the new schedule does not conflict
+    The service validates:
+        - appointment existence
+        - clinic ownership
+        - valid appointment status
+        - clinic ACTIVE status
+        - new schedule
+        - schedule conflicts
     """
+
     payload = _payload(
         AppointmentRescheduleSchema
     )
@@ -185,21 +268,33 @@ def reschedule(appointment_id: int):
     if isinstance(payload, tuple):
         return payload
 
-    appointment = reschedule_appointment(
-        appointment_id=appointment_id,
-        new_start=payload.scheduled_start,
-        new_end=payload.scheduled_end,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 200
+        appointment = reschedule_appointment(
+            appointment_id=appointment_id,
+            clinic_id=clinic_id,
+            new_start=payload.scheduled_start,
+            new_end=payload.scheduled_end,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Confirm appointment
-# ---------------------------------------------------------------------
+# ============================================================================
+# Confirm Appointment
+# ============================================================================
 
 
 @appointment_bp.post(
@@ -209,22 +304,33 @@ def reschedule(appointment_id: int):
 def confirm(appointment_id: int):
     """
     Confirm a scheduled appointment.
-
-    Clinic activity validation is handled by the service.
     """
-    appointment = confirm_appointment(
-        appointment_id=appointment_id,
-    )
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 200
+    try:
+        clinic_id = _current_clinic_id()
+
+        appointment = confirm_appointment(
+            appointment_id=appointment_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Cancel appointment
-# ---------------------------------------------------------------------
+# ============================================================================
+# Cancel Appointment
+# ============================================================================
 
 
 @appointment_bp.post(
@@ -235,6 +341,7 @@ def cancel(appointment_id: int):
     """
     Cancel a scheduled or confirmed appointment.
     """
+
     payload = _payload(
         AppointmentCancelSchema
     )
@@ -242,20 +349,32 @@ def cancel(appointment_id: int):
     if isinstance(payload, tuple):
         return payload
 
-    appointment = cancel_appointment(
-        appointment_id=appointment_id,
-        reason=payload.cancellation_reason,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 200
+        appointment = cancel_appointment(
+            appointment_id=appointment_id,
+            clinic_id=clinic_id,
+            reason=payload.cancellation_reason,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Complete appointment
-# ---------------------------------------------------------------------
+# ============================================================================
+# Complete Appointment
+# ============================================================================
 
 
 @appointment_bp.post(
@@ -266,6 +385,7 @@ def complete(appointment_id: int):
     """
     Mark a confirmed appointment as completed.
     """
+
     payload = _payload(
         AppointmentCompleteSchema
     )
@@ -273,20 +393,32 @@ def complete(appointment_id: int):
     if isinstance(payload, tuple):
         return payload
 
-    appointment = complete_appointment(
-        appointment_id=appointment_id,
-        notes=payload.notes,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 200
+        appointment = complete_appointment(
+            appointment_id=appointment_id,
+            clinic_id=clinic_id,
+            notes=payload.notes,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Mark appointment as no-show
-# ---------------------------------------------------------------------
+# ============================================================================
+# Mark Appointment as No-Show
+# ============================================================================
 
 
 @appointment_bp.post(
@@ -297,19 +429,32 @@ def no_show(appointment_id: int):
     """
     Mark a confirmed appointment as a no-show.
     """
-    appointment = mark_no_show(
-        appointment_id=appointment_id,
-    )
 
-    return jsonify({
-        "success": True,
-        "data": _serialize_appointment(appointment),
-    }), 200
+    try:
+        clinic_id = _current_clinic_id()
+
+        appointment = mark_no_show(
+            appointment_id=appointment_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": _serialize_appointment(
+                appointment
+            ),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Patient appointment history
-# ---------------------------------------------------------------------
+# ============================================================================
+# Patient Appointment History
+# ============================================================================
 
 
 @appointment_bp.get(
@@ -320,24 +465,39 @@ def patient_appointments(patient_id: int):
     """
     Retrieve all appointments for a patient.
 
-    This endpoint intentionally works even when the patient's clinic
-    is INACTIVE or SUSPENDED.
+    Historical appointments remain accessible even if
+    the clinic is inactive or suspended.
 
-    Historical records must remain accessible.
+    Results are always restricted to the authenticated
+    user's clinic.
     """
-    appointments = get_appointments_for_patient(
-        patient_id=patient_id,
-    )
 
-    return jsonify({
-        "success": True,
-        "data": [_serialize_appointment(item) for item in appointments],
-    }), 200
+    try:
+        clinic_id = _current_clinic_id()
+
+        appointments = get_appointments_for_patient(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": [
+                _serialize_appointment(item)
+                for item in appointments
+            ],
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code
 
 
-# ---------------------------------------------------------------------
-# Staff appointment schedule
-# ---------------------------------------------------------------------
+# ============================================================================
+# Staff Appointment Schedule
+# ============================================================================
 
 
 @appointment_bp.get(
@@ -350,9 +510,13 @@ def staff_appointments(staff_id: int):
 
     An optional date query parameter may be supplied.
 
-    Historical appointments remain retrievable regardless of clinic
-    status.
+    Historical appointments remain retrievable regardless
+    of clinic status.
+
+    Results are always restricted to the authenticated
+    user's clinic.
     """
+
     payload = _query_payload(
         AppointmentStaffScheduleQuerySchema
     )
@@ -360,12 +524,25 @@ def staff_appointments(staff_id: int):
     if isinstance(payload, tuple):
         return payload
 
-    appointments = get_appointments_for_staff(
-        staff_id=staff_id,
-        date_=payload.date_,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "success": True,
-        "data": [_serialize_appointment(item) for item in appointments],
-    }), 200
+        appointments = get_appointments_for_staff(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+            date_=payload.date_,
+        )
+
+        return jsonify({
+            "success": True,
+            "data": [
+                _serialize_appointment(item)
+                for item in appointments
+            ],
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), exc.status_code

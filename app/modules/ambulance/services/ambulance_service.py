@@ -1,4 +1,8 @@
+from flask import g, has_request_context
+
 from app.extensions import db
+
+from app.core.auth.user.models.user_model import User
 
 from app.core.exceptions import (
     ConflictError,
@@ -51,6 +55,113 @@ from app.modules.ambulance.models.ambulance_model import (
 
 
 # ============================================================
+# AUTHENTICATION / CLINIC CONTEXT
+# ============================================================
+
+
+def _current_user() -> User:
+    """
+    Return the authenticated User from the decorator-provided
+    authentication context.
+
+    This helper is only enforced when the service is called
+    inside an HTTP request. Direct service-level tests can still
+    call the service without Flask request context.
+    """
+    if not has_request_context():
+        raise ValidationError(
+            "Authenticated request context is required"
+        )
+
+    user_id = getattr(g, "current_user_id", None)
+
+    if user_id is None:
+        raise ValidationError(
+            "Authenticated user is required"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if user is None:
+        raise ValidationError(
+            "Authenticated user was not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
+        )
+
+    return user
+
+
+def _current_clinic_id() -> int:
+    """
+    Return the authenticated user's clinic ID.
+    """
+    user = _current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated "
+            "with a clinic"
+        )
+
+    return user.clinic_id
+
+
+def _assert_authenticated_clinic(
+    clinic_id: int,
+) -> None:
+    """
+    Verify that the requested clinic belongs to the
+    authenticated user.
+
+    This prevents a client from accessing another clinic by
+    supplying a different clinic_id.
+
+    When the service is called directly without a Flask request
+    context, this check is skipped so service-level tests and
+    internal jobs can still operate using explicit clinic IDs.
+    """
+    if not has_request_context():
+        return
+
+    authenticated_clinic_id = _current_clinic_id()
+
+    if authenticated_clinic_id != clinic_id:
+        raise ValidationError(
+            "Resource does not belong "
+            "to the authenticated user's clinic"
+        )
+
+
+def _audit_user_id() -> int | None:
+    """
+    Return the authenticated user ID for audit logging.
+
+    Returns None when the service is being executed outside
+    an HTTP request context.
+    """
+    if not has_request_context():
+        return None
+
+    user_id = getattr(
+        g,
+        "current_user_id",
+        None,
+    )
+
+    if user_id is None:
+        return None
+
+    return user_id
+
+
+# ============================================================
 # VEHICLE
 # ============================================================
 
@@ -61,9 +172,11 @@ def get_vehicle(
     """
     Retrieve an ambulance vehicle.
 
-    Retrieval is intentionally allowed regardless of
-    clinic status so historical vehicle information remains
-    accessible.
+    Historical vehicle information remains accessible even if
+    the clinic is inactive.
+
+    When called through an authenticated HTTP request, the
+    vehicle must belong to the authenticated user's clinic.
     """
     vehicle = db.session.get(
         AmbulanceVehicle,
@@ -75,6 +188,10 @@ def get_vehicle(
             f"Ambulance vehicle {vehicle_id} not found"
         )
 
+    _assert_authenticated_clinic(
+        vehicle.clinic_id,
+    )
+
     return vehicle
 
 
@@ -85,9 +202,16 @@ def list_vehicles(
     """
     List ambulance vehicles for a clinic.
 
-    This is a read operation and therefore does not require
-    the clinic to be active.
+    Read operations do not require the clinic to be active.
+
+    The requested clinic is still required to match the
+    authenticated user's clinic when called through an API
+    request.
     """
+    _assert_authenticated_clinic(
+        clinic_id,
+    )
+
     query = AmbulanceVehicle.query.filter_by(
         clinic_id=clinic_id,
     )
@@ -115,9 +239,17 @@ def create_vehicle(
     Register a new ambulance vehicle.
 
     New vehicles can only be created for an active clinic.
+    The clinic must also belong to the authenticated user when
+    called through an API request.
     """
 
-    ensure_clinic_active(clinic_id)
+    _assert_authenticated_clinic(
+        clinic_id,
+    )
+
+    ensure_clinic_active(
+        clinic_id,
+    )
 
     if not isinstance(plate_number, str):
         raise ValidationError(
@@ -136,7 +268,6 @@ def create_vehicle(
             "Vehicle capacity must be at least 1"
         )
 
-    # New vehicles must start operationally available.
     if status != VehicleStatus.AVAILABLE:
         raise ValidationError(
             "A newly registered ambulance must "
@@ -182,6 +313,7 @@ def create_vehicle(
             "capacity": vehicle.capacity,
             "status": vehicle.status.value,
         },
+        user_id=_audit_user_id(),
     )
 
     return vehicle
@@ -195,16 +327,13 @@ def set_vehicle_status(
     """
     Manually change a vehicle's availability status.
 
-    ON_TRIP is controlled by trip dispatch/completion/cancellation
-    and cannot be manually assigned here.
-
-    Manual operational states are:
-        AVAILABLE
-        MAINTENANCE
-        OUT_OF_SERVICE
+    ON_TRIP is controlled by trip dispatch/completion/
+    cancellation and cannot be manually assigned here.
     """
 
-    vehicle = get_vehicle(vehicle_id)
+    vehicle = get_vehicle(
+        vehicle_id,
+    )
 
     ensure_clinic_active(
         vehicle.clinic_id,
@@ -244,6 +373,7 @@ def set_vehicle_status(
         new_value={
             "status": new_status.value,
         },
+        user_id=_audit_user_id(),
     )
 
     return vehicle
@@ -262,6 +392,9 @@ def get_trip(
 
     Historical trips remain retrievable even if their clinic
     is inactive or suspended.
+
+    When called through an authenticated HTTP request, the
+    trip must belong to the authenticated user's clinic.
     """
     trip = db.session.get(
         AmbulanceTrip,
@@ -272,6 +405,10 @@ def get_trip(
         raise NotFoundError(
             f"Ambulance trip {trip_id} not found"
         )
+
+    _assert_authenticated_clinic(
+        trip.clinic_id,
+    )
 
     return trip
 
@@ -286,6 +423,11 @@ def list_trips(
     Historical retrieval remains available regardless of
     clinic status.
     """
+
+    _assert_authenticated_clinic(
+        clinic_id,
+    )
+
     query = AmbulanceTrip.query.filter_by(
         clinic_id=clinic_id,
     )
@@ -364,8 +506,8 @@ def _get_admission(
     """
     Retrieve and validate an admission.
 
-    The admission model is associated with a patient, so
-    clinic ownership is verified through that patient.
+    Clinic ownership is verified through the admission's
+    patient.
     """
     admission = db.session.get(
         Admission,
@@ -406,7 +548,7 @@ def _get_ambulance_crew_member(
     - staff belongs to trip clinic
     - linked user exists
     - linked user is active
-    - user has an appropriate ambulance role
+    - linked user has an appropriate ambulance role
     """
 
     staff = db.session.get(
@@ -462,10 +604,15 @@ def _lock_vehicle(
 ) -> AmbulanceVehicle:
     """
     Lock a vehicle row for a state-changing operation.
+
+    Clinic ownership is checked by the caller because the
+    expected clinic depends on the operation.
     """
     vehicle = (
         AmbulanceVehicle.query
-        .filter_by(id=vehicle_id)
+        .filter_by(
+            id=vehicle_id,
+        )
         .with_for_update()
         .first()
     )
@@ -508,7 +655,13 @@ def request_trip(
     an admission and patient.
     """
 
-    ensure_clinic_active(clinic_id)
+    _assert_authenticated_clinic(
+        clinic_id,
+    )
+
+    ensure_clinic_active(
+        clinic_id,
+    )
 
     patient = None
     admission = None
@@ -620,6 +773,7 @@ def request_trip(
             ),
             "status": trip.status.value,
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -645,7 +799,9 @@ def dispatch_trip(
     The vehicle is locked to prevent concurrent dispatches.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -765,6 +921,7 @@ def dispatch_trip(
                 else None
             ),
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -794,12 +951,11 @@ def update_trip_status(
 
     PATIENT_ON_BOARD
         -> EN_ROUTE_TO_DESTINATION
-
-    COMPLETED and CANCELLED are handled by dedicated
-    functions.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -809,15 +965,12 @@ def update_trip_status(
         TripStatus.DISPATCHED: (
             TripStatus.EN_ROUTE_TO_PICKUP,
         ),
-
         TripStatus.EN_ROUTE_TO_PICKUP: (
             TripStatus.AT_PICKUP,
         ),
-
         TripStatus.AT_PICKUP: (
             TripStatus.PATIENT_ON_BOARD,
         ),
-
         TripStatus.PATIENT_ON_BOARD: (
             TripStatus.EN_ROUTE_TO_DESTINATION,
         ),
@@ -835,10 +988,6 @@ def update_trip_status(
             f"to '{new_status.value}'"
         )
 
-    old_status = trip.status.value
-
-    # Patient must exist before moving to
-    # PATIENT_ON_BOARD.
     if new_status == TripStatus.PATIENT_ON_BOARD:
         if trip.patient_id is None:
             raise ValidationError(
@@ -850,6 +999,8 @@ def update_trip_status(
             patient_id=trip.patient_id,
             clinic_id=trip.clinic_id,
         )
+
+    old_status = trip.status.value
 
     trip.status = new_status
 
@@ -871,6 +1022,7 @@ def update_trip_status(
         new_value={
             "status": new_status.value,
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -893,7 +1045,9 @@ def link_patient(
     after completion/cancellation.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -947,6 +1101,7 @@ def link_patient(
         new_value={
             "patient_id": patient.id,
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -971,7 +1126,9 @@ def complete_trip(
     Billing is intentionally NOT created here.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -988,8 +1145,6 @@ def complete_trip(
             "without a patient"
         )
 
-    # Validate that the patient still belongs to
-    # this clinic before completing the trip.
     _get_patient(
         patient_id=trip.patient_id,
         clinic_id=trip.clinic_id,
@@ -1041,6 +1196,7 @@ def complete_trip(
                 else None
             ),
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -1063,7 +1219,9 @@ def link_invoice(
     billing service.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -1129,6 +1287,7 @@ def link_invoice(
         new_value={
             "invoice_id": invoice.id,
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
@@ -1153,7 +1312,9 @@ def cancel_trip(
     it is released back to AVAILABLE.
     """
 
-    trip = get_trip(trip_id)
+    trip = get_trip(
+        trip_id,
+    )
 
     ensure_clinic_active(
         trip.clinic_id,
@@ -1214,6 +1375,7 @@ def cancel_trip(
             "status": trip.status.value,
             "reason": trip.cancellation_reason,
         },
+        user_id=_audit_user_id(),
     )
 
     return trip
