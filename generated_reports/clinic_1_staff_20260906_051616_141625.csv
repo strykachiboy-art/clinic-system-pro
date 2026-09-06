@@ -1,0 +1,2 @@
+id,clinic_id,user_id,first_name,last_name,specialty,phone,email,status,hired_at,created_at
+1,1,1,Test,Staff,,,,active,,2026-09-06T05:16:16.126628

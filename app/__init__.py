@@ -24,6 +24,7 @@ def create_app(config_name=None):
 
 
 def register_blueprints(app):
+    from app.core.web_routes import web_bp
     from app.core.audit.routes.audit_route import audit_bp
     from app.core.auth.user.routes.user_route import auth_bp
     from app.modules.ai.routes.ai_route import ai_bp
@@ -43,6 +44,7 @@ def register_blueprints(app):
     from app.modules.staff.routes.staff_route import staff_bp
     from app.modules.ward.routes.ward_route import ward_bp
 
+    app.register_blueprint(web_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(vehicle_bp)
     app.register_blueprint(trip_bp)

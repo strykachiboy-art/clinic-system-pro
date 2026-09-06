@@ -1,0 +1,2 @@
+clinic_id,patients,staff,appointments,invoices,lab_orders,drugs,wards,total_billed,total_paid,outstanding_balance
+1,2,1,0,0,0,0,0,0,0,0

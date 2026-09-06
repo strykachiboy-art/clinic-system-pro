@@ -1,0 +1,10 @@
+<header class="flex items-center justify-between border-b border-[#dce5dc] bg-white px-5 py-4 lg:px-8">
+  <div class="flex items-center gap-3">
+    <button type="button" data-sidebar-toggle aria-expanded="false" class="rounded-md border border-[#dce5dc] px-3 py-2 text-sm lg:hidden" aria-label="Open navigation">Menu</button>
+    <div>
+      <p class="eyebrow">Clinic operations</p>
+      <h1 class="text-xl font-semibold">{{ page_title }}</h1>
+    </div>
+  </div>
+  <a href="{{ url_for('web.login') }}" class="text-sm font-semibold text-[#176b5b]">Sign in</a>
+</header>

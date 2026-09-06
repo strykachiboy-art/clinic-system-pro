@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title or "Clinic System" }} | Clinic System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='frontend/app.css') }}">
+</head>
+<body class="page-surface">
+  {% block body %}{% endblock %}
+  <script type="module" src="{{ url_for('static', filename='frontend/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

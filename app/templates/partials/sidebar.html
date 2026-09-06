@@ -1,0 +1,12 @@
+<aside data-sidebar class="fixed inset-y-0 left-0 z-30 w-64 -translate-x-full border-r border-[#dce5dc] bg-[#16302b] p-5 text-white transition-transform lg:static lg:translate-x-0">
+  <div class="mb-10 flex items-center justify-between">
+    <a href="{{ url_for('web.dashboard') }}" class="text-lg font-semibold tracking-tight">Clinic System</a>
+    <span class="rounded-full bg-[#d8f06b] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#16302b]">Care</span>
+  </div>
+  <nav aria-label="Primary navigation" class="space-y-1">
+    <a href="{{ url_for('web.dashboard') }}" class="block rounded-md px-3 py-2 text-sm text-[#dbe8de] hover:bg-white/10">Dashboard</a>
+    {% for module in navigation_modules %}
+      <a href="{{ url_for('web.module_index', module=module.slug) }}" class="block rounded-md px-3 py-2 text-sm capitalize text-[#dbe8de] hover:bg-white/10">{{ module.label }}</a>
+    {% endfor %}
+  </nav>
+</aside>

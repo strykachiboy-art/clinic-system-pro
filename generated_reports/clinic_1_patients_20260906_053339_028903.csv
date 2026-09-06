@@ -1,0 +1,3 @@
+id,clinic_id,first_name,last_name,email,phone,created_at
+1,1,Alice,Doe,,,2026-09-06T05:33:39.009609
+2,1,Bob,Doe,,,2026-09-06T05:33:39.009609
