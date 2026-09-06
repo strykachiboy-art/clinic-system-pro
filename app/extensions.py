@@ -9,6 +9,9 @@ from celery import Celery
 from celery.schedules import crontab
 import redis
 
+from app.core.auth.user.services.token_service import is_token_revoked
+
+
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
@@ -17,7 +20,12 @@ limiter = Limiter(key_func=get_remote_address)
 socketio = SocketIO()
 celery = Celery(__name__)
 
-redis_client = None 
+redis_client = None
+
+
+@jwt.token_in_blocklist_loader
+def check_if_token_revoked(jwt_header, jwt_payload):
+    return is_token_revoked(jwt_payload)
 
 
 def init_extensions(app):
@@ -28,9 +36,17 @@ def init_extensions(app):
     jwt.init_app(app)
     cors.init_app(app)
     limiter.init_app(app)
-    socketio.init_app(app, cors_allowed_origins="*", message_queue=app.config.get("REDIS_URL"))
 
-    redis_client = redis.StrictRedis.from_url(app.config["REDIS_URL"], decode_responses=True)
+    socketio.init_app(
+        app,
+        cors_allowed_origins="*",
+        message_queue=app.config.get("REDIS_URL"),
+    )
+
+    redis_client = redis.StrictRedis.from_url(
+        app.config["REDIS_URL"],
+        decode_responses=True,
+    )
 
     celery.conf.update(
         broker_url=app.config.get("REDIS_URL"),

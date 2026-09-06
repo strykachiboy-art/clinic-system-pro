@@ -1,6 +1,16 @@
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError as PydanticValidationError
 
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    get_jwt_identity,
+    jwt_required,
+)
+
+from app import db
+from app.core.auth.user.models.user_model import User
 from app.core.auth.user.schema.user_schema import (
     GoogleAuthCallbackSchema,
     UserLoginSchema,
@@ -11,16 +21,16 @@ from app.core.auth.user.services.google_auth_service import (
     get_google_authorization_url,
     validate_google_oauth_state,
 )
+from app.core.auth.user.services.token_service import (
+    revoke_current_token,
+    revoke_token,
+)
 from app.core.auth.user.services.user_service import (
     authenticate_user,
     register_user,
 )
 from app.core.enums.role_enums import Role
-from app.core.exceptions import (
-    ConflictError,
-    DomainError,
-    ValidationError,
-)
+from app.core.exceptions import DomainError
 
 
 auth_bp = Blueprint(
@@ -222,5 +232,174 @@ def google_callback():
         {
             "success": True,
             "data": result,
+        }
+    ), 200
+
+
+@auth_bp.post("/refresh")
+@jwt_required(refresh=True)
+def refresh():
+    """
+    Rotate the refresh token and issue a new access token.
+
+    Flow:
+
+        refresh_A
+            ↓
+        validate JWT
+            ↓
+        check blocklist
+            ↓
+        load user
+            ↓
+        verify active
+            ↓
+        revoke refresh_A
+            ↓
+        issue access_B
+            ↓
+        issue refresh_B
+    """
+    user_id = get_jwt_identity()
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid authentication identity",
+            }
+        ), 401
+
+    user = User.query.get(user_id)
+
+    if user is None:
+        return jsonify(
+            {
+                "success": False,
+                "error": "User not found",
+            }
+        ), 401
+
+    if not user.is_active:
+        return jsonify(
+            {
+                "success": False,
+                "error": "This account has been deactivated",
+            }
+        ), 401
+
+    try:
+        # Revoke the refresh token that was just used.
+        revoke_current_token()
+
+        access_token = create_access_token(
+            identity=str(user.id),
+            additional_claims={
+                "role": user.role.value,
+            },
+        )
+
+        refresh_token = create_refresh_token(
+            identity=str(user.id),
+        )
+
+    except DomainError as exc:
+        db.session.rollback()
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
+
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "user_id": user.id,
+                "role": user.role.value,
+            },
+        }
+    ), 200
+
+
+@auth_bp.post("/logout")
+@jwt_required()
+def logout():
+    """
+    Revoke both the current access token and the supplied
+    refresh token.
+    """
+    payload = request.get_json(silent=True) or {}
+    refresh_token = payload.get("refresh_token")
+
+    if not refresh_token:
+        return jsonify(
+            {
+                "success": False,
+                "error": "Refresh token is required",
+            }
+        ), 400
+
+    try:
+        refresh_payload = decode_token(
+            refresh_token,
+            allow_expired=False,
+        )
+
+        if refresh_payload.get("type") != "refresh":
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid refresh token",
+                }
+            ), 401
+
+        current_user_id = get_jwt_identity()
+        refresh_user_id = refresh_payload.get(
+            "sub"
+        )
+
+        if str(current_user_id) != str(
+            refresh_user_id
+        ):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Refresh token does not belong to the current user",
+                }
+            ), 401
+
+        # Revoke the refresh token first.
+        revoke_token(refresh_payload)
+
+        # Revoke the access token used for this request.
+        revoke_current_token()
+
+    except DomainError as exc:
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
+
+    except Exception:
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid refresh token",
+            }
+        ), 401
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Successfully logged out",
         }
     ), 200
