@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func
+
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
@@ -23,6 +25,7 @@ from app.core.utils.decorators import transactional
 from app.modules.clinic.services.clinic_service import ensure_clinic_active
 from app.modules.patient.models.patient_model import Patient
 from app.modules.staff.models.staff_model import Staff
+
 from app.modules.ward.models.ward_model import (
     Admission,
     Bed,
@@ -32,11 +35,12 @@ from app.modules.ward.models.ward_model import (
 )
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
+def _utcnow():
+    """
+    Project-wide UTC timestamp helper.
 
-def _utcnow() -> datetime:
+    Ward models use timezone-aware UTC timestamps.
+    """
     return datetime.now(timezone.utc)
 
 
@@ -49,40 +53,59 @@ def _normalize_text(value: str | None) -> str | None:
     return value or None
 
 
-def _validate_positive_id(value: int, field_name: str) -> None:
+def _validate_positive_id(value: int, field_name: str) -> int:
+    if value is None:
+        raise ValidationError(f"{field_name} is required")
+
     if not isinstance(value, int) or value <= 0:
         raise ValidationError(
             f"{field_name} must be a positive integer"
         )
 
-
-def _validate_ward_type(ward_type: WardType) -> None:
-    if not isinstance(ward_type, WardType):
-        try:
-            WardType(ward_type)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(
-                f"Invalid ward type '{ward_type}'"
-            ) from exc
+    return value
 
 
-def _validate_ward_capacity_value(capacity: int) -> None:
+def _validate_ward_type(ward_type):
+    if ward_type is None:
+        return WardType.GENERAL
+
+    if isinstance(ward_type, WardType):
+        return ward_type
+
+    try:
+        return WardType(ward_type)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            f"Invalid ward type: {ward_type}"
+        )
+
+
+def _validate_ward_capacity_value(capacity: int) -> int:
+    if capacity is None:
+        raise ValidationError("capacity is required")
+
     if not isinstance(capacity, int):
-        raise ValidationError("Ward capacity must be an integer")
+        raise ValidationError("capacity must be an integer")
 
     if capacity < 0:
-        raise ValidationError("Ward capacity cannot be negative")
+        raise ValidationError(
+            "capacity cannot be negative"
+        )
+
+    return capacity
 
 
 def _validate_bed_number(bed_number: str) -> str:
     bed_number = _normalize_text(bed_number)
 
     if not bed_number:
-        raise ValidationError("Bed number is required")
+        raise ValidationError(
+            "bed_number is required"
+        )
 
     if len(bed_number) > 30:
         raise ValidationError(
-            "Bed number cannot exceed 30 characters"
+            "bed_number cannot exceed 30 characters"
         )
 
     return bed_number
@@ -93,20 +116,51 @@ def _validate_reason(reason: str | None) -> str | None:
 
     if reason and len(reason) > 255:
         raise ValidationError(
-            "Reason cannot exceed 255 characters"
+            "reason cannot exceed 255 characters"
         )
 
     return reason
 
 
+def _validate_clinic_id(clinic_id: int) -> int:
+    return _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+
+def _validate_actor_id(actor_user_id: int) -> int:
+    return _validate_positive_id(
+        actor_user_id,
+        "actor_user_id",
+    )
+
+
+# ============================================================================
+# OWNERSHIP / LOOKUP HELPERS
+# ============================================================================
+
+
 def _get_ward(
     ward_id: int,
-    *,
+    clinic_id: int | None = None,
     lock: bool = False,
 ) -> Ward:
-    _validate_positive_id(ward_id, "ward_id")
+    ward_id = _validate_positive_id(
+        ward_id,
+        "ward_id",
+    )
 
-    query = Ward.query.filter_by(id=ward_id)
+    query = Ward.query.filter(
+        Ward.id == ward_id
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
 
     if lock:
         query = query.with_for_update()
@@ -123,12 +177,26 @@ def _get_ward(
 
 def _get_bed(
     bed_id: int,
-    *,
+    clinic_id: int | None = None,
     lock: bool = False,
 ) -> Bed:
-    _validate_positive_id(bed_id, "bed_id")
+    bed_id = _validate_positive_id(
+        bed_id,
+        "bed_id",
+    )
 
-    query = Bed.query.filter_by(id=bed_id)
+    query = (
+        Bed.query
+        .join(Ward, Bed.ward_id == Ward.id)
+        .filter(Bed.id == bed_id)
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
 
     if lock:
         query = query.with_for_update()
@@ -145,12 +213,24 @@ def _get_bed(
 
 def _get_patient(
     patient_id: int,
-    *,
+    clinic_id: int | None = None,
     lock: bool = False,
 ) -> Patient:
-    _validate_positive_id(patient_id, "patient_id")
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
 
-    query = Patient.query.filter_by(id=patient_id)
+    query = Patient.query.filter(
+        Patient.id == patient_id
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Patient.clinic_id == clinic_id
+        )
 
     if lock:
         query = query.with_for_update()
@@ -165,10 +245,27 @@ def _get_patient(
     return patient
 
 
-def _get_staff(staff_id: int) -> Staff:
-    _validate_positive_id(staff_id, "staff_id")
+def _get_staff(
+    staff_id: int,
+    clinic_id: int | None = None,
+) -> Staff:
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
 
-    staff = Staff.query.filter_by(id=staff_id).first()
+    query = Staff.query.filter(
+        Staff.id == staff_id
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Staff.clinic_id == clinic_id
+        )
+
+    staff = query.first()
 
     if staff is None:
         raise NotFoundError(
@@ -178,41 +275,31 @@ def _get_staff(staff_id: int) -> Staff:
     return staff
 
 
-def _get_admission(
-    admission_id: int,
-    *,
-    lock: bool = False,
-) -> Admission:
-    _validate_positive_id(admission_id, "admission_id")
-
-    query = Admission.query.filter_by(id=admission_id)
-
-    if lock:
-        query = query.with_for_update()
-
-    admission = query.first()
-
-    if admission is None:
-        raise NotFoundError(
-            f"Admission {admission_id} not found"
-        )
-
-    return admission
-
-
 def _get_reservation(
     reservation_id: int,
-    *,
+    clinic_id: int | None = None,
     lock: bool = False,
 ) -> BedReservation:
-    _validate_positive_id(
+    reservation_id = _validate_positive_id(
         reservation_id,
         "reservation_id",
     )
 
-    query = BedReservation.query.filter_by(
-        id=reservation_id
+    query = (
+        BedReservation.query
+        .join(Bed, BedReservation.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
+        .filter(
+            BedReservation.id == reservation_id
+        )
     )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
 
     if lock:
         query = query.with_for_update()
@@ -227,172 +314,329 @@ def _get_reservation(
     return reservation
 
 
+def _get_admission(
+    admission_id: int,
+    clinic_id: int | None = None,
+    lock: bool = False,
+) -> Admission:
+    admission_id = _validate_positive_id(
+        admission_id,
+        "admission_id",
+    )
+
+    query = (
+        Admission.query
+        .join(Bed, Admission.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
+        .filter(
+            Admission.id == admission_id
+        )
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
+
+    if lock:
+        query = query.with_for_update()
+
+    admission = query.first()
+
+    if admission is None:
+        raise NotFoundError(
+            f"Admission {admission_id} not found"
+        )
+
+    return admission
+
+
+# ============================================================================
+# VALIDATION HELPERS
+# ============================================================================
+
+
 def _validate_staff_for_clinic(
-    *,
     staff_id: int,
     clinic_id: int,
 ) -> Staff:
-    staff = _get_staff(staff_id)
+    staff = _get_staff(
+        staff_id,
+        clinic_id=clinic_id,
+    )
 
     if staff.clinic_id != clinic_id:
-        raise ValidationError(
+        raise ConflictError(
             f"Staff {staff_id} does not belong to clinic {clinic_id}"
         )
 
     if staff.status != StaffStatus.ACTIVE:
         raise ConflictError(
-            f"Staff {staff_id} is inactive"
+            f"Staff {staff_id} is not active"
         )
 
     return staff
 
 
 def _validate_patient_for_clinic(
-    *,
     patient: Patient,
     clinic_id: int,
-) -> None:
+) -> Patient:
     if patient.clinic_id != clinic_id:
-        raise ValidationError(
-            f"Patient {patient.id} does not belong to clinic {clinic_id}"
+        raise ConflictError(
+            f"Patient {patient.id} does not belong "
+            f"to clinic {clinic_id}"
         )
+
+    return patient
 
 
 def _validate_bed_for_clinic(
-    *,
     bed: Bed,
     clinic_id: int,
-) -> Ward:
-    ward = bed.ward
-
-    if ward is None:
-        raise ValidationError(
-            f"Bed {bed.id} is not associated with a ward"
+) -> Bed:
+    if bed.ward is None:
+        raise ConflictError(
+            f"Bed {bed.id} is not assigned to a ward"
         )
 
-    if ward.clinic_id != clinic_id:
-        raise ValidationError(
-            f"Bed {bed.id} does not belong to clinic {clinic_id}"
+    if bed.ward.clinic_id != clinic_id:
+        raise ConflictError(
+            f"Bed {bed.id} does not belong "
+            f"to clinic {clinic_id}"
         )
 
-    return ward
+    return bed
 
 
-def _get_configured_bed_count(ward_id: int) -> int:
+def _get_configured_bed_count(
+    ward_id: int,
+) -> int:
     return (
-        Bed.query
-        .filter_by(ward_id=ward_id)
-        .count()
+        db.session.query(
+            func.count(Bed.id)
+        )
+        .filter(
+            Bed.ward_id == ward_id
+        )
+        .scalar()
+        or 0
     )
 
 
 def _validate_ward_capacity(
-    *,
     ward: Ward,
-    capacity: int,
 ) -> None:
-    _validate_ward_capacity_value(capacity)
-
-    configured_beds = _get_configured_bed_count(
+    bed_count = _get_configured_bed_count(
         ward.id
     )
 
-    if capacity < configured_beds:
-        raise ValidationError(
-            f"Ward capacity cannot be less than the "
-            f"configured bed count ({configured_beds})"
+    if bed_count > ward.capacity:
+        raise ConflictError(
+            f"Ward {ward.id} already has "
+            f"{bed_count} beds configured against "
+            f"a capacity of {ward.capacity}"
         )
 
 
 def _validate_new_capacity(
-    *,
     ward: Ward,
     new_capacity: int,
 ) -> None:
-    _validate_ward_capacity(
-        ward=ward,
-        capacity=new_capacity,
+    bed_count = _get_configured_bed_count(
+        ward.id
     )
+
+    if new_capacity < bed_count:
+        raise ConflictError(
+            f"Capacity cannot be reduced below "
+            f"the current configured bed count of {bed_count}"
+        )
 
 
 def _get_admission_clinic_id(
     admission: Admission,
 ) -> int:
     if admission.bed is None:
-        raise ValidationError(
-            f"Admission {admission.id} has no associated bed"
+        raise ConflictError(
+            f"Admission {admission.id} has no valid bed"
         )
 
     if admission.bed.ward is None:
-        raise ValidationError(
-            f"Admission {admission.id} has no associated ward"
+        raise ConflictError(
+            f"Admission {admission.id} has no valid ward"
         )
 
     return admission.bed.ward.clinic_id
 
 
-def _assert_admission_active(
+# ============================================================================
+# STATUS HELPERS
+# ============================================================================
+
+
+def _ensure_ward_active(
+    clinic_id: int,
+) -> None:
+    ensure_clinic_active(clinic_id)
+
+
+def _ensure_admission_active(
     admission: Admission,
 ) -> None:
     if admission.status != AdmissionStatus.ADMITTED:
         raise ConflictError(
-            f"Admission {admission.id} is "
-            f"'{admission.status.value}', not active"
+            f"Admission {admission.id} is currently "
+            f"'{admission.status.value}'"
         )
 
 
-def _assert_reservation_pending(
+def _ensure_reservation_pending(
     reservation: BedReservation,
 ) -> None:
     if reservation.status != ReservationStatus.PENDING:
         raise ConflictError(
-            f"Reservation {reservation.id} is "
-            f"'{reservation.status.value}', not pending"
+            f"Reservation {reservation.id} is currently "
+            f"'{reservation.status.value}'"
         )
 
 
-def _get_active_admission_for_patient_locked(
+def _ensure_reservation_not_expired(
+    reservation: BedReservation,
+) -> None:
+    if (
+        reservation.expires_at is not None
+        and reservation.expires_at <= _utcnow()
+    ):
+        raise ConflictError(
+            f"Reservation {reservation.id} has expired"
+        )
+
+
+def _ensure_bed_available(
+    bed: Bed,
+) -> None:
+    if bed.status != BedStatus.AVAILABLE:
+        raise ConflictError(
+            f"Bed {bed.id} is currently "
+            f"'{bed.status.value}' and is not available"
+        )
+
+
+def _ensure_bed_occupied(
+    bed: Bed,
+) -> None:
+    if bed.status != BedStatus.OCCUPIED:
+        raise ConflictError(
+            f"Bed {bed.id} is currently "
+            f"'{bed.status.value}' and is not occupied"
+        )
+
+
+# ============================================================================
+# ACTIVE RECORD HELPERS
+# ============================================================================
+
+
+def _get_active_admission_for_patient(
     patient_id: int,
+    clinic_id: int | None = None,
+    lock: bool = False,
 ) -> Admission | None:
-    return (
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
+
+    query = (
         Admission.query
+        .join(Bed, Admission.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
         .filter(
             Admission.patient_id == patient_id,
             Admission.status == AdmissionStatus.ADMITTED,
         )
-        .with_for_update()
-        .first()
     )
 
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
 
-def _get_active_reservation_for_patient_locked(
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
+
+    if lock:
+        query = query.with_for_update()
+
+    return query.first()
+
+
+def _get_active_reservation_for_patient(
     patient_id: int,
+    clinic_id: int | None = None,
+    lock: bool = False,
 ) -> BedReservation | None:
-    return (
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
+
+    query = (
         BedReservation.query
+        .join(Bed, BedReservation.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
         .filter(
             BedReservation.patient_id == patient_id,
             BedReservation.status == ReservationStatus.PENDING,
         )
-        .with_for_update()
-        .first()
     )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
+
+    if lock:
+        query = query.with_for_update()
+
+    return query.first()
 
 
 def _get_active_reservation_for_bed(
     bed_id: int,
+    clinic_id: int | None = None,
+    lock: bool = False,
 ) -> BedReservation | None:
-    return (
+    bed_id = _validate_positive_id(
+        bed_id,
+        "bed_id",
+    )
+
+    query = (
         BedReservation.query
+        .join(Bed, BedReservation.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
         .filter(
             BedReservation.bed_id == bed_id,
             BedReservation.status == ReservationStatus.PENDING,
         )
-        .order_by(
-            BedReservation.reserved_at.desc()
-        )
-        .first()
     )
+
+    if clinic_id is not None:
+        clinic_id = _validate_clinic_id(clinic_id)
+
+        query = query.filter(
+            Ward.clinic_id == clinic_id
+        )
+
+    if lock:
+        query = query.with_for_update()
+
+    return query.first()
 
 
 def _get_latest_transfer(
@@ -400,7 +644,9 @@ def _get_latest_transfer(
 ) -> WardTransfer | None:
     return (
         WardTransfer.query
-        .filter_by(admission_id=admission_id)
+        .filter(
+            WardTransfer.admission_id == admission_id
+        )
         .order_by(
             WardTransfer.transferred_at.desc(),
             WardTransfer.id.desc(),
@@ -410,58 +656,62 @@ def _get_latest_transfer(
 
 
 # ============================================================================
-# Ward management
+# WARD MANAGEMENT
 # ============================================================================
 
-def get_ward(ward_id: int) -> Ward:
-    return _get_ward(ward_id)
+
+def get_ward(
+    ward_id: int,
+    clinic_id: int | None = None,
+) -> Ward:
+    return _get_ward(
+        ward_id,
+        clinic_id=clinic_id,
+    )
 
 
 def list_wards(
     clinic_id: int,
-    ward_type: WardType | None = None,
-) -> list[Ward]:
-    _validate_positive_id(
-        clinic_id,
-        "clinic_id",
-    )
+    ward_type: WardType | str | None = None,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
 
-    ensure_clinic_active(clinic_id)
+    _ensure_ward_active(clinic_id)
 
-    query = Ward.query.filter_by(
-        clinic_id=clinic_id
+    query = Ward.query.filter(
+        Ward.clinic_id == clinic_id
     )
 
     if ward_type is not None:
-        _validate_ward_type(ward_type)
-
-        if not isinstance(ward_type, WardType):
-            ward_type = WardType(ward_type)
-
-        query = query.filter_by(
-            ward_type=ward_type
+        ward_type = _validate_ward_type(
+            ward_type
         )
 
-    return (
-        query
-        .order_by(Ward.name.asc())
-        .all()
-    )
+        query = query.filter(
+            Ward.ward_type == ward_type
+        )
+
+    return query.order_by(
+        Ward.name.asc()
+    ).all()
 
 
 @transactional
 def create_ward(
     clinic_id: int,
     name: str,
-    ward_type: WardType = WardType.GENERAL,
-    capacity: int = 0,
-) -> Ward:
-    _validate_positive_id(
-        clinic_id,
-        "clinic_id",
-    )
+    ward_type: WardType,
+    capacity: int,
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
 
-    ensure_clinic_active(clinic_id)
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
+
+    _ensure_ward_active(clinic_id)
 
     name = _normalize_text(name)
 
@@ -475,20 +725,18 @@ def create_ward(
             "Ward name cannot exceed 150 characters"
         )
 
-    _validate_ward_type(ward_type)
-    _validate_ward_capacity_value(capacity)
-
-    if not isinstance(ward_type, WardType):
-        ward_type = WardType(ward_type)
-
-    existing = (
-        Ward.query
-        .filter_by(
-            clinic_id=clinic_id,
-            name=name,
-        )
-        .first()
+    ward_type = _validate_ward_type(
+        ward_type
     )
+
+    capacity = _validate_ward_capacity_value(
+        capacity
+    )
+
+    existing = Ward.query.filter(
+        Ward.clinic_id == clinic_id,
+        Ward.name == name,
+    ).first()
 
     if existing is not None:
         raise ConflictError(
@@ -507,18 +755,14 @@ def create_ward(
     db.session.flush()
 
     create_audit_log(
+        user_id=actor_user_id,
         action=AuditAction.CREATE,
-        entity_type="Ward",
+        entity_type="ward",
         entity_id=ward.id,
         description=(
-            f"Ward '{ward.name}' created"
+            f"Created ward '{ward.name}' "
+            f"in clinic {clinic_id}"
         ),
-        new_value={
-            "clinic_id": clinic_id,
-            "name": ward.name,
-            "ward_type": ward.ward_type.value,
-            "capacity": ward.capacity,
-        },
     )
 
     return ward
@@ -527,38 +771,37 @@ def create_ward(
 @transactional
 def update_ward(
     ward_id: int,
+    clinic_id: int,
+    actor_user_id: int | None = None,
     **fields,
-) -> Ward:
+):
+    clinic_id = _validate_clinic_id(clinic_id)
+
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
+
+    _ensure_ward_active(clinic_id)
+
     ward = _get_ward(
         ward_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    allowed_fields = {
-        "name",
-        "ward_type",
-        "capacity",
+    old_value = {
+        "name": ward.name,
+        "ward_type": ward.ward_type.value,
+        "capacity": ward.capacity,
     }
 
-    unknown = set(fields) - allowed_fields
-
-    if unknown:
-        raise ValidationError(
-            "Unknown ward field(s): "
-            + ", ".join(sorted(unknown))
-        )
-
-    old_value = {}
-    new_value = {}
-
     if "name" in fields:
-        name = _normalize_text(
-            fields["name"]
-        )
+        name = _normalize_text(fields["name"])
 
         if not name:
             raise ValidationError(
-                "Ward name is required"
+                "Ward name cannot be empty"
             )
 
         if len(name) > 150:
@@ -566,92 +809,85 @@ def update_ward(
                 "Ward name cannot exceed 150 characters"
             )
 
-        if name != ward.name:
-            duplicate = (
-                Ward.query
-                .filter(
-                    Ward.clinic_id == ward.clinic_id,
-                    Ward.name == name,
-                    Ward.id != ward.id,
-                )
-                .first()
+        duplicate = (
+            Ward.query
+            .filter(
+                Ward.clinic_id == clinic_id,
+                Ward.name == name,
+                Ward.id != ward.id,
+            )
+            .first()
+        )
+
+        if duplicate is not None:
+            raise ConflictError(
+                f"Ward '{name}' already exists "
+                f"in clinic {clinic_id}"
             )
 
-            if duplicate is not None:
-                raise ConflictError(
-                    f"Ward '{name}' already exists "
-                    f"in clinic {ward.clinic_id}"
-                )
-
-            old_value["name"] = ward.name
-            new_value["name"] = name
-
-            ward.name = name
+        ward.name = name
 
     if "ward_type" in fields:
-        ward_type = fields["ward_type"]
-
-        _validate_ward_type(ward_type)
-
-        if not isinstance(ward_type, WardType):
-            ward_type = WardType(ward_type)
-
-        if ward_type != ward.ward_type:
-            old_value["ward_type"] = (
-                ward.ward_type.value
-            )
-            new_value["ward_type"] = (
-                ward_type.value
-            )
-
-            ward.ward_type = ward_type
+        ward.ward_type = _validate_ward_type(
+            fields["ward_type"]
+        )
 
     if "capacity" in fields:
-        capacity = fields["capacity"]
+        new_capacity = _validate_ward_capacity_value(
+            fields["capacity"]
+        )
 
         _validate_new_capacity(
-            ward=ward,
-            new_capacity=capacity,
+            ward,
+            new_capacity,
         )
 
-        if capacity != ward.capacity:
-            old_value["capacity"] = ward.capacity
-            new_value["capacity"] = capacity
+        ward.capacity = new_capacity
 
-            ward.capacity = capacity
+    db.session.flush()
 
-    if new_value:
-        create_audit_log(
-            action=AuditAction.UPDATE,
-            entity_type="Ward",
-            entity_id=ward.id,
-            description=(
-                f"Ward '{ward.name}' updated"
-            ),
-            old_value=old_value,
-            new_value=new_value,
-        )
+    new_value = {
+        "name": ward.name,
+        "ward_type": ward.ward_type.value,
+        "capacity": ward.capacity,
+    }
+
+    create_audit_log(
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="ward",
+        entity_id=ward.id,
+        description=f"Updated ward {ward.id}",
+        old_value=old_value,
+        new_value=new_value,
+    )
 
     return ward
 
 
 def get_ward_occupancy(
     ward_id: int,
-) -> dict:
-    ward = _get_ward(ward_id)
+    clinic_id: int,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
+
+    ward = _get_ward(
+        ward_id,
+        clinic_id=clinic_id,
+    )
 
     total_beds = len(ward.beds)
-
-    available = sum(
-        1
-        for bed in ward.beds
-        if bed.status == BedStatus.AVAILABLE
-    )
 
     occupied = sum(
         1
         for bed in ward.beds
         if bed.status == BedStatus.OCCUPIED
+    )
+
+    available = sum(
+        1
+        for bed in ward.beds
+        if bed.status == BedStatus.AVAILABLE
     )
 
     reserved = sum(
@@ -668,72 +904,87 @@ def get_ward_occupancy(
 
     return {
         "ward_id": ward.id,
+        "clinic_id": ward.clinic_id,
+        "ward_name": ward.name,
         "capacity": ward.capacity,
         "total_beds": total_beds,
-        "available": available,
         "occupied": occupied,
+        "available": available,
         "reserved": reserved,
         "maintenance": maintenance,
-        "occupancy_rate": (
-            round(
-                (occupied / total_beds) * 100,
-                2,
-            )
-            if total_beds
-            else 0
-        ),
     }
 
 
 # ============================================================================
-# Bed management
+# BED MANAGEMENT
 # ============================================================================
 
-def get_bed(bed_id: int) -> Bed:
-    return _get_bed(bed_id)
+
+def get_bed(
+    bed_id: int,
+    clinic_id: int | None = None,
+) -> Bed:
+    return _get_bed(
+        bed_id,
+        clinic_id=clinic_id,
+    )
 
 
 def list_beds(
     ward_id: int,
-    status: BedStatus | None = None,
-) -> list[Bed]:
-    ward = _get_ward(ward_id)
+    clinic_id: int,
+    status: BedStatus | str | None = None,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
 
-    query = Bed.query.filter_by(
-        ward_id=ward.id
+    ward = _get_ward(
+        ward_id,
+        clinic_id=clinic_id,
+    )
+
+    query = Bed.query.filter(
+        Bed.ward_id == ward.id
     )
 
     if status is not None:
-        if not isinstance(status, BedStatus):
-            try:
+        try:
+            if not isinstance(status, BedStatus):
                 status = BedStatus(status)
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(
-                    f"Invalid bed status '{status}'"
-                ) from exc
+        except (TypeError, ValueError):
+            raise ValidationError(
+                f"Invalid bed status: {status}"
+            )
 
-        query = query.filter_by(
-            status=status
+        query = query.filter(
+            Bed.status == status
         )
 
-    return (
-        query
-        .order_by(Bed.bed_number.asc())
-        .all()
-    )
+    return query.order_by(
+        Bed.bed_number.asc()
+    ).all()
 
 
 @transactional
 def add_bed(
     ward_id: int,
     bed_number: str,
-) -> Bed:
+    clinic_id: int,
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
+
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
+
     ward = _get_ward(
         ward_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    ensure_clinic_active(
+    _ensure_ward_active(
         ward.clinic_id
     )
 
@@ -741,29 +992,25 @@ def add_bed(
         bed_number
     )
 
-    existing = (
-        Bed.query
-        .filter_by(
-            ward_id=ward.id,
-            bed_number=bed_number,
-        )
-        .first()
+    current_count = _get_configured_bed_count(
+        ward.id
     )
+
+    if current_count >= ward.capacity:
+        raise ConflictError(
+            f"Ward {ward.id} has reached "
+            f"its configured capacity of {ward.capacity}"
+        )
+
+    existing = Bed.query.filter(
+        Bed.ward_id == ward.id,
+        Bed.bed_number == bed_number,
+    ).first()
 
     if existing is not None:
         raise ConflictError(
             f"Bed '{bed_number}' already exists "
             f"in ward {ward.id}"
-        )
-
-    configured_beds = _get_configured_bed_count(
-        ward.id
-    )
-
-    if configured_beds >= ward.capacity:
-        raise ConflictError(
-            f"Ward {ward.id} has reached its "
-            f"configured capacity of {ward.capacity}"
         )
 
     bed = Bed(
@@ -776,18 +1023,14 @@ def add_bed(
     db.session.flush()
 
     create_audit_log(
+        user_id=actor_user_id,
         action=AuditAction.CREATE,
-        entity_type="Bed",
+        entity_type="bed",
         entity_id=bed.id,
         description=(
-            f"Bed '{bed.bed_number}' added "
+            f"Added bed '{bed.bed_number}' "
             f"to ward {ward.id}"
         ),
-        new_value={
-            "ward_id": ward.id,
-            "bed_number": bed.bed_number,
-            "status": bed.status.value,
-        },
     )
 
     return bed
@@ -797,21 +1040,29 @@ def add_bed(
 def set_bed_maintenance(
     bed_id: int,
     under_maintenance: bool,
-) -> Bed:
+    clinic_id: int,
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(clinic_id)
+
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
+
     bed = _get_bed(
         bed_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    ward = bed.ward
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
+    )
 
-    if ward is None:
-        raise ValidationError(
-            f"Bed {bed.id} has no associated ward"
-        )
-
-    ensure_clinic_active(
-        ward.clinic_id
+    _ensure_ward_active(
+        clinic_id
     )
 
     if not isinstance(
@@ -819,55 +1070,47 @@ def set_bed_maintenance(
         bool,
     ):
         raise ValidationError(
-            "under_maintenance must be a boolean"
+            "under_maintenance must be boolean"
         )
 
     old_status = bed.status
 
     if under_maintenance:
-        if bed.status == BedStatus.MAINTENANCE:
-            return bed
-
-        if bed.status == BedStatus.OCCUPIED:
+        if bed.status in (
+            BedStatus.OCCUPIED,
+            BedStatus.RESERVED,
+        ):
             raise ConflictError(
-                f"Bed {bed.id} is occupied and "
-                f"cannot be placed into maintenance"
-            )
-
-        if bed.status == BedStatus.RESERVED:
-            raise ConflictError(
-                f"Bed {bed.id} is reserved and "
-                f"cannot be placed into maintenance"
+                f"Bed {bed.id} cannot be placed "
+                f"under maintenance while "
+                f"'{bed.status.value}'"
             )
 
         bed.status = BedStatus.MAINTENANCE
 
     else:
-        if bed.status == BedStatus.AVAILABLE:
-            return bed
-
         if bed.status != BedStatus.MAINTENANCE:
             raise ConflictError(
-                f"Bed {bed.id} is "
-                f"'{bed.status.value}' and cannot "
-                f"be restored from maintenance"
+                f"Bed {bed.id} is not under maintenance"
             )
 
         bed.status = BedStatus.AVAILABLE
 
+    db.session.flush()
+
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="bed",
         entity_id=bed.id,
         description=(
-            f"Bed status changed to "
-            f"'{bed.status.value}'"
+            f"Changed bed {bed.id} maintenance status"
         ),
         old_value={
-            "status": old_status.value
+            "status": old_status.value,
         },
         new_value={
-            "status": bed.status.value
+            "status": bed.status.value,
         },
     )
 
@@ -875,69 +1118,69 @@ def set_bed_maintenance(
 
 
 # ============================================================================
-# Bed reservations
+# BED RESERVATIONS
 # ============================================================================
+
 
 def get_bed_reservation(
     reservation_id: int,
+    clinic_id: int | None = None,
 ) -> BedReservation:
     return _get_reservation(
-        reservation_id
+        reservation_id,
+        clinic_id=clinic_id,
     )
 
 
 def list_bed_reservations(
     clinic_id: int,
-    status: ReservationStatus | None = None,
+    status: ReservationStatus | str | None = None,
     patient_id: int | None = None,
     bed_id: int | None = None,
-) -> list[BedReservation]:
-    _validate_positive_id(
-        clinic_id,
-        "clinic_id",
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
     )
-
-    ensure_clinic_active(clinic_id)
 
     query = (
         BedReservation.query
-        .join(Bed)
-        .join(Ward)
+        .join(Bed, BedReservation.bed_id == Bed.id)
+        .join(Ward, Bed.ward_id == Ward.id)
         .filter(
             Ward.clinic_id == clinic_id
         )
     )
 
     if status is not None:
-        if not isinstance(
-            status,
-            ReservationStatus,
-        ):
-            try:
-                status = ReservationStatus(status)
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(
-                    f"Invalid reservation status "
-                    f"'{status}'"
-                ) from exc
+        try:
+            if not isinstance(
+                status,
+                ReservationStatus,
+            ):
+                status = ReservationStatus(
+                    status
+                )
+        except (TypeError, ValueError):
+            raise ValidationError(
+                f"Invalid reservation status: {status}"
+            )
 
         query = query.filter(
             BedReservation.status == status
         )
 
     if patient_id is not None:
-        _validate_positive_id(
+        patient_id = _validate_positive_id(
             patient_id,
             "patient_id",
         )
 
         query = query.filter(
-            BedReservation.patient_id
-            == patient_id
+            BedReservation.patient_id == patient_id
         )
 
     if bed_id is not None:
-        _validate_positive_id(
+        bed_id = _validate_positive_id(
             bed_id,
             "bed_id",
         )
@@ -946,67 +1189,113 @@ def list_bed_reservations(
             BedReservation.bed_id == bed_id
         )
 
-    return (
-        query
-        .order_by(
-            BedReservation.reserved_at.desc()
-        )
-        .all()
-    )
+    return query.order_by(
+        BedReservation.reserved_at.desc()
+    ).all()
 
 
 def get_active_bed_reservation_for_patient(
     patient_id: int,
-) -> BedReservation | None:
-    patient = _get_patient(patient_id)
+    clinic_id: int,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    return (
-        BedReservation.query
-        .filter(
-            BedReservation.patient_id == patient.id,
-            BedReservation.status
-            == ReservationStatus.PENDING,
-        )
-        .order_by(
-            BedReservation.reserved_at.desc()
-        )
-        .first()
+    _get_patient(
+        patient_id,
+        clinic_id=clinic_id,
+    )
+
+    return _get_active_reservation_for_patient(
+        patient_id,
+        clinic_id=clinic_id,
     )
 
 
 def get_active_bed_reservation_for_bed(
     bed_id: int,
-) -> BedReservation | None:
-    bed = _get_bed(bed_id)
+    clinic_id: int,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
+
+    _get_bed(
+        bed_id,
+        clinic_id=clinic_id,
+    )
 
     return _get_active_reservation_for_bed(
-        bed.id
+        bed_id,
+        clinic_id=clinic_id,
     )
 
 
 @transactional
 def reserve_bed(
-    *,
     patient_id: int,
     bed_id: int,
     reserved_by_id: int,
+    clinic_id: int,
     reason: str | None = None,
-    expires_at: datetime | None = None,
-) -> BedReservation:
-    """
-    Reserve an available bed for a patient.
+    expires_at=None,
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    Lifecycle:
+    reserved_by_id = _validate_positive_id(
+        reserved_by_id,
+        "reserved_by_id",
+    )
 
-        Bed:         AVAILABLE -> RESERVED
-        Reservation: PENDING
+    if actor_user_id is None:
+        actor_user_id = reserved_by_id
 
-    Locks the patient first and the bed second so concurrent
-    requests cannot create two active reservations/admissions
-    for the same patient or reserve the same bed twice.
-    """
+    actor_user_id = _validate_actor_id(
+        actor_user_id
+    )
 
-    reason = _validate_reason(reason)
+    _ensure_ward_active(
+        clinic_id
+    )
+
+    patient = _get_patient(
+        patient_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    bed = _get_bed(
+        bed_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    _validate_patient_for_clinic(
+        patient,
+        clinic_id,
+    )
+
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
+    )
+
+    # The actor is authenticated and must correspond
+    # to an active staff member in this clinic.
+    staff = _validate_staff_for_clinic(
+        reserved_by_id,
+        clinic_id,
+    )
+
+    if staff.user_id != actor_user_id:
+        raise ConflictError(
+            "Reservation actor does not match "
+            "the authenticated user"
+        )
 
     if expires_at is not None:
         if expires_at <= _utcnow():
@@ -1014,83 +1303,54 @@ def reserve_bed(
                 "expires_at must be in the future"
             )
 
-    patient = _get_patient(
-        patient_id,
+    reason = _validate_reason(
+        reason
+    )
+
+    active_admission = _get_active_admission_for_patient(
+        patient.id,
+        clinic_id=clinic_id,
         lock=True,
-    )
-
-    bed = _get_bed(
-        bed_id,
-        lock=True,
-    )
-
-    ward = _validate_bed_for_clinic(
-        bed=bed,
-        clinic_id=bed.ward.clinic_id,
-    )
-
-    ensure_clinic_active(
-        ward.clinic_id
-    )
-
-    _validate_patient_for_clinic(
-        patient=patient,
-        clinic_id=ward.clinic_id,
-    )
-
-    _validate_staff_for_clinic(
-        staff_id=reserved_by_id,
-        clinic_id=ward.clinic_id,
-    )
-
-    active_admission = (
-        _get_active_admission_for_patient_locked(
-            patient.id
-        )
     )
 
     if active_admission is not None:
         raise ConflictError(
             f"Patient {patient.id} already has "
-            f"active admission {active_admission.id}"
+            f"an active admission"
         )
 
-    active_reservation = (
-        _get_active_reservation_for_patient_locked(
-            patient.id
-        )
+    active_reservation = _get_active_reservation_for_patient(
+        patient.id,
+        clinic_id=clinic_id,
+        lock=True,
     )
 
     if active_reservation is not None:
         raise ConflictError(
             f"Patient {patient.id} already has "
-            f"active bed reservation "
-            f"{active_reservation.id}"
+            f"an active bed reservation"
         )
 
-    if bed.status != BedStatus.AVAILABLE:
-        raise ConflictError(
-            f"Bed {bed.id} is "
-            f"'{bed.status.value}', not available"
-        )
-
-    existing_bed_reservation = (
-        _get_active_reservation_for_bed(
-            bed.id
-        )
+    bed_reservation = _get_active_reservation_for_bed(
+        bed.id,
+        clinic_id=clinic_id,
+        lock=True,
     )
 
-    if existing_bed_reservation is not None:
+    if bed_reservation is not None:
         raise ConflictError(
-            f"Bed {bed.id} is already reserved "
-            f"by reservation "
-            f"{existing_bed_reservation.id}"
+            f"Bed {bed.id} already has "
+            f"an active reservation"
         )
+
+    _ensure_bed_available(
+        bed
+    )
 
     reservation = BedReservation(
         patient_id=patient.id,
         bed_id=bed.id,
-        reserved_by_id=reserved_by_id,
+        reserved_by_id=staff.id,
         status=ReservationStatus.PENDING,
         reason=reason,
         reserved_at=_utcnow(),
@@ -1104,40 +1364,14 @@ def reserve_bed(
     db.session.flush()
 
     create_audit_log(
+        user_id=actor_user_id,
         action=AuditAction.CREATE,
-        entity_type="BedReservation",
+        entity_type="bed_reservation",
         entity_id=reservation.id,
         description=(
-            f"Bed {bed.id} reserved for "
-            f"patient {patient.id}"
+            f"Reserved bed {bed.id} "
+            f"for patient {patient.id}"
         ),
-        new_value={
-            "patient_id": patient.id,
-            "bed_id": bed.id,
-            "reserved_by_id": reserved_by_id,
-            "status": reservation.status.value,
-            "reason": reason,
-            "expires_at": (
-                expires_at.isoformat()
-                if expires_at
-                else None
-            ),
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
-        description=(
-            f"Bed {bed.id} marked as reserved"
-        ),
-        old_value={
-            "status": BedStatus.AVAILABLE.value
-        },
-        new_value={
-            "status": BedStatus.RESERVED.value
-        },
     )
 
     return reservation
@@ -1146,45 +1380,51 @@ def reserve_bed(
 @transactional
 def cancel_bed_reservation(
     reservation_id: int,
+    clinic_id: int,
     reason: str | None = None,
-) -> BedReservation:
-    """
-    Cancel a pending reservation.
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    Lifecycle:
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
 
-        Reservation: PENDING -> CANCELLED
-        Bed:         RESERVED -> AVAILABLE
-    """
-
-    reason = _validate_reason(reason)
+    _ensure_ward_active(
+        clinic_id
+    )
 
     reservation = _get_reservation(
         reservation_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    _assert_reservation_pending(
+    _ensure_reservation_pending(
         reservation
     )
 
     bed = _get_bed(
         reservation.bed_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    ward = _validate_bed_for_clinic(
-        bed=bed,
-        clinic_id=bed.ward.clinic_id,
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
     )
 
-    ensure_clinic_active(
-        ward.clinic_id
+    reason = _validate_reason(
+        reason
     )
 
-    old_status = reservation.status
-
-    reservation.status = ReservationStatus.CANCELLED
+    reservation.status = (
+        ReservationStatus.CANCELLED
+    )
     reservation.cancelled_at = _utcnow()
 
     if reason:
@@ -1193,51 +1433,24 @@ def cancel_bed_reservation(
     if bed.status == BedStatus.RESERVED:
         bed.status = BedStatus.AVAILABLE
 
-    elif bed.status != BedStatus.AVAILABLE:
-        raise ConflictError(
-            f"Bed {bed.id} is "
-            f"'{bed.status.value}' while "
-            f"cancelling reservation "
-            f"{reservation.id}"
-        )
-
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="BedReservation",
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="bed_reservation",
         entity_id=reservation.id,
         description=(
-            f"Bed reservation {reservation.id} "
-            f"cancelled"
+            f"Cancelled bed reservation "
+            f"{reservation.id}"
         ),
-        old_value={
-            "status": old_status.value
-        },
         new_value={
             "status": reservation.status.value,
-            "reason": reservation.reason,
             "cancelled_at": (
                 reservation.cancelled_at.isoformat()
                 if reservation.cancelled_at
                 else None
             ),
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
-        description=(
-            f"Bed {bed.id} released after "
-            f"reservation cancellation"
-        ),
-        old_value={
-            "status": BedStatus.RESERVED.value
-        },
-        new_value={
-            "status": bed.status.value
         },
     )
 
@@ -1247,105 +1460,45 @@ def cancel_bed_reservation(
 @transactional
 def expire_bed_reservation(
     reservation_id: int,
-) -> BedReservation:
-    """
-    Expire a pending reservation.
-
-    This is intended to be called by a scheduled job,
-    or manually when a reservation has passed expires_at.
-
-    Lifecycle:
-
-        Reservation: PENDING -> EXPIRED
-        Bed:         RESERVED -> AVAILABLE
-    """
-
+):
     reservation = _get_reservation(
         reservation_id,
         lock=True,
     )
 
-    _assert_reservation_pending(
-        reservation
-    )
+    if reservation.status != ReservationStatus.PENDING:
+        return reservation
+
+    now = _utcnow()
 
     if (
         reservation.expires_at is None
+        or reservation.expires_at > now
     ):
-        raise ValidationError(
-            f"Reservation {reservation.id} "
-            f"does not have an expiry time"
-        )
-
-    now = _utcnow().replace(tzinfo=None)
-
-    if reservation.expires_at > now:
-        raise ConflictError(
-            f"Reservation {reservation.id} "
-            f"has not expired yet"
-        )
+        return reservation
 
     bed = _get_bed(
         reservation.bed_id,
         lock=True,
     )
 
-    ward = _validate_bed_for_clinic(
-        bed=bed,
-        clinic_id=bed.ward.clinic_id,
+    reservation.status = (
+        ReservationStatus.EXPIRED
     )
-
-    ensure_clinic_active(
-        ward.clinic_id
-    )
-
-    old_status = reservation.status
-
-    reservation.status = ReservationStatus.EXPIRED
 
     if bed.status == BedStatus.RESERVED:
         bed.status = BedStatus.AVAILABLE
 
-    elif bed.status != BedStatus.AVAILABLE:
-        raise ConflictError(
-            f"Bed {bed.id} is "
-            f"'{bed.status.value}' while "
-            f"expiring reservation "
-            f"{reservation.id}"
-        )
-
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="BedReservation",
+        action=AuditAction.UPDATE,
+        entity_type="bed_reservation",
         entity_id=reservation.id,
         description=(
-            f"Bed reservation {reservation.id} "
-            f"expired"
+            f"Expired bed reservation "
+            f"{reservation.id}"
         ),
-        old_value={
-            "status": old_status.value
-        },
-        new_value={
-            "status": reservation.status.value
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
-        description=(
-            f"Bed {bed.id} released after "
-            f"reservation expiry"
-        ),
-        old_value={
-            "status": BedStatus.RESERVED.value
-        },
-        new_value={
-            "status": bed.status.value
-        },
     )
 
     return reservation
@@ -1353,157 +1506,117 @@ def expire_bed_reservation(
 
 @transactional
 def expire_due_bed_reservations(
-    *,
     clinic_id: int | None = None,
-) -> list[BedReservation]:
-    """
-    Expire all pending reservations whose expiry time
-    has passed.
-
-    This is suitable for a scheduled/background task.
-    """
-
-    now = _utcnow()
-
+):
     query = (
         BedReservation.query
         .filter(
             BedReservation.status
             == ReservationStatus.PENDING,
             BedReservation.expires_at.isnot(None),
-            BedReservation.expires_at <= now,
+            BedReservation.expires_at <= _utcnow(),
         )
     )
 
     if clinic_id is not None:
-        _validate_positive_id(
-            clinic_id,
-            "clinic_id",
-        )
-
-        ensure_clinic_active(
+        clinic_id = _validate_clinic_id(
             clinic_id
         )
 
         query = (
             query
-            .join(Bed)
-            .join(Ward)
+            .join(
+                Bed,
+                BedReservation.bed_id == Bed.id,
+            )
+            .join(
+                Ward,
+                Bed.ward_id == Ward.id,
+            )
             .filter(
                 Ward.clinic_id == clinic_id
             )
         )
 
-    reservations = (
-        query
-        .order_by(
-            BedReservation.expires_at.asc()
-        )
-        .with_for_update()
-        .all()
-    )
-
-    expired = []
+    reservations = query.with_for_update().all()
 
     for reservation in reservations:
         bed = _get_bed(
             reservation.bed_id,
+            clinic_id=clinic_id,
             lock=True,
         )
 
-        if reservation.status != ReservationStatus.PENDING:
-            continue
-
-        reservation.status = ReservationStatus.EXPIRED
+        reservation.status = (
+            ReservationStatus.EXPIRED
+        )
 
         if bed.status == BedStatus.RESERVED:
             bed.status = BedStatus.AVAILABLE
 
-        elif bed.status != BedStatus.AVAILABLE:
-            raise ConflictError(
-                f"Bed {bed.id} is "
-                f"'{bed.status.value}' while "
-                f"expiring reservation "
-                f"{reservation.id}"
-            )
-
-        create_audit_log(
-            action=AuditAction.STATUS_CHANGE,
-            entity_type="BedReservation",
-            entity_id=reservation.id,
-            description=(
-                f"Bed reservation {reservation.id} "
-                f"expired automatically"
-            ),
-            old_value={
-                "status": ReservationStatus.PENDING.value
-            },
-            new_value={
-                "status": ReservationStatus.EXPIRED.value
-            },
-        )
-
-        create_audit_log(
-            action=AuditAction.STATUS_CHANGE,
-            entity_type="Bed",
-            entity_id=bed.id,
-            description=(
-                f"Bed {bed.id} released after "
-                f"automatic reservation expiry"
-            ),
-            old_value={
-                "status": BedStatus.RESERVED.value
-            },
-            new_value={
-                "status": BedStatus.AVAILABLE.value
-            },
-        )
-
-        expired.append(reservation)
-
-    return expired
+    return reservations
 
 
 # ============================================================================
-# Admissions
+# ADMISSIONS
 # ============================================================================
+
 
 def get_admission(
     admission_id: int,
-) -> Admission:
+    clinic_id: int | None = None,
+):
     return _get_admission(
-        admission_id
+        admission_id,
+        clinic_id=clinic_id,
     )
 
 
 def get_active_admission_for_patient(
     patient_id: int,
-) -> Admission | None:
-    _get_patient(patient_id)
+    clinic_id: int,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    return (
-        Admission.query
-        .filter(
-            Admission.patient_id == patient_id,
-            Admission.status
-            == AdmissionStatus.ADMITTED,
-        )
-        .order_by(
-            Admission.admitted_at.desc()
-        )
-        .first()
+    _get_patient(
+        patient_id,
+        clinic_id=clinic_id,
+    )
+
+    return _get_active_admission_for_patient(
+        patient_id,
+        clinic_id=clinic_id,
     )
 
 
 def list_admissions_for_patient(
     patient_id: int,
-) -> list[Admission]:
-    _get_patient(patient_id)
+    clinic_id: int,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
+
+    _get_patient(
+        patient_id,
+        clinic_id=clinic_id,
+    )
 
     return (
         Admission.query
-        .filter_by(
-            patient_id=patient_id
+        .join(
+            Bed,
+            Admission.bed_id == Bed.id,
+        )
+        .join(
+            Ward,
+            Bed.ward_id == Ward.id,
+        )
+        .filter(
+            Admission.patient_id == patient_id,
+            Ward.clinic_id == clinic_id,
         )
         .order_by(
             Admission.admitted_at.desc()
@@ -1514,9 +1627,11 @@ def list_admissions_for_patient(
 
 def get_current_bed(
     patient_id: int,
-) -> Bed | None:
+    clinic_id: int,
+):
     admission = get_active_admission_for_patient(
-        patient_id
+        patient_id,
+        clinic_id,
     )
 
     if admission is None:
@@ -1527,97 +1642,106 @@ def get_current_bed(
 
 @transactional
 def admit_patient(
-    *,
     patient_id: int,
     bed_id: int,
     admitted_by_id: int,
+    clinic_id: int,
     reason: str | None = None,
-) -> Admission:
-    """
-    Direct admission for walk-ins/emergency cases.
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    Reservation-aware behavior:
-    - A patient with an active reservation cannot be
-      directly admitted through this function.
-    - Reserved beds cannot be directly admitted into.
-    - Use admit_patient_from_reservation() to fulfil
-      a reservation.
+    admitted_by_id = _validate_positive_id(
+        admitted_by_id,
+        "admitted_by_id",
+    )
 
-    Lifecycle:
+    if actor_user_id is None:
+        actor_user_id = admitted_by_id
 
-        Bed:       AVAILABLE -> OCCUPIED
-        Admission: ADMITTED
-    """
+    actor_user_id = _validate_actor_id(
+        actor_user_id
+    )
 
-    reason = _validate_reason(reason)
+    _ensure_ward_active(
+        clinic_id
+    )
 
-    # Lock patient first to prevent concurrent admission
-    # and reservation races.
+    # Lock patient first.
     patient = _get_patient(
         patient_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    active_admission = (
-        _get_active_admission_for_patient_locked(
-            patient.id
-        )
+    _validate_patient_for_clinic(
+        patient,
+        clinic_id,
+    )
+
+    active_admission = _get_active_admission_for_patient(
+        patient.id,
+        clinic_id=clinic_id,
+        lock=True,
     )
 
     if active_admission is not None:
         raise ConflictError(
             f"Patient {patient.id} already has "
-            f"active admission {active_admission.id}"
+            f"an active admission"
         )
 
-    active_reservation = (
-        _get_active_reservation_for_patient_locked(
-            patient.id
-        )
+    active_reservation = _get_active_reservation_for_patient(
+        patient.id,
+        clinic_id=clinic_id,
+        lock=True,
     )
 
     if active_reservation is not None:
         raise ConflictError(
-            f"Patient {patient.id} has active "
-            f"bed reservation "
-            f"{active_reservation.id}; "
-            f"use admit_patient_from_reservation()"
+            f"Patient {patient.id} has an active "
+            f"reservation that must be fulfilled "
+            f"or cancelled first"
         )
 
+    # Then lock the bed.
     bed = _get_bed(
         bed_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    ward = _validate_bed_for_clinic(
-        bed=bed,
-        clinic_id=bed.ward.clinic_id,
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
     )
 
-    ensure_clinic_active(
-        ward.clinic_id
+    _ensure_bed_available(
+        bed
     )
 
-    _validate_patient_for_clinic(
-        patient=patient,
-        clinic_id=ward.clinic_id,
+    staff = _validate_staff_for_clinic(
+        admitted_by_id,
+        clinic_id,
     )
 
-    _validate_staff_for_clinic(
-        staff_id=admitted_by_id,
-        clinic_id=ward.clinic_id,
-    )
-
-    if bed.status != BedStatus.AVAILABLE:
+    if staff.user_id != actor_user_id:
         raise ConflictError(
-            f"Bed {bed.id} is "
-            f"'{bed.status.value}', not available"
+            "Admission actor does not match "
+            "the authenticated user"
         )
+
+    reason = _validate_reason(
+        reason
+    )
 
     admission = Admission(
         patient_id=patient.id,
         bed_id=bed.id,
-        admitted_by_id=admitted_by_id,
+        admitted_by_id=staff.id,
+        reservation_id=None,
         status=AdmissionStatus.ADMITTED,
         reason=reason,
         admitted_at=_utcnow(),
@@ -1630,36 +1754,14 @@ def admit_patient(
     db.session.flush()
 
     create_audit_log(
+        user_id=actor_user_id,
         action=AuditAction.CREATE,
-        entity_type="Admission",
+        entity_type="admission",
         entity_id=admission.id,
         description=(
-            f"Patient {patient.id} admitted "
+            f"Admitted patient {patient.id} "
             f"to bed {bed.id}"
         ),
-        new_value={
-            "patient_id": patient.id,
-            "bed_id": bed.id,
-            "admitted_by_id": admitted_by_id,
-            "status": admission.status.value,
-            "reason": reason,
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
-        description=(
-            f"Bed {bed.id} occupied by "
-            f"patient {patient.id}"
-        ),
-        old_value={
-            "status": BedStatus.AVAILABLE.value
-        },
-        new_value={
-            "status": BedStatus.OCCUPIED.value
-        },
     )
 
     return admission
@@ -1667,117 +1769,134 @@ def admit_patient(
 
 @transactional
 def admit_patient_from_reservation(
-    *,
     reservation_id: int,
     admitted_by_id: int,
+    clinic_id: int,
     reason: str | None = None,
-) -> Admission:
-    """
-    Fulfil a pending bed reservation by admitting
-    the reserved patient into the reserved bed.
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    Lifecycle:
+    admitted_by_id = _validate_positive_id(
+        admitted_by_id,
+        "admitted_by_id",
+    )
 
-        Reservation: PENDING -> FULFILLED
-        Bed:         RESERVED -> OCCUPIED
-        Admission:   ADMITTED
-    """
+    if actor_user_id is None:
+        actor_user_id = admitted_by_id
 
-    reason = _validate_reason(reason)
+    actor_user_id = _validate_actor_id(
+        actor_user_id
+    )
+
+    _ensure_ward_active(
+        clinic_id
+    )
 
     reservation = _get_reservation(
         reservation_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    _assert_reservation_pending(
+    _ensure_reservation_pending(
         reservation
     )
 
-    # Lock patient before checking active admission.
+    _ensure_reservation_not_expired(
+        reservation
+    )
+
+    # Lock patient before bed, matching the direct
+    # admission workflow.
     patient = _get_patient(
         reservation.patient_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    active_admission = (
-        _get_active_admission_for_patient_locked(
-            patient.id
+    bed = _get_bed(
+        reservation.bed_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    _validate_patient_for_clinic(
+        patient,
+        clinic_id,
+    )
+
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
+    )
+
+    staff = _validate_staff_for_clinic(
+        admitted_by_id,
+        clinic_id,
+    )
+
+    if staff.user_id != actor_user_id:
+        raise ConflictError(
+            "Admission actor does not match "
+            "the authenticated user"
         )
+
+    active_admission = _get_active_admission_for_patient(
+        patient.id,
+        clinic_id=clinic_id,
+        lock=True,
     )
 
     if active_admission is not None:
         raise ConflictError(
             f"Patient {patient.id} already has "
-            f"active admission {active_admission.id}"
+            f"an active admission"
         )
 
-    bed = _get_bed(
-        reservation.bed_id,
+    active_reservation = _get_active_reservation_for_bed(
+        bed.id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    ward = _validate_bed_for_clinic(
-        bed=bed,
-        clinic_id=bed.ward.clinic_id,
-    )
-
-    ensure_clinic_active(
-        ward.clinic_id
-    )
-
-    _validate_patient_for_clinic(
-        patient=patient,
-        clinic_id=ward.clinic_id,
-    )
-
-    _validate_staff_for_clinic(
-        staff_id=admitted_by_id,
-        clinic_id=ward.clinic_id,
-    )
+    if (
+        active_reservation is None
+        or active_reservation.id != reservation.id
+    ):
+        raise ConflictError(
+            f"Reservation {reservation.id} "
+            f"is no longer the active reservation "
+            f"for bed {bed.id}"
+        )
 
     if bed.status != BedStatus.RESERVED:
         raise ConflictError(
-            f"Reserved bed {bed.id} is "
-            f"'{bed.status.value}', not reserved"
+            f"Bed {bed.id} is currently "
+            f"'{bed.status.value}' and is not reserved"
         )
 
-    # Ensure the reservation is still the active reservation
-    # attached to this bed.
-    active_bed_reservation = (
-        _get_active_reservation_for_bed(
-            bed.id
-        )
+    reason = _validate_reason(
+        reason
     )
-
-    if (
-        active_bed_reservation is not None
-        and active_bed_reservation.id
-        != reservation.id
-    ):
-        raise ConflictError(
-            f"Bed {bed.id} has another active "
-            f"reservation "
-            f"{active_bed_reservation.id}"
-        )
 
     admission = Admission(
         patient_id=patient.id,
         bed_id=bed.id,
-        admitted_by_id=admitted_by_id,
+        admitted_by_id=staff.id,
         reservation_id=reservation.id,
         status=AdmissionStatus.ADMITTED,
-        reason=(
-            reason
-            if reason is not None
-            else reservation.reason
-        ),
+        reason=reason or reservation.reason,
         admitted_at=_utcnow(),
     )
 
     db.session.add(admission)
 
-    reservation.status = ReservationStatus.FULFILLED
+    reservation.status = (
+        ReservationStatus.FULFILLED
+    )
     reservation.fulfilled_at = _utcnow()
 
     bed.status = BedStatus.OCCUPIED
@@ -1785,153 +1904,122 @@ def admit_patient_from_reservation(
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="BedReservation",
-        entity_id=reservation.id,
-        description=(
-            f"Bed reservation {reservation.id} "
-            f"fulfilled by admission "
-            f"{admission.id}"
-        ),
-        old_value={
-            "status": ReservationStatus.PENDING.value
-        },
-        new_value={
-            "status": ReservationStatus.FULFILLED.value,
-            "fulfilled_at": (
-                reservation.fulfilled_at.isoformat()
-                if reservation.fulfilled_at
-                else None
-            ),
-            "admission_id": admission.id,
-        },
-    )
-
-    create_audit_log(
+        user_id=actor_user_id,
         action=AuditAction.CREATE,
-        entity_type="Admission",
+        entity_type="admission",
         entity_id=admission.id,
         description=(
-            f"Patient {patient.id} admitted "
-            f"from reservation "
-            f"{reservation.id}"
+            f"Admitted patient {patient.id} "
+            f"from reservation {reservation.id}"
         ),
-        new_value={
-            "patient_id": patient.id,
-            "bed_id": bed.id,
-            "admitted_by_id": admitted_by_id,
-            "reservation_id": reservation.id,
-            "status": admission.status.value,
-            "reason": admission.reason,
-        },
     )
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="bed_reservation",
+        entity_id=reservation.id,
         description=(
-            f"Reserved bed {bed.id} occupied "
-            f"by patient {patient.id}"
+            f"Fulfilled bed reservation "
+            f"{reservation.id}"
         ),
-        old_value={
-            "status": BedStatus.RESERVED.value
-        },
-        new_value={
-            "status": BedStatus.OCCUPIED.value
-        },
     )
 
     return admission
 
 
-# Optional explicit alias for callers that prefer
-# the reservation terminology.
-fulfill_bed_reservation = admit_patient_from_reservation
+# Backward-compatible alias.
+fulfill_bed_reservation = (
+    admit_patient_from_reservation
+)
 
-
-# ============================================================================
-# Admissions / transfers
-# ============================================================================
 
 @transactional
 def transfer_bed(
-    *,
     admission_id: int,
     to_bed_id: int,
+    clinic_id: int,
     reason: str | None = None,
-) -> WardTransfer:
-    """
-    Transfer an actively admitted patient to another
-    available bed.
-
-    Lifecycle:
-
-        Current bed: AVAILABLE
-        Target bed:  AVAILABLE -> OCCUPIED
-
-    The admission remains ADMITTED.
-
-    AdmissionStatus.TRANSFERRED is intentionally not used
-    here because this is an internal bed transfer within
-    the same active admission.
-    """
-
-    reason = _validate_reason(reason)
-
-    admission = _get_admission(
-        admission_id,
-        lock=True,
-    )
-
-    _assert_admission_active(
-        admission
-    )
-
-    from_bed = _get_bed(
-        admission.bed_id,
-        lock=True,
-    )
-
-    to_bed = _get_bed(
-        to_bed_id,
-        lock=True,
-    )
-
-    if from_bed.id == to_bed.id:
-        raise ValidationError(
-            "Source and destination beds must be different"
-        )
-
-    clinic_id = _get_admission_clinic_id(
-        admission
-    )
-
-    ensure_clinic_active(
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
         clinic_id
     )
 
-    _validate_bed_for_clinic(
-        bed=from_bed,
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
+
+    _ensure_ward_active(
+        clinic_id
+    )
+
+    admission = _get_admission(
+        admission_id,
         clinic_id=clinic_id,
+        lock=True,
+    )
+
+    _ensure_admission_active(
+        admission
+    )
+
+    source_bed_id = admission.bed_id
+
+    if source_bed_id == to_bed_id:
+        raise ValidationError(
+            "Source and destination beds "
+            "must be different"
+        )
+
+    # Lock beds in deterministic ID order to reduce
+    # deadlock risk during concurrent transfers.
+    first_bed_id, second_bed_id = sorted(
+        [source_bed_id, to_bed_id]
+    )
+
+    first_bed = _get_bed(
+        first_bed_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    second_bed = _get_bed(
+        second_bed_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    if first_bed.id == source_bed_id:
+        from_bed = first_bed
+        to_bed = second_bed
+    else:
+        from_bed = second_bed
+        to_bed = first_bed
+
+    _validate_bed_for_clinic(
+        from_bed,
+        clinic_id,
     )
 
     _validate_bed_for_clinic(
-        bed=to_bed,
-        clinic_id=clinic_id,
+        to_bed,
+        clinic_id,
     )
 
     if from_bed.status != BedStatus.OCCUPIED:
         raise ConflictError(
-            f"Current bed {from_bed.id} is "
-            f"'{from_bed.status.value}', not occupied"
+            f"Source bed {from_bed.id} is not occupied"
         )
 
-    if to_bed.status != BedStatus.AVAILABLE:
-        raise ConflictError(
-            f"Destination bed {to_bed.id} is "
-            f"'{to_bed.status.value}', not available"
-        )
+    _ensure_bed_available(
+        to_bed
+    )
+
+    reason = _validate_reason(
+        reason
+    )
 
     transfer = WardTransfer(
         admission_id=admission.id,
@@ -1951,113 +2039,81 @@ def transfer_bed(
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.CREATE,
-        entity_type="WardTransfer",
-        entity_id=transfer.id,
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="admission",
+        entity_id=admission.id,
         description=(
-            f"Admission {admission.id} transferred "
+            f"Transferred admission {admission.id} "
             f"from bed {from_bed.id} "
             f"to bed {to_bed.id}"
         ),
-        new_value={
-            "admission_id": admission.id,
-            "from_bed_id": from_bed.id,
-            "to_bed_id": to_bed.id,
-            "reason": reason,
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=from_bed.id,
-        description=(
-            f"Bed {from_bed.id} released after "
-            f"patient transfer"
-        ),
         old_value={
-            "status": BedStatus.OCCUPIED.value
+            "bed_id": from_bed.id,
         },
         new_value={
-            "status": BedStatus.AVAILABLE.value
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=to_bed.id,
-        description=(
-            f"Bed {to_bed.id} occupied after "
-            f"patient transfer"
-        ),
-        old_value={
-            "status": BedStatus.AVAILABLE.value
-        },
-        new_value={
-            "status": BedStatus.OCCUPIED.value
+            "bed_id": to_bed.id,
         },
     )
 
     return transfer
 
 
-# ============================================================================
-# Discharge
-# ============================================================================
-
 @transactional
 def discharge_patient(
-    *,
     admission_id: int,
+    clinic_id: int,
     reason: str | None = None,
-) -> Admission:
-    """
-    Discharge an actively admitted patient.
+    actor_user_id: int | None = None,
+):
+    clinic_id = _validate_clinic_id(
+        clinic_id
+    )
 
-    Lifecycle:
+    if actor_user_id is not None:
+        actor_user_id = _validate_actor_id(
+            actor_user_id
+        )
 
-        Admission: ADMITTED -> DISCHARGED
-        Bed:       OCCUPIED -> AVAILABLE
-    """
-
-    reason = _validate_reason(reason)
+    _ensure_ward_active(
+        clinic_id
+    )
 
     admission = _get_admission(
         admission_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    _assert_admission_active(
+    _ensure_admission_active(
         admission
     )
 
     bed = _get_bed(
         admission.bed_id,
+        clinic_id=clinic_id,
         lock=True,
     )
 
-    clinic_id = _get_admission_clinic_id(
-        admission
+    _validate_bed_for_clinic(
+        bed,
+        clinic_id,
     )
 
-    ensure_clinic_active(
-        clinic_id
+    _ensure_bed_occupied(
+        bed
     )
 
-    if bed.status != BedStatus.OCCUPIED:
-        raise ConflictError(
-            f"Admission {admission.id} points to "
-            f"bed {bed.id}, but the bed is "
-            f"'{bed.status.value}'"
-        )
+    reason = _validate_reason(
+        reason
+    )
 
-    old_status = admission.status
-
-    admission.status = AdmissionStatus.DISCHARGED
+    admission.status = (
+        AdmissionStatus.DISCHARGED
+    )
     admission.discharged_at = _utcnow()
 
-    if reason is not None:
+    if reason:
         admission.reason = reason
 
     bed.status = BedStatus.AVAILABLE
@@ -2065,15 +2121,15 @@ def discharge_patient(
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Admission",
+        user_id=actor_user_id,
+        action=AuditAction.UPDATE,
+        entity_type="admission",
         entity_id=admission.id,
         description=(
-            f"Admission {admission.id} discharged"
+            f"Discharged patient "
+            f"{admission.patient_id} "
+            f"from admission {admission.id}"
         ),
-        old_value={
-            "status": old_status.value
-        },
         new_value={
             "status": admission.status.value,
             "discharged_at": (
@@ -2081,23 +2137,6 @@ def discharge_patient(
                 if admission.discharged_at
                 else None
             ),
-            "reason": admission.reason,
-        },
-    )
-
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Bed",
-        entity_id=bed.id,
-        description=(
-            f"Bed {bed.id} released after "
-            f"patient discharge"
-        ),
-        old_value={
-            "status": BedStatus.OCCUPIED.value
-        },
-        new_value={
-            "status": BedStatus.AVAILABLE.value
         },
     )
 

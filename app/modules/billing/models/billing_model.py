@@ -16,7 +16,10 @@ def _utcnow():
 class Invoice(db.Model):
     __tablename__ = "invoices"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     clinic_id = db.Column(
         db.Integer,
@@ -216,9 +219,16 @@ class Payment(db.Model):
         index=True,
     )
 
+    # Nullable so cash/manual payments can omit it.
+    # UNIQUE prevents the same gateway transaction from
+    # being recorded more than once.
+    #
+    # SQLite allows multiple NULL values in a UNIQUE column,
+    # so payments without gateway transactions remain valid.
     gateway_transaction_id = db.Column(
         db.String(255),
         nullable=True,
+        unique=True,
         index=True,
     )
 

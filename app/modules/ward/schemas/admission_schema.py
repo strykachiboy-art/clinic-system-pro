@@ -4,18 +4,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class AdmissionCreateSchema(BaseModel):
-    patient_id: int = Field(...)
-    bed_id: int = Field(...)
-    admitted_by_id: int = Field(...)
-    reason: Optional[str] = Field(None)
+    patient_id: int = Field(..., gt=0)
+    bed_id: int = Field(..., gt=0)
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=255,
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class AdmissionFromReservationSchema(BaseModel):
-    admitted_by_id: int = Field(...)
     reason: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
     )
 
@@ -24,7 +25,7 @@ class AdmissionFromReservationSchema(BaseModel):
 
 class AdmissionDischargeSchema(BaseModel):
     reason: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
     )
 
@@ -32,9 +33,9 @@ class AdmissionDischargeSchema(BaseModel):
 
 
 class AdmissionTransferSchema(BaseModel):
-    to_bed_id: int = Field(...)
+    to_bed_id: int = Field(..., gt=0)
     reason: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
     )
 

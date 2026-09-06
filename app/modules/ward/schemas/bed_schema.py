@@ -1,17 +1,14 @@
-from datetime import datetime
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.enums.ward_enums import (
-    BedStatus,
-    ReservationStatus,
-)
+from app.core.enums.ward_enums import BedStatus
 
 
 class BedCreateSchema(BaseModel):
-    ward_id: int = Field(..., description="ID of the ward")
-    bed_number: str = Field(..., min_length=1, max_length=30)
+    bed_number: str = Field(
+        ...,
+        min_length=1,
+        max_length=30,
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -24,48 +21,5 @@ class BedMaintenanceSchema(BaseModel):
 
 class BedStatusResponseSchema(BaseModel):
     status: BedStatus
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ---------------------------------------------------------------------------
-# BED RESERVATIONS
-# ---------------------------------------------------------------------------
-
-class BedReservationCreateSchema(BaseModel):
-    patient_id: int = Field(...)
-    bed_id: int = Field(...)
-    reserved_by_id: int = Field(...)
-    reason: Optional[str] = Field(
-        None,
-        max_length=255,
-    )
-    expires_at: Optional[datetime] = Field(
-        None,
-    )
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class BedReservationCancelSchema(BaseModel):
-    reason: Optional[str] = Field(
-        None,
-        max_length=255,
-    )
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class BedReservationResponseSchema(BaseModel):
-    id: int
-    patient_id: int
-    bed_id: int
-    reserved_by_id: int
-    status: ReservationStatus
-    reason: Optional[str]
-    reserved_at: datetime
-    expires_at: Optional[datetime]
-    cancelled_at: Optional[datetime]
-    fulfilled_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True)

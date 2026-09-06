@@ -7,15 +7,14 @@ from app.core.enums.ward_enums import ReservationStatus
 
 
 class BedReservationCreateSchema(BaseModel):
-    patient_id: int = Field(...)
-    bed_id: int = Field(...)
-    reserved_by_id: int = Field(...)
+    patient_id: int = Field(..., gt=0)
+    bed_id: int = Field(..., gt=0)
     reason: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
     )
     expires_at: Optional[datetime] = Field(
-        None,
+        default=None,
     )
 
     model_config = ConfigDict(from_attributes=True)
@@ -23,7 +22,7 @@ class BedReservationCreateSchema(BaseModel):
 
 class BedReservationCancelSchema(BaseModel):
     reason: Optional[str] = Field(
-        None,
+        default=None,
         max_length=255,
     )
 
