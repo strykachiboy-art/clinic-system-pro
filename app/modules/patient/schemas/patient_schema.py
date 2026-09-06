@@ -377,21 +377,36 @@ class PatientVitalsResponseSchema(BaseModel):
     consultation_id: Optional[int] = None
     recorded_by_id: Optional[int] = None
 
-    temperature: Optional[Decimal] = None
+    temperature: Optional[Decimal] = Field(
+        default=None,
+        validation_alias="temperature_c",
+    )
 
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
 
-    heart_rate: Optional[int] = None
+    heart_rate: Optional[int] = Field(
+        default=None,
+        validation_alias="heart_rate_bpm",
+    )
+
     respiratory_rate: Optional[int] = None
 
     oxygen_saturation: Optional[Decimal] = None
 
-    weight: Optional[Decimal] = None
-    height: Optional[Decimal] = None
+    weight: Optional[Decimal] = Field(
+        default=None,
+        validation_alias="weight_kg",
+    )
+
+    height: Optional[Decimal] = Field(
+        default=None,
+        validation_alias="height_cm",
+    )
 
     recorded_at: datetime
 
     model_config = ConfigDict(
         from_attributes=True,
+        populate_by_name=True,
     )

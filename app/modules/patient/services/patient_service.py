@@ -950,24 +950,25 @@ def record_vitals(
     )
 
     vitals = PatientVitals(
-        patient_id=patient.id,
-        consultation_id=consultation_id,
-        recorded_by_id=recorded_by_id,
-        temperature=data.get("temperature"),
-        blood_pressure_systolic=data.get(
-            "blood_pressure_systolic"
-        ),
-        blood_pressure_diastolic=data.get(
-            "blood_pressure_diastolic"
-        ),
-        heart_rate=data.get("heart_rate"),
-        respiratory_rate=data.get("respiratory_rate"),
-        oxygen_saturation=data.get("oxygen_saturation"),
-        weight=data.get("weight"),
-        height=data.get("height"),
-        recorded_at=data.get("recorded_at", _utcnow()),
-    )
+    patient_id=patient.id,
+    consultation_id=consultation_id,
+    recorded_by_id=recorded_by_id,
 
+    temperature_c=data.get("temperature"),
+    blood_pressure_systolic=data.get(
+        "blood_pressure_systolic"
+    ),
+    blood_pressure_diastolic=data.get(
+        "blood_pressure_diastolic"
+    ),
+    heart_rate_bpm=data.get("heart_rate"),
+    respiratory_rate=data.get("respiratory_rate"),
+    oxygen_saturation=data.get("oxygen_saturation"),
+    weight_kg=data.get("weight"),
+    height_cm=data.get("height"),
+
+    recorded_at=data.get("recorded_at", _utcnow()),
+   )
     db.session.add(vitals)
     db.session.flush()
 

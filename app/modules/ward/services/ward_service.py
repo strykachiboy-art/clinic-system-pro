@@ -1277,7 +1277,7 @@ def expire_bed_reservation(
             f"does not have an expiry time"
         )
 
-    now = _utcnow()
+    now = _utcnow().replace(tzinfo=None)
 
     if reservation.expires_at > now:
         raise ConflictError(

@@ -25,6 +25,7 @@ from app.modules.staff.models.staff_model import Staff
 
 
 _EDITABLE_LAB_TEST_FIELDS = {
+    "name",
     "loinc_code",
     "code",
     "sample_type",

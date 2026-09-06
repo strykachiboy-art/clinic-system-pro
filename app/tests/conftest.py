@@ -512,39 +512,222 @@ def make_template(db):
 
 
 # ============================================================================
-# INVENTORY
+# PHARMACY / PRESCRIPTION
 # ============================================================================
 
 @pytest.fixture()
-def inventory_item(db, clinic):
-    from app.core.enums.inventory_enums import InventoryCategory
-    from app.modules.inventory.models.inventory_model import InventoryItem
+def make_drug(db):
+    """
+    Factory: make_drug(clinic=None, **overrides) -> Drug
 
-    item = InventoryItem(
-        clinic_id=clinic.id,
-        name="Test Medical Supply",
-        category=InventoryCategory.MEDICAL_SUPPLY,
-        sku="TEST-SKU-001",
-        barcode="TEST-BARCODE-001",
-        unit="piece",
-        quantity_on_hand=100,
-        reorder_level=10,
-        is_active=True,
-    )
+    clinic=None -> global/shared catalog drug (Drug.clinic_id is
+    nullable, this is the intended "usable by any clinic" case, not
+    an oversight — see Drug's docstring in pharmacy_model.py).
+    clinic=<Clinic> -> clinic-specific catalog drug.
+    """
+    from app.modules.pharmacy.models.pharmacy_model import Drug
 
-    db.session.add(item)
-    db.session.commit()
+    counter = {"n": 0}
 
-    return item
+    def _make(clinic=None, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("name", f"Test Drug {counter['n']}")
+        overrides.setdefault("is_active", True)
+
+        drug = Drug(
+            clinic_id=clinic.id if clinic else None,
+            **overrides,
+        )
+        db.session.add(drug)
+        db.session.commit()
+        return drug
+
+    return _make
 
 
 @pytest.fixture()
-def pharmacist(make_staff, clinic):
-    from app.core.enums.role_enums import Role
+def make_drug_batch(db):
+    """
+    Factory: make_drug_batch(clinic, drug, **overrides) -> DrugBatch
 
-    return make_staff(
-        clinic,
-        role=Role.PHARMACIST,
-        first_name="Test",
-        last_name="Pharmacist",
-    )
+    Defaults to 100 units expiring 90 days out — inside every
+    "expiring soon" window a test is likely to use, so pass an
+    explicit expiry_date when a test needs to distinguish that.
+    """
+    from datetime import date, timedelta
+
+    from app.modules.pharmacy.models.pharmacy_model import DrugBatch
+
+    counter = {"n": 0}
+
+    def _make(clinic, drug, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("batch_number", f"BATCH-{counter['n']}")
+        overrides.setdefault("quantity_on_hand", 100)
+        overrides.setdefault("reorder_level", 20)
+        overrides.setdefault(
+            "expiry_date", date.today() + timedelta(days=90)
+        )
+
+        batch = DrugBatch(
+            clinic_id=clinic.id,
+            drug_id=drug.id,
+            **overrides,
+        )
+        db.session.add(batch)
+        db.session.commit()
+        return batch
+
+    return _make
+
+
+@pytest.fixture()
+def make_prescription(db):
+    """
+    Factory: make_prescription(clinic, patient, staff, **overrides) -> Prescription
+
+    staff is the prescriber (prescribed_by_id) — pass a DOCTOR-role
+    staff for realism, though the model itself doesn't enforce a role
+    on who prescribes.
+    """
+    from app.core.enums.prescription_enums import PrescriptionStatus
+    from app.modules.prescription.models.prescription_model import Prescription
+
+    def _make(clinic, patient, staff, status=PrescriptionStatus.ACTIVE, **overrides):
+        prescription = Prescription(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            status=status,
+            **overrides,
+        )
+        db.session.add(prescription)
+        db.session.commit()
+        return prescription
+
+    return _make
+
+
+@pytest.fixture()
+def make_prescription_item(db):
+    """Factory: make_prescription_item(prescription, drug, quantity=30, **overrides) -> PrescriptionItem."""
+    from app.modules.prescription.models.prescription_model import PrescriptionItem
+
+    def _make(prescription, drug, quantity=30, **overrides):
+        item = PrescriptionItem(
+            prescription_id=prescription.id,
+            drug_id=drug.id,
+            quantity=quantity,
+            **overrides,
+        )
+        db.session.add(item)
+        db.session.commit()
+        return item
+
+    return _make
+
+
+# ============================================================================
+# WARD
+# ============================================================================
+
+@pytest.fixture()
+def make_ward(db):
+    """Factory: make_ward(clinic, capacity=5, **overrides) -> Ward."""
+    from app.modules.ward.models.ward_model import Ward
+
+    counter = {"n": 0}
+
+    def _make(clinic, capacity=5, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("name", f"Test Ward {counter['n']}")
+
+        ward = Ward(clinic_id=clinic.id, capacity=capacity, **overrides)
+        db.session.add(ward)
+        db.session.commit()
+        return ward
+
+    return _make
+
+
+@pytest.fixture()
+def make_bed(db):
+    """Factory: make_bed(ward, **overrides) -> Bed (status defaults to AVAILABLE)."""
+    from app.modules.ward.models.ward_model import Bed
+
+    counter = {"n": 0}
+
+    def _make(ward, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("bed_number", f"B{counter['n']}")
+
+        bed = Bed(ward_id=ward.id, **overrides)
+        db.session.add(bed)
+        db.session.commit()
+        return bed
+
+    return _make
+
+
+# ============================================================================
+# LAB
+# ============================================================================
+
+@pytest.fixture()
+def make_lab_test(db):
+    """
+    Factory: make_lab_test(clinic=None, **overrides) -> LabTest
+
+    clinic=None -> global catalog test (LabTest.clinic_id is nullable,
+    same "usable by any clinic" pattern as Drug).
+    """
+    from app.modules.lab.models.lab_model import LabTest
+
+    counter = {"n": 0}
+
+    def _make(clinic=None, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("name", f"Test Lab Test {counter['n']}")
+
+        test = LabTest(clinic_id=clinic.id if clinic else None, **overrides)
+        db.session.add(test)
+        db.session.commit()
+        return test
+
+    return _make
+
+
+@pytest.fixture()
+def make_lab_order(db):
+    """
+    Factory: make_lab_order(clinic, patient, staff, tests, **overrides) -> LabOrder
+
+    `tests` is a list of LabTest objects — one LabOrderItem is created
+    per test, matching what create_lab_order() does in the service.
+    """
+    from app.core.enums.lab_enums import LabOrderStatus
+    from app.modules.lab.models.lab_model import LabOrder, LabOrderItem
+
+    counter = {"n": 0}
+
+    def _make(clinic, patient, staff, tests, status=LabOrderStatus.ORDERED, **overrides):
+        counter["n"] += 1
+        overrides.setdefault("qr_code", f"LAB-TEST-{counter['n']}")
+
+        order = LabOrder(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            ordered_by_id=staff.id,
+            status=status,
+            **overrides,
+        )
+        db.session.add(order)
+        db.session.flush()
+
+        for test in tests:
+            db.session.add(LabOrderItem(order_id=order.id, test_id=test.id))
+
+        db.session.commit()
+        return order
+
+    return _make

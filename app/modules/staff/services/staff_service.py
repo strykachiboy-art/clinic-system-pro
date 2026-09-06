@@ -533,7 +533,7 @@ def request_leave(
 
     if staff.status in {
         StaffStatus.TERMINATED,
-        StaffStatus.INACTIVE,
+        StaffStatus.SUSPENDED,
     }:
         raise ValidationError(
             f"Staff {staff.id} cannot request leave "
