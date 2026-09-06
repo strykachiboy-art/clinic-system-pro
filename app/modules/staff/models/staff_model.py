@@ -15,7 +15,10 @@ def _utcnow():
 class Staff(db.Model):
     __tablename__ = "staff"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     clinic_id = db.Column(
         db.Integer,
@@ -32,8 +35,15 @@ class Staff(db.Model):
         index=True,
     )
 
-    first_name = db.Column(db.String(80), nullable=False)
-    last_name = db.Column(db.String(80), nullable=False)
+    first_name = db.Column(
+        db.String(80),
+        nullable=False,
+    )
+
+    last_name = db.Column(
+        db.String(80),
+        nullable=False,
+    )
 
     specialty = db.Column(
         db.String(100),
@@ -41,8 +51,15 @@ class Staff(db.Model):
         index=True,
     )
 
-    phone = db.Column(db.String(30), nullable=True)
-    email = db.Column(db.String(120), nullable=True)
+    phone = db.Column(
+        db.String(30),
+        nullable=True,
+    )
+
+    email = db.Column(
+        db.String(120),
+        nullable=True,
+    )
 
     status = db.Column(
         db.Enum(StaffStatus),
@@ -83,7 +100,10 @@ class Staff(db.Model):
         back_populates="staff",
     )
 
-    # Clinical / operational relationships
+    # ------------------------------------------------------------------
+    # Clinical / Operational Relationships
+    # ------------------------------------------------------------------
+
     appointments = db.relationship(
         "Appointment",
         back_populates="staff",
@@ -98,11 +118,11 @@ class Staff(db.Model):
         "LabOrder",
         back_populates="ordered_by",
     )
-    
+
     bed_reservations = db.relationship(
         "BedReservation",
-         back_populates="reserved_by",
-     )
+        back_populates="reserved_by",
+    )
 
     prescriptions = db.relationship(
         "Prescription",
@@ -129,7 +149,10 @@ class Staff(db.Model):
         back_populates="admitted_by",
     )
 
-    # Ambulance relationships
+    # ------------------------------------------------------------------
+    # Ambulance Relationships
+    # ------------------------------------------------------------------
+
     driver_trips = db.relationship(
         "AmbulanceTrip",
         foreign_keys="AmbulanceTrip.driver_id",
@@ -142,7 +165,10 @@ class Staff(db.Model):
         back_populates="paramedic",
     )
 
-    # HR relationships
+    # ------------------------------------------------------------------
+    # HR Relationships
+    # ------------------------------------------------------------------
+
     payroll_records = db.relationship(
         "PayrollRecord",
         back_populates="staff",
@@ -156,8 +182,16 @@ class Staff(db.Model):
         foreign_keys="LeaveRequest.staff_id",
     )
 
+    excuses = db.relationship(
+        "Excuse",
+        back_populates="staff",
+        cascade="all, delete-orphan",
+        foreign_keys="Excuse.staff_id",
+    )
+
     def __repr__(self):
         return f"<Staff {self.first_name} {self.last_name}>"
+
 
 class PayrollRecord(db.Model):
     __tablename__ = "payroll_records"
@@ -191,7 +225,11 @@ class PayrollRecord(db.Model):
         ),
     )
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
     staff_id = db.Column(
         db.Integer,
         db.ForeignKey("staff.id"),
@@ -199,35 +237,49 @@ class PayrollRecord(db.Model):
         index=True,
     )
 
-    pay_period_start = db.Column(db.Date, nullable=False)
-    pay_period_end = db.Column(db.Date, nullable=False)
+    pay_period_start = db.Column(
+        db.Date,
+        nullable=False,
+    )
+
+    pay_period_end = db.Column(
+        db.Date,
+        nullable=False,
+    )
 
     base_salary = db.Column(
         db.Numeric(12, 2),
         nullable=False,
     )
+
     bonuses = db.Column(
         db.Numeric(12, 2),
         nullable=False,
         default=0,
     )
+
     deductions = db.Column(
         db.Numeric(12, 2),
         nullable=False,
         default=0,
     )
+
     net_pay = db.Column(
         db.Numeric(12, 2),
         nullable=False,
     )
 
-    paid_at = db.Column(db.DateTime, nullable=True)
+    paid_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
 
     created_at = db.Column(
         db.DateTime,
         default=_utcnow,
         nullable=False,
     )
+
     updated_at = db.Column(
         db.DateTime,
         default=_utcnow,
@@ -246,6 +298,7 @@ class PayrollRecord(db.Model):
             f"({self.pay_period_start} - {self.pay_period_end})>"
         )
 
+
 class LeaveRequest(db.Model):
     __tablename__ = "leave_requests"
 
@@ -256,7 +309,10 @@ class LeaveRequest(db.Model):
         ),
     )
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     staff_id = db.Column(
         db.Integer,
@@ -293,9 +349,9 @@ class LeaveRequest(db.Model):
         nullable=True,
     )
 
-    reviewed_by_id = db.Column(
+    reviewed_by_user_id = db.Column(
         db.Integer,
-        db.ForeignKey("staff.id"),
+        db.ForeignKey("users.id"),
         nullable=True,
         index=True,
     )
@@ -318,6 +374,10 @@ class LeaveRequest(db.Model):
         nullable=False,
     )
 
+    # ------------------------------------------------------------------
+    # Relationships
+    # ------------------------------------------------------------------
+
     staff = db.relationship(
         "Staff",
         back_populates="leave_requests",
@@ -325,8 +385,15 @@ class LeaveRequest(db.Model):
     )
 
     reviewed_by = db.relationship(
-        "Staff",
-        foreign_keys=[reviewed_by_id],
+        "User",
+        foreign_keys=[reviewed_by_user_id],
+    )
+
+    excuses = db.relationship(
+        "Excuse",
+        back_populates="leave_request",
+        cascade="all, delete-orphan",
+        foreign_keys="Excuse.leave_request_id",
     )
 
     def __repr__(self):

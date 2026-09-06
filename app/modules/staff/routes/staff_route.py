@@ -1,6 +1,14 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
+from flask_jwt_extended import jwt_required
+from pydantic import ValidationError as PydanticValidationError
 
+from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
+from app.core.exceptions import (
+    DomainError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.utils.decorators import role_required
 
 from app.modules.staff.schemas.staff_schema import (
@@ -17,6 +25,13 @@ from app.modules.staff.schemas.staff_schema import (
     StaffUpdateSchema,
 )
 
+from app.modules.staff.schemas.excuse_schema import (
+    ExcuseCreateSchema,
+    ExcuseListQuerySchema,
+    ExcuseRejectSchema,
+    ExcuseReviewSchema,
+)
+
 from app.modules.staff.services.staff_service import (
     approve_leave_request,
     change_staff_status,
@@ -27,6 +42,7 @@ from app.modules.staff.services.staff_service import (
     get_payroll_record,
     get_staff,
     list_leave_requests,
+    list_payroll,
     list_payroll_for_staff,
     list_staff,
     mark_payroll_paid,
@@ -35,6 +51,19 @@ from app.modules.staff.services.staff_service import (
     update_staff,
 )
 
+from app.modules.staff.services.excuse_service import (
+    approve_excuse,
+    create_excuse,
+    get_excuse,
+    get_my_excuses,
+    list_excuses,
+    reject_excuse,
+)
+
+
+# ============================================================================
+# BLUEPRINT
+# ============================================================================
 
 staff_bp = Blueprint(
     "staff",
@@ -44,7 +73,7 @@ staff_bp = Blueprint(
 
 
 # ============================================================================
-# ROLE GROUPS
+# ROLE MATRIX
 # ============================================================================
 
 MANAGEMENT_ROLES = (
@@ -55,7 +84,16 @@ STAFF_VIEW_ROLES = (
     Role.ADMIN,
     Role.DOCTOR,
     Role.NURSE,
+    Role.PHARMACIST,
+    Role.LAB_TECHNICIAN,
     Role.RECEPTIONIST,
+    Role.PARAMEDIC,
+    Role.EMT,
+    Role.DRIVER,
+    Role.AMBULANCE_DISPATCHER,
+    Role.AMBULANCE_COORDINATOR,
+    Role.ACCOUNTANT,
+    Role.OTHER,
 )
 
 LEAVE_MANAGEMENT_ROLES = (
@@ -67,11 +105,95 @@ PAYROLL_ROLES = (
     Role.ACCOUNTANT,
 )
 
+EXCUSE_REVIEW_ROLES = (
+    Role.ADMIN,
+)
+
+
+# ============================================================================
+# AUTH HELPERS
+# ============================================================================
+
+def _current_user() -> User:
+    user_id = getattr(
+        g,
+        "current_user_id",
+        None,
+    )
+
+    if user_id is None:
+        raise ValidationError(
+            "Authenticated user could not be resolved"
+        )
+
+    user = User.query.get(user_id)
+
+    if user is None:
+        raise NotFoundError(
+            "Authenticated user not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
+        )
+
+    return user
+
+
+def _current_clinic_id() -> int:
+    user = _current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not assigned to a clinic"
+        )
+
+    return user.clinic_id
+
+
+def _current_staff_id() -> int:
+    user = _current_user()
+
+    if user.staff is None:
+        raise ValidationError(
+            "Authenticated user is not linked to a staff profile"
+        )
+
+    return user.staff.id
+
+
+# ============================================================================
+# REQUEST VALIDATION
+# ============================================================================
+
+def _validate_json(schema):
+    payload = request.get_json(silent=True)
+
+    if payload is None:
+        return None, (
+            jsonify({
+                "error": "Request body must contain valid JSON",
+            }),
+            400,
+        )
+
+    try:
+        return schema.model_validate(payload), None
+
+    except PydanticValidationError as exc:
+        return None, (
+            jsonify({
+                "error": "Validation failed",
+                "details": exc.errors(),
+            }),
+            422,
+        )
+
 
 # ============================================================================
 # SERIALIZERS
 # ============================================================================
-
 
 def _serialize_staff(staff):
     return {
@@ -83,7 +205,11 @@ def _serialize_staff(staff):
         "specialty": staff.specialty,
         "phone": staff.phone,
         "email": staff.email,
-        "status": staff.status.value,
+        "status": (
+            staff.status.value
+            if hasattr(staff.status, "value")
+            else staff.status
+        ),
         "hired_at": (
             staff.hired_at.isoformat()
             if staff.hired_at
@@ -106,12 +232,20 @@ def _serialize_leave(leave):
     return {
         "id": leave.id,
         "staff_id": leave.staff_id,
-        "leave_type": leave.leave_type.value,
-        "status": leave.status.value,
+        "leave_type": (
+            leave.leave_type.value
+            if hasattr(leave.leave_type, "value")
+            else leave.leave_type
+        ),
+        "status": (
+            leave.status.value
+            if hasattr(leave.status, "value")
+            else leave.status
+        ),
         "start_date": leave.start_date.isoformat(),
         "end_date": leave.end_date.isoformat(),
         "reason": leave.reason,
-        "reviewed_by_id": leave.reviewed_by_id,
+        "reviewed_by_user_id": leave.reviewed_by_user_id,
         "reviewed_at": (
             leave.reviewed_at.isoformat()
             if leave.reviewed_at
@@ -134,8 +268,12 @@ def _serialize_payroll(record):
     return {
         "id": record.id,
         "staff_id": record.staff_id,
-        "pay_period_start": record.pay_period_start.isoformat(),
-        "pay_period_end": record.pay_period_end.isoformat(),
+        "pay_period_start": (
+            record.pay_period_start.isoformat()
+        ),
+        "pay_period_end": (
+            record.pay_period_end.isoformat()
+        ),
         "base_salary": str(record.base_salary),
         "bonuses": str(record.bonuses),
         "deductions": str(record.deductions),
@@ -158,292 +296,752 @@ def _serialize_payroll(record):
     }
 
 
+def _serialize_excuse(excuse):
+    return {
+        "id": excuse.id,
+        "staff_id": excuse.staff_id,
+        "leave_request_id": excuse.leave_request_id,
+        "excuse_type": (
+            excuse.excuse_type.value
+            if hasattr(excuse.excuse_type, "value")
+            else excuse.excuse_type
+        ),
+        "status": (
+            excuse.status.value
+            if hasattr(excuse.status, "value")
+            else excuse.status
+        ),
+        "description": excuse.description,
+        "document_url": excuse.document_url,
+        "reviewed_by_user_id": excuse.reviewed_by_user_id,
+        "reviewed_at": (
+            excuse.reviewed_at.isoformat()
+            if excuse.reviewed_at
+            else None
+        ),
+        "created_at": (
+            excuse.created_at.isoformat()
+            if excuse.created_at
+            else None
+        ),
+        "updated_at": (
+            excuse.updated_at.isoformat()
+            if excuse.updated_at
+            else None
+        ),
+    }
+
+
 # ============================================================================
 # STAFF
 # ============================================================================
 
-
 @staff_bp.post("")
+@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def create_staff_route():
-    payload = StaffCreateSchema.model_validate(
-        request.get_json() or {}
+    payload, error = _validate_json(
+        StaffCreateSchema,
     )
 
-    staff = create_staff(
-        clinic_id=payload.clinic_id,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        user_id=payload.user_id,
-        specialty=payload.specialty,
-        phone=payload.phone,
-        email=payload.email,
-        hired_at=payload.hired_at,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Staff created successfully",
-        "data": _serialize_staff(staff),
-    }), 201
+    try:
+        clinic_id = _current_clinic_id()
+
+        staff = create_staff(
+            clinic_id=clinic_id,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            user_id=payload.user_id,
+            specialty=payload.specialty,
+            phone=payload.phone,
+            email=payload.email,
+            hired_at=payload.hired_at,
+        )
+
+        return jsonify({
+            "message": "Staff created successfully",
+            "data": _serialize_staff(staff),
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.get("")
+@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def list_staff_route():
-    payload = StaffListQuerySchema.model_validate(
-        request.args.to_dict()
-    )
+    try:
+        payload = StaffListQuerySchema.model_validate(
+            request.args.to_dict(),
+        )
 
-    staff = list_staff(
-        clinic_id=payload.clinic_id,
-        status=payload.status,
-        search=payload.search,
-    )
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "data": [
-            _serialize_staff(item)
-            for item in staff
-        ],
-    }), 200
+        staff = list_staff(
+            clinic_id=clinic_id,
+            status=payload.status,
+            search=payload.search,
+        )
+
+        return jsonify({
+            "data": [
+                _serialize_staff(item)
+                for item in staff
+            ],
+        }), 200
+
+    except PydanticValidationError as exc:
+        return jsonify({
+            "error": "Validation failed",
+            "details": exc.errors(),
+        }), 422
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.get("/<int:staff_id>")
+@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def get_staff_route(staff_id: int):
-    staff = get_staff(staff_id)
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "data": _serialize_staff(staff),
-    }), 200
+        staff = get_staff(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "data": _serialize_staff(staff),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.patch("/<int:staff_id>")
+@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def update_staff_route(staff_id: int):
-    payload = StaffUpdateSchema.model_validate(
-        request.get_json() or {}
+    payload, error = _validate_json(
+        StaffUpdateSchema,
     )
 
-    fields = payload.model_dump(
-        exclude_unset=True,
-    )
+    if error:
+        return error
 
-    staff = update_staff(
-        staff_id=staff_id,
-        **fields,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "message": "Staff updated successfully",
-        "data": _serialize_staff(staff),
-    }), 200
+        fields = payload.model_dump(
+            exclude_unset=True,
+        )
+
+        staff = update_staff(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+            **fields,
+        )
+
+        return jsonify({
+            "message": "Staff updated successfully",
+            "data": _serialize_staff(staff),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.patch("/<int:staff_id>/status")
+@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def change_staff_status_route(staff_id: int):
-    payload = StaffStatusUpdateSchema.model_validate(
-        request.get_json() or {}
+    payload, error = _validate_json(
+        StaffStatusUpdateSchema,
     )
 
-    staff = change_staff_status(
-        staff_id=staff_id,
-        new_status=payload.status,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Staff status updated successfully",
-        "data": _serialize_staff(staff),
-    }), 200
+    try:
+        clinic_id = _current_clinic_id()
+
+        staff = change_staff_status(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+            new_status=payload.status,
+        )
+
+        return jsonify({
+            "message": "Staff status updated successfully",
+            "data": _serialize_staff(staff),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 # ============================================================================
-# LEAVE REQUESTS
+# LEAVE
 # ============================================================================
 
-
-@staff_bp.post("/leaves")
+@staff_bp.post("/leave")
+@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
 def request_leave_route():
-    payload = LeaveRequestCreateSchema.model_validate(
-        request.get_json() or {}
+    payload, error = _validate_json(
+        LeaveRequestCreateSchema,
     )
 
-    leave = request_leave(
-        staff_id=payload.staff_id,
-        leave_type=payload.leave_type,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        reason=payload.reason,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Leave request submitted successfully",
-        "data": _serialize_leave(leave),
-    }), 201
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+        staff_id = _current_staff_id()
+
+        leave = request_leave(
+            clinic_id=clinic_id,
+            staff_id=staff_id,
+            actor_user_id=user.id,
+            leave_type=payload.leave_type,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            reason=payload.reason,
+        )
+
+        return jsonify({
+            "message": "Leave request submitted successfully",
+            "data": _serialize_leave(leave),
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
-@staff_bp.get("/leaves")
+@staff_bp.get("/leave")
+@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
-def list_leave_requests_route():
-    payload = LeaveListQuerySchema.model_validate(
-        request.args.to_dict()
-    )
+def list_leave_route():
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
 
-    leaves = list_leave_requests(
-        staff_id=payload.staff_id,
-        status=payload.status,
-    )
+        payload = LeaveListQuerySchema.model_validate(
+            request.args.to_dict(),
+        )
 
-    return jsonify({
-        "data": [
-            _serialize_leave(leave)
-            for leave in leaves
-        ],
-    }), 200
+        staff_id = payload.staff_id
+
+        if user.role != Role.ADMIN:
+            staff_id = _current_staff_id()
+
+        leaves = list_leave_requests(
+            clinic_id=clinic_id,
+            staff_id=staff_id,
+            status=payload.status,
+        )
+
+        return jsonify({
+            "data": [
+                _serialize_leave(leave)
+                for leave in leaves
+            ],
+        }), 200
+
+    except PydanticValidationError as exc:
+        return jsonify({
+            "error": "Validation failed",
+            "details": exc.errors(),
+        }), 422
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
-@staff_bp.get("/leaves/<int:leave_id>")
+@staff_bp.get("/leave/<int:leave_id>")
+@jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
-def get_leave_request_route(leave_id: int):
-    leave = get_leave_request(leave_id)
+def get_leave_route(leave_id: int):
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "data": _serialize_leave(leave),
-    }), 200
+        leave = get_leave_request(
+            leave_id=leave_id,
+            clinic_id=clinic_id,
+        )
+
+        if user.role != Role.ADMIN:
+            staff_id = _current_staff_id()
+
+            if leave.staff_id != staff_id:
+                raise NotFoundError(
+                    f"Leave request {leave_id} not found"
+                )
+
+        return jsonify({
+            "data": _serialize_leave(leave),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
-@staff_bp.post("/leaves/<int:leave_id>/approve")
+@staff_bp.post("/leave/<int:leave_id>/approve")
+@jwt_required()
 @role_required(*LEAVE_MANAGEMENT_ROLES)
-def approve_leave_request_route(leave_id: int):
-    payload = LeaveReviewSchema.model_validate(
-        request.get_json() or {}
+def approve_leave_route(leave_id: int):
+    _, error = _validate_json(
+        LeaveReviewSchema,
     )
 
-    leave = approve_leave_request(
-        leave_id=leave_id,
-        reviewed_by_id=payload.reviewed_by_id,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Leave request approved successfully",
-        "data": _serialize_leave(leave),
-    }), 200
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        leave = approve_leave_request(
+            leave_id=leave_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=user.id,
+        )
+
+        return jsonify({
+            "message": "Leave request approved successfully",
+            "data": _serialize_leave(leave),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
-@staff_bp.post("/leaves/<int:leave_id>/reject")
+@staff_bp.post("/leave/<int:leave_id>/reject")
+@jwt_required()
 @role_required(*LEAVE_MANAGEMENT_ROLES)
-def reject_leave_request_route(leave_id: int):
-    payload = LeaveRejectSchema.model_validate(
-        request.get_json() or {}
+def reject_leave_route(leave_id: int):
+    payload, error = _validate_json(
+        LeaveRejectSchema,
     )
 
-    leave = reject_leave_request(
-        leave_id=leave_id,
-        reviewed_by_id=payload.reviewed_by_id,
-        reason=payload.reason,
+    if error:
+        return error
+
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        leave = reject_leave_request(
+            leave_id=leave_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=user.id,
+            reason=payload.reason,
+        )
+
+        return jsonify({
+            "message": "Leave request rejected successfully",
+            "data": _serialize_leave(leave),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+# ============================================================================
+# EXCUSES
+# ============================================================================
+
+@staff_bp.post("/excuses")
+@jwt_required()
+@role_required(*STAFF_VIEW_ROLES)
+def create_excuse_route():
+    payload, error = _validate_json(
+        ExcuseCreateSchema,
     )
 
-    return jsonify({
-        "message": "Leave request rejected successfully",
-        "data": _serialize_leave(leave),
-    }), 200
+    if error:
+        return error
+
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+        staff_id = _current_staff_id()
+
+        excuse = create_excuse(
+            clinic_id=clinic_id,
+            staff_id=staff_id,
+            actor_user_id=user.id,
+            excuse_type=payload.excuse_type,
+            description=payload.description,
+            leave_request_id=payload.leave_request_id,
+            document_url=payload.document_url,
+        )
+
+        return jsonify({
+            "message": "Excuse submitted successfully",
+            "data": _serialize_excuse(excuse),
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+@staff_bp.get("/excuses")
+@jwt_required()
+@role_required(*STAFF_VIEW_ROLES)
+def list_excuses_route():
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        payload = ExcuseListQuerySchema.model_validate(
+            request.args.to_dict(),
+        )
+
+        if user.role == Role.ADMIN:
+            excuses = list_excuses(
+                clinic_id=clinic_id,
+                staff_id=payload.staff_id,
+                leave_request_id=payload.leave_request_id,
+                excuse_type=payload.excuse_type,
+                status=payload.status,
+            )
+        else:
+            staff_id = _current_staff_id()
+
+            excuses = list_excuses(
+                clinic_id=clinic_id,
+                staff_id=staff_id,
+                leave_request_id=payload.leave_request_id,
+                excuse_type=payload.excuse_type,
+                status=payload.status,
+            )
+
+        return jsonify({
+            "data": [
+                _serialize_excuse(excuse)
+                for excuse in excuses
+            ],
+        }), 200
+
+    except PydanticValidationError as exc:
+        return jsonify({
+            "error": "Validation failed",
+            "details": exc.errors(),
+        }), 422
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+@staff_bp.get("/excuses/me")
+@jwt_required()
+@role_required(*STAFF_VIEW_ROLES)
+def get_my_excuses_route():
+    try:
+        clinic_id = _current_clinic_id()
+        staff_id = _current_staff_id()
+
+        excuses = get_my_excuses(
+            clinic_id=clinic_id,
+            staff_id=staff_id,
+        )
+
+        return jsonify({
+            "data": [
+                _serialize_excuse(excuse)
+                for excuse in excuses
+            ],
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+@staff_bp.get("/excuses/<int:excuse_id>")
+@jwt_required()
+@role_required(*STAFF_VIEW_ROLES)
+def get_excuse_route(excuse_id: int):
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        excuse = get_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
+        )
+
+        if user.role != Role.ADMIN:
+            staff_id = _current_staff_id()
+
+            if excuse.staff_id != staff_id:
+                raise NotFoundError(
+                    f"Excuse {excuse_id} not found"
+                )
+
+        return jsonify({
+            "data": _serialize_excuse(excuse),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+@staff_bp.post("/excuses/<int:excuse_id>/approve")
+@jwt_required()
+@role_required(*EXCUSE_REVIEW_ROLES)
+def approve_excuse_route(excuse_id: int):
+    _, error = _validate_json(
+        ExcuseReviewSchema,
+    )
+
+    if error:
+        return error
+
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        excuse = approve_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=user.id,
+        )
+
+        return jsonify({
+            "message": "Excuse approved successfully",
+            "data": _serialize_excuse(excuse),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
+
+
+@staff_bp.post("/excuses/<int:excuse_id>/reject")
+@jwt_required()
+@role_required(*EXCUSE_REVIEW_ROLES)
+def reject_excuse_route(excuse_id: int):
+    payload, error = _validate_json(
+        ExcuseRejectSchema,
+    )
+
+    if error:
+        return error
+
+    try:
+        user = _current_user()
+        clinic_id = _current_clinic_id()
+
+        excuse = reject_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=user.id,
+            reason=payload.reason,
+        )
+
+        return jsonify({
+            "message": "Excuse rejected successfully",
+            "data": _serialize_excuse(excuse),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 # ============================================================================
 # PAYROLL
 # ============================================================================
 
-
 @staff_bp.post("/payroll")
+@jwt_required()
 @role_required(*PAYROLL_ROLES)
-def create_payroll_record_route():
-    payload = PayrollCreateSchema.model_validate(
-        request.get_json() or {}
+def create_payroll_route():
+    payload, error = _validate_json(
+        PayrollCreateSchema,
     )
 
-    record = create_payroll_record(
-        staff_id=payload.staff_id,
-        pay_period_start=payload.pay_period_start,
-        pay_period_end=payload.pay_period_end,
-        base_salary=payload.base_salary,
-        bonuses=payload.bonuses,
-        deductions=payload.deductions,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Payroll record created successfully",
-        "data": _serialize_payroll(record),
-    }), 201
+    try:
+        clinic_id = _current_clinic_id()
+
+        record = create_payroll_record(
+            clinic_id=clinic_id,
+            staff_id=payload.staff_id,
+            pay_period_start=payload.pay_period_start,
+            pay_period_end=payload.pay_period_end,
+            base_salary=payload.base_salary,
+            bonuses=payload.bonuses,
+            deductions=payload.deductions,
+        )
+
+        return jsonify({
+            "message": "Payroll record created successfully",
+            "data": _serialize_payroll(record),
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.post("/payroll/generate")
+@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def generate_payroll_route():
-    payload = PayrollGenerateSchema.model_validate(
-        request.get_json() or {}
+    payload, error = _validate_json(
+        PayrollGenerateSchema,
     )
 
-    records = generate_payroll_for_period(
-        clinic_id=payload.clinic_id,
-        pay_period_start=payload.pay_period_start,
-        pay_period_end=payload.pay_period_end,
-        salary_lookup=payload.salary_lookup,
-    )
+    if error:
+        return error
 
-    return jsonify({
-        "message": "Payroll generated successfully",
-        "data": [
-            _serialize_payroll(record)
-            for record in records
-        ],
-        "count": len(records),
-    }), 201
+    try:
+        clinic_id = _current_clinic_id()
+
+        records = generate_payroll_for_period(
+            clinic_id=clinic_id,
+            pay_period_start=payload.pay_period_start,
+            pay_period_end=payload.pay_period_end,
+            salary_lookup=payload.salary_lookup,
+        )
+
+        return jsonify({
+            "message": "Payroll generated successfully",
+            "data": [
+                _serialize_payroll(record)
+                for record in records
+            ],
+        }), 201
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.get("/payroll")
+@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def list_payroll_route():
-    payload = PayrollListQuerySchema.model_validate(
-        request.args.to_dict()
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    if payload.staff_id is None:
+        payload = PayrollListQuerySchema.model_validate(
+            request.args.to_dict(),
+        )
+
+        if payload.staff_id is not None:
+            records = list_payroll_for_staff(
+                clinic_id=clinic_id,
+                staff_id=payload.staff_id,
+            )
+        else:
+            records = list_payroll(
+                clinic_id=clinic_id,
+            )
+
         return jsonify({
-            "error": "staff_id query parameter is required",
+            "data": [
+                _serialize_payroll(record)
+                for record in records
+            ],
+        }), 200
+
+    except PydanticValidationError as exc:
+        return jsonify({
+            "error": "Validation failed",
+            "details": exc.errors(),
         }), 422
 
-    records = list_payroll_for_staff(
-        staff_id=payload.staff_id,
-    )
-
-    return jsonify({
-        "data": [
-            _serialize_payroll(record)
-            for record in records
-        ],
-    }), 200
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.get("/payroll/<int:record_id>")
+@jwt_required()
 @role_required(*PAYROLL_ROLES)
-def get_payroll_record_route(record_id: int):
-    record = get_payroll_record(record_id)
+def get_payroll_route(record_id: int):
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "data": _serialize_payroll(record),
-    }), 200
+        record = get_payroll_record(
+            record_id=record_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "data": _serialize_payroll(record),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code
 
 
 @staff_bp.post("/payroll/<int:record_id>/pay")
+@jwt_required()
 @role_required(*PAYROLL_ROLES)
 def mark_payroll_paid_route(record_id: int):
-    record = mark_payroll_paid(
-        record_id=record_id,
-    )
+    try:
+        clinic_id = _current_clinic_id()
 
-    return jsonify({
-        "message": "Payroll marked as paid successfully",
-        "data": _serialize_payroll(record),
-    }), 200
+        record = mark_payroll_paid(
+            record_id=record_id,
+            clinic_id=clinic_id,
+        )
+
+        return jsonify({
+            "message": "Payroll marked as paid successfully",
+            "data": _serialize_payroll(record),
+        }), 200
+
+    except DomainError as exc:
+        return jsonify({
+            "error": str(exc),
+        }), exc.status_code

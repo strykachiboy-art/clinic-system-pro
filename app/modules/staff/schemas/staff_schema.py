@@ -2,7 +2,12 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from app.core.enums.staff_enums import (
     LeaveStatus,
@@ -17,15 +22,17 @@ from app.core.enums.staff_enums import (
 
 
 class StaffCreateSchema(BaseModel):
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-        description="ID of the clinic the staff member belongs to",
-    )
+    """
+    Create a staff profile.
+
+    clinic_id is intentionally excluded.
+    The clinic comes from the authenticated user's account.
+    """
+
     user_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Optional user account linked to this staff member",
+        description="Optional user account to link to the staff profile",
     )
 
     first_name: str = Field(
@@ -33,23 +40,28 @@ class StaffCreateSchema(BaseModel):
         min_length=1,
         max_length=80,
     )
+
     last_name: str = Field(
         ...,
         min_length=1,
         max_length=80,
     )
+
     specialty: Optional[str] = Field(
         default=None,
         max_length=100,
     )
+
     phone: Optional[str] = Field(
         default=None,
         max_length=30,
     )
+
     email: Optional[str] = Field(
         default=None,
         max_length=120,
     )
+
     hired_at: Optional[date] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -61,43 +73,42 @@ class StaffUpdateSchema(BaseModel):
         min_length=1,
         max_length=80,
     )
+
     last_name: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=80,
     )
+
     specialty: Optional[str] = Field(
         default=None,
         max_length=100,
     )
+
     phone: Optional[str] = Field(
         default=None,
         max_length=30,
     )
+
     email: Optional[str] = Field(
         default=None,
         max_length=120,
     )
+
     hired_at: Optional[date] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class StaffStatusUpdateSchema(BaseModel):
-    status: StaffStatus = Field(
-        ...,
-        description="New staff status",
-    )
+    status: StaffStatus
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class StaffListQuerySchema(BaseModel):
-    clinic_id: Optional[int] = Field(
-        default=None,
-        gt=0,
-    )
     status: Optional[StaffStatus] = None
+
     search: Optional[str] = Field(
         default=None,
         max_length=100,
@@ -112,13 +123,19 @@ class StaffListQuerySchema(BaseModel):
 
 
 class LeaveRequestCreateSchema(BaseModel):
-    staff_id: int = Field(
-        ...,
-        gt=0,
-    )
+    """
+    Create a leave request for the authenticated staff member.
+
+    staff_id is intentionally excluded.
+    The staff member comes from the authenticated user.
+    """
+
     leave_type: LeaveType = Field(...)
+
     start_date: date = Field(...)
+
     end_date: date = Field(...)
+
     reason: Optional[str] = Field(
         default=None,
         max_length=2000,
@@ -127,28 +144,32 @@ class LeaveRequestCreateSchema(BaseModel):
     @model_validator(mode="after")
     def validate_dates(self):
         if self.end_date < self.start_date:
-            raise ValueError("Leave end date cannot be before start date")
+            raise ValueError(
+                "Leave end date cannot be before start date"
+            )
+
         return self
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class LeaveReviewSchema(BaseModel):
-    reviewed_by_id: int = Field(
-        ...,
-        gt=0,
-        description="Staff ID of the person reviewing the leave request",
-    )
+    """
+    Approve a leave request.
+
+    The reviewer is always the authenticated user.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class LeaveRejectSchema(BaseModel):
-    reviewed_by_id: int = Field(
-        ...,
-        gt=0,
-        description="Staff ID of the person rejecting the leave request",
-    )
+    """
+    Reject a leave request.
+
+    The reviewer is always the authenticated user.
+    """
+
     reason: Optional[str] = Field(
         default=None,
         max_length=2000,
@@ -158,10 +179,18 @@ class LeaveRejectSchema(BaseModel):
 
 
 class LeaveListQuerySchema(BaseModel):
+    """
+    Admins may filter by any staff member.
+
+    Non-admins are restricted by the route to their own
+    staff record.
+    """
+
     staff_id: Optional[int] = Field(
         default=None,
         gt=0,
     )
+
     status: Optional[LeaveStatus] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -177,17 +206,21 @@ class PayrollCreateSchema(BaseModel):
         ...,
         gt=0,
     )
+
     pay_period_start: date = Field(...)
+
     pay_period_end: date = Field(...)
 
     base_salary: Decimal = Field(
         ...,
         ge=Decimal("0"),
     )
+
     bonuses: Decimal = Field(
         default=Decimal("0"),
         ge=Decimal("0"),
     )
+
     deductions: Decimal = Field(
         default=Decimal("0"),
         ge=Decimal("0"),
@@ -199,17 +232,26 @@ class PayrollCreateSchema(BaseModel):
             raise ValueError(
                 "Pay period end cannot be before pay period start"
             )
+
+        net_pay = (
+            self.base_salary
+            + self.bonuses
+            - self.deductions
+        )
+
+        if net_pay < Decimal("0"):
+            raise ValueError(
+                "Deductions cannot exceed total earnings"
+            )
+
         return self
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class PayrollGenerateSchema(BaseModel):
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-    )
     pay_period_start: date = Field(...)
+
     pay_period_end: date = Field(...)
 
     salary_lookup: dict[int, Decimal] = Field(
