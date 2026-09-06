@@ -16,10 +16,21 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # JWT
-    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-change-me")
+        # JWT
+    JWT_SECRET_KEY = os.environ.get(
+        "JWT_SECRET_KEY",
+        "dev-jwt-secret-change-me",
+    )
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+    GOOGLE_REDIRECT_URI = os.environ.get(
+        "GOOGLE_REDIRECT_URI",
+        "http://localhost:5000/api/auth/google/callback",
+    )
 
     # Redis / Celery
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")

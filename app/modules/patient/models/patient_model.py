@@ -19,6 +19,15 @@ class Patient(db.Model):
         db.Integer,
         primary_key=True,
     )
+    
+    user_id = db.Column(
+    db.Integer,
+    db.ForeignKey("users.id"),
+    nullable=True,
+    unique=True,
+    index=True,
+    
+    )
 
     clinic_id = db.Column(
         db.Integer,
