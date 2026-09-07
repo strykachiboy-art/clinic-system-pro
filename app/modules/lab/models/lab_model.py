@@ -22,10 +22,19 @@ class LabTest(db.Model):
             "OR critical_low <= critical_high",
             name="ck_lab_tests_valid_critical_range",
         ),
+        db.CheckConstraint(
+            "price IS NULL OR price >= 0",
+            name="ck_lab_tests_price_non_negative",
+        ),
     )
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
+    # NULL = global/shared laboratory test.
+    # Non-NULL = clinic-specific laboratory test.
     clinic_id = db.Column(
         db.Integer,
         db.ForeignKey("clinics.id"),
@@ -77,9 +86,10 @@ class LabTest(db.Model):
 
     # Numeric critical thresholds.
     #
-    # These are intentionally separate from reference_range because
-    # reference_range is primarily descriptive/display information,
-    # while these values can be used for automatic CRITICAL flagging.
+    # These are separate from reference_range because
+    # reference_range is descriptive/display information,
+    # while these values can be used for automatic
+    # CRITICAL flagging.
     critical_low = db.Column(
         db.Numeric(10, 3),
         nullable=True,
@@ -122,10 +132,87 @@ class LabTest(db.Model):
 class LabOrder(db.Model):
     __tablename__ = "lab_orders"
 
+    __table_args__ = (
+        # ---------------------------------------------------------
+        # Collection timestamp integrity
+        # ---------------------------------------------------------
+        db.CheckConstraint(
+            "sample_collected_at IS NULL "
+            "OR sample_collected_at >= created_at",
+            name="ck_lab_orders_sample_collected_after_created",
+        ),
+
+        # ---------------------------------------------------------
+        # Processing timestamp integrity
+        # ---------------------------------------------------------
+        db.CheckConstraint(
+            "processed_at IS NULL "
+            "OR processed_at >= created_at",
+            name="ck_lab_orders_processed_after_created",
+        ),
+
+        db.CheckConstraint(
+            "processed_at IS NULL "
+            "OR sample_collected_at IS NULL "
+            "OR processed_at >= sample_collected_at",
+            name="ck_lab_orders_processed_after_sample",
+        ),
+
+        # ---------------------------------------------------------
+        # Verification timestamp integrity
+        # ---------------------------------------------------------
+        db.CheckConstraint(
+            "verified_at IS NULL "
+            "OR verified_at >= created_at",
+            name="ck_lab_orders_verified_after_created",
+        ),
+
+        db.CheckConstraint(
+            "verified_at IS NULL "
+            "OR processed_at IS NULL "
+            "OR verified_at >= processed_at",
+            name="ck_lab_orders_verified_after_processed",
+        ),
+
+        # ---------------------------------------------------------
+        # Completion timestamp integrity
+        # ---------------------------------------------------------
+        db.CheckConstraint(
+            "completed_at IS NULL "
+            "OR completed_at >= created_at",
+            name="ck_lab_orders_completed_after_created",
+        ),
+
+        db.CheckConstraint(
+            "completed_at IS NULL "
+            "OR sample_collected_at IS NULL "
+            "OR completed_at >= sample_collected_at",
+            name="ck_lab_orders_completed_after_sample",
+        ),
+
+        db.CheckConstraint(
+            "completed_at IS NULL "
+            "OR processed_at IS NULL "
+            "OR completed_at >= processed_at",
+            name="ck_lab_orders_completed_after_processed",
+        ),
+
+        db.CheckConstraint(
+            "completed_at IS NULL "
+            "OR verified_at IS NULL "
+            "OR completed_at >= verified_at",
+            name="ck_lab_orders_completed_after_verified",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
     )
+
+    # -------------------------------------------------------------
+    # Tenant ownership
+    # -------------------------------------------------------------
 
     clinic_id = db.Column(
         db.Integer,
@@ -148,12 +235,44 @@ class LabOrder(db.Model):
         index=True,
     )
 
+    # -------------------------------------------------------------
+    # Clinical actors
+    #
+    # These are populated by the service from the authenticated
+    # user's Staff record. They must NOT come from the request body.
+    # -------------------------------------------------------------
+
     ordered_by_id = db.Column(
         db.Integer,
         db.ForeignKey("staff.id"),
         nullable=False,
         index=True,
     )
+
+    collected_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("staff.id"),
+        nullable=True,
+        index=True,
+    )
+
+    processed_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("staff.id"),
+        nullable=True,
+        index=True,
+    )
+
+    verified_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("staff.id"),
+        nullable=True,
+        index=True,
+    )
+
+    # -------------------------------------------------------------
+    # Order lifecycle
+    # -------------------------------------------------------------
 
     status = db.Column(
         db.Enum(LabOrderStatus),
@@ -162,6 +281,8 @@ class LabOrder(db.Model):
         index=True,
     )
 
+    # Unique QR identifier used to identify the order during
+    # specimen collection/workflow.
     qr_code = db.Column(
         db.String(150),
         unique=True,
@@ -169,10 +290,36 @@ class LabOrder(db.Model):
         index=True,
     )
 
+    # -------------------------------------------------------------
+    # Collection
+    # -------------------------------------------------------------
+
     sample_collected_at = db.Column(
         db.DateTime,
         nullable=True,
     )
+
+    # -------------------------------------------------------------
+    # Processing
+    # -------------------------------------------------------------
+
+    processed_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    # -------------------------------------------------------------
+    # Verification
+    # -------------------------------------------------------------
+
+    verified_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    # -------------------------------------------------------------
+    # Equipment
+    # -------------------------------------------------------------
 
     equipment_reference_id = db.Column(
         db.String(150),
@@ -180,12 +327,20 @@ class LabOrder(db.Model):
         index=True,
     )
 
-    # Persisted separately so cancellation reason is queryable/reportable
-    # and does not exist only inside the audit log.
+    # -------------------------------------------------------------
+    # Cancellation
+    # -------------------------------------------------------------
+
+    # Persisted separately so cancellation reason is
+    # queryable/reportable and not stored only in audit logs.
     cancellation_reason = db.Column(
         db.String(255),
         nullable=True,
     )
+
+    # -------------------------------------------------------------
+    # Timestamps
+    # -------------------------------------------------------------
 
     created_at = db.Column(
         db.DateTime,
@@ -205,6 +360,10 @@ class LabOrder(db.Model):
         nullable=True,
     )
 
+    # -------------------------------------------------------------
+    # Relationships
+    # -------------------------------------------------------------
+
     clinic = db.relationship(
         "Clinic",
         back_populates="lab_orders",
@@ -220,9 +379,27 @@ class LabOrder(db.Model):
         back_populates="lab_orders",
     )
 
+    # Multiple foreign keys point to Staff, so foreign_keys must
+    # be explicit to avoid SQLAlchemy relationship ambiguity.
     ordered_by = db.relationship(
         "Staff",
+        foreign_keys=[ordered_by_id],
         back_populates="lab_orders",
+    )
+
+    collected_by = db.relationship(
+        "Staff",
+        foreign_keys=[collected_by_id],
+    )
+
+    processed_by = db.relationship(
+        "Staff",
+        foreign_keys=[processed_by_id],
+    )
+
+    verified_by = db.relationship(
+        "Staff",
+        foreign_keys=[verified_by_id],
     )
 
     items = db.relationship(
@@ -243,8 +420,8 @@ class LabOrderItem(db.Model):
     """
     A single laboratory test within a lab order.
 
-    Stores the result associated with that test once the laboratory
-    processing is completed.
+    Stores the result associated with that test once
+    laboratory processing is completed.
     """
 
     __tablename__ = "lab_order_items"

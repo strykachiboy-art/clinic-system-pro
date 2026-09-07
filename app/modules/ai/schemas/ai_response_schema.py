@@ -8,6 +8,9 @@ from app.core.enums.ai_enums import AIRiskLevel
 class AIResponseBaseSchema(BaseModel):
     """
     Common response fields returned by AI features.
+
+    These represent AI-generated suggestions and must not be
+    interpreted as clinician-authored clinical truth.
     """
 
     summary: Optional[str] = Field(

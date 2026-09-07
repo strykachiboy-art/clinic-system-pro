@@ -31,7 +31,7 @@ class ReportFiltersSchema(BaseModel):
         cls,
         value: Optional[date],
         info,
-    ):
+    ) -> Optional[date]:
         if value is None:
             return value
 
@@ -48,12 +48,6 @@ class ReportFiltersSchema(BaseModel):
 
 
 class ReportGenerateSchema(BaseModel):
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-        description="ID of the clinic the report belongs to",
-    )
-
     report_type: ReportType = Field(
         ...,
         description="Type of report to generate",
@@ -69,15 +63,13 @@ class ReportGenerateSchema(BaseModel):
         description="Filters applied when generating the report",
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class ReportQuerySchema(BaseModel):
-    clinic_id: Optional[int] = Field(
-        default=None,
-        gt=0,
-    )
-
     report_type: Optional[ReportType] = Field(
         default=None,
     )
@@ -116,7 +108,7 @@ class ReportQuerySchema(BaseModel):
         cls,
         value: Optional[date],
         info,
-    ):
+    ) -> Optional[date]:
         if value is None:
             return value
 
@@ -129,7 +121,10 @@ class ReportQuerySchema(BaseModel):
 
         return value
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class GeneratedReportResponseSchema(BaseModel):

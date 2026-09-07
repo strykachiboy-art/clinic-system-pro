@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
+
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
@@ -44,17 +46,43 @@ def _utcnow():
 
 def get_consultation(
     consultation_id: int,
+    clinic_id: int | None = None,
+    *,
+    for_update: bool = False,
 ) -> Consultation:
     """
-    Retrieve a consultation regardless of clinic status.
+    Retrieve a consultation.
 
-    Historical consultations must remain accessible even when
-    the clinic is inactive or suspended.
+    Historical consultations remain readable even when the clinic
+    is inactive or suspended.
+
+    When clinic_id is supplied, the consultation must belong to
+    that clinic. This is the tenant-isolation boundary used by
+    authenticated API operations.
     """
-    consultation = db.session.get(
-        Consultation,
-        consultation_id,
+    if consultation_id <= 0:
+        raise ValidationError(
+            "Consultation ID must be greater than 0"
+        )
+
+    query = Consultation.query.filter(
+        Consultation.id == consultation_id
     )
+
+    if clinic_id is not None:
+        if clinic_id <= 0:
+            raise ValidationError(
+                "Clinic ID must be greater than 0"
+            )
+
+        query = query.filter(
+            Consultation.clinic_id == clinic_id
+        )
+
+    if for_update:
+        query = query.with_for_update()
+
+    consultation = query.first()
 
     if consultation is None:
         raise NotFoundError(
@@ -70,7 +98,15 @@ def get_consultation_template(
     """
     Retrieve a consultation template regardless of whether
     it is currently active.
+
+    Tenant authorization is handled by the caller/service
+    operation that uses the template.
     """
+    if template_id <= 0:
+        raise ValidationError(
+            "Consultation template ID must be greater than 0"
+        )
+
     template = db.session.get(
         ConsultationTemplate,
         template_id,
@@ -103,6 +139,21 @@ def _validate_consultation_participants(
     The patient and staff member must both belong to the
     specified clinic.
     """
+    if clinic_id <= 0:
+        raise ValidationError(
+            "Clinic ID must be greater than 0"
+        )
+
+    if patient_id <= 0:
+        raise ValidationError(
+            "Patient ID must be greater than 0"
+        )
+
+    if staff_id <= 0:
+        raise ValidationError(
+            "Staff ID must be greater than 0"
+        )
+
     clinic = ensure_clinic_active(clinic_id)
 
     patient = get_patient(patient_id)
@@ -182,21 +233,26 @@ def _validate_appointment(
     - belong to the same staff member
     - be SCHEDULED or CONFIRMED
 
-    Terminal or cancelled appointments cannot be used to start
-    a new consultation.
+    The appointment row is locked to prevent concurrent
+    consultation creation from racing against appointment state.
     """
     if appointment_id is None:
         return None
 
-    # Local import avoids unnecessary circular imports during
-    # module initialization.
+    if appointment_id <= 0:
+        raise ValidationError(
+            "Appointment ID must be greater than 0"
+        )
+
     from app.modules.appointment.models.appointment_model import (
         Appointment,
     )
 
-    appointment = db.session.get(
-        Appointment,
-        appointment_id,
+    appointment = (
+        Appointment.query
+        .filter(Appointment.id == appointment_id)
+        .with_for_update()
+        .first()
     )
 
     if appointment is None:
@@ -239,8 +295,6 @@ def _validate_consultation_can_be_completed(
     consultation: Consultation,
 ):
     """
-    Ensure that a consultation can be completed.
-
     Only IN_PROGRESS consultations can be completed.
     """
     if consultation.status == ConsultationStatus.COMPLETED:
@@ -255,13 +309,17 @@ def _validate_consultation_can_be_completed(
             "and cannot be completed"
         )
 
+    if consultation.status != ConsultationStatus.IN_PROGRESS:
+        raise ConflictError(
+            f"Consultation {consultation.id} is currently "
+            f"'{consultation.status.value}' and cannot be completed"
+        )
+
 
 def _validate_consultation_can_be_cancelled(
     consultation: Consultation,
 ):
     """
-    Ensure that a consultation can be cancelled.
-
     Only IN_PROGRESS consultations can be cancelled.
     """
     if consultation.status == ConsultationStatus.COMPLETED:
@@ -274,6 +332,12 @@ def _validate_consultation_can_be_cancelled(
         raise ConflictError(
             f"Consultation {consultation.id} "
             "is already cancelled"
+        )
+
+    if consultation.status != ConsultationStatus.IN_PROGRESS:
+        raise ConflictError(
+            f"Consultation {consultation.id} is currently "
+            f"'{consultation.status.value}' and cannot be cancelled"
         )
 
 
@@ -372,21 +436,27 @@ def start_consultation(
 @transactional
 def update_consultation_note(
     consultation_id: int,
+    clinic_id: int,
     **fields,
 ) -> Consultation:
     """
     Update clinical documentation.
+
+    The consultation must belong to the authenticated clinic.
 
     The clinic must be ACTIVE because documentation changes are
     operational writes.
 
     Cancelled consultations cannot be edited.
 
-    Completed consultations may be updated for legitimate
-    documentation corrections or additions.
+    Completed consultations remain editable to preserve the
+    existing application's documentation-correction workflow.
+    Every actual change is recorded in the audit log.
     """
     consultation = get_consultation(
-        consultation_id
+        consultation_id=consultation_id,
+        clinic_id=clinic_id,
+        for_update=True,
     )
 
     ensure_clinic_active(
@@ -425,6 +495,9 @@ def update_consultation_note(
         if value is None:
             continue
 
+        if isinstance(value, str):
+            value = value.strip()
+
         current_value = getattr(
             consultation,
             key,
@@ -445,11 +518,18 @@ def update_consultation_note(
     if not new_value:
         return consultation
 
+    audit_action = AuditAction.UPDATE
+
+    if consultation.status == ConsultationStatus.COMPLETED:
+        description = "Completed consultation documentation amended"
+    else:
+        description = "Consultation note updated"
+
     create_audit_log(
-        action=AuditAction.UPDATE,
+        action=audit_action,
         entity_type="Consultation",
         entity_id=consultation.id,
-        description="Consultation note updated",
+        description=description,
         old_value=old_value,
         new_value=new_value,
     )
@@ -464,6 +544,7 @@ def update_consultation_note(
 @transactional
 def complete_consultation(
     consultation_id: int,
+    clinic_id: int,
     diagnosis: str,
     treatment_plan: str | None = None,
     notes: str | None = None,
@@ -473,11 +554,12 @@ def complete_consultation(
 
     Diagnosis is mandatory.
 
-    The clinic must still be ACTIVE because completing a
-    consultation is an operational write.
+    The consultation must belong to the authenticated clinic.
     """
     consultation = get_consultation(
-        consultation_id
+        consultation_id=consultation_id,
+        clinic_id=clinic_id,
+        for_update=True,
     )
 
     ensure_clinic_active(
@@ -499,10 +581,10 @@ def complete_consultation(
     consultation.diagnosis = diagnosis.strip()
 
     if treatment_plan is not None:
-        consultation.treatment_plan = treatment_plan
+        consultation.treatment_plan = treatment_plan.strip()
 
     if notes is not None:
-        consultation.notes = notes
+        consultation.notes = notes.strip()
 
     consultation.status = ConsultationStatus.COMPLETED
     consultation.ended_at = _utcnow()
@@ -531,16 +613,18 @@ def complete_consultation(
 @transactional
 def cancel_consultation(
     consultation_id: int,
+    clinic_id: int,
     reason: str | None = None,
 ) -> Consultation:
     """
     Cancel an in-progress consultation.
 
-    The clinic must be ACTIVE because cancellation is an
-    operational state change.
+    The consultation must belong to the authenticated clinic.
     """
     consultation = get_consultation(
-        consultation_id
+        consultation_id=consultation_id,
+        clinic_id=clinic_id,
+        for_update=True,
     )
 
     ensure_clinic_active(
@@ -599,19 +683,37 @@ def cancel_consultation(
 
 def get_consultations_for_patient(
     patient_id: int,
+    clinic_id: int,
 ) -> list[Consultation]:
     """
-    Return consultation history for a patient.
+    Return consultation history for a patient within the
+    authenticated clinic.
 
     Historical consultations remain accessible regardless of
     clinic status.
     """
-    get_patient(patient_id)
+    if patient_id <= 0:
+        raise ValidationError(
+            "Patient ID must be greater than 0"
+        )
+
+    if clinic_id <= 0:
+        raise ValidationError(
+            "Clinic ID must be greater than 0"
+        )
+
+    patient = get_patient(patient_id)
+
+    if patient.clinic_id != clinic_id:
+        raise NotFoundError(
+            f"Patient {patient_id} not found"
+        )
 
     return (
         Consultation.query
         .filter(
-            Consultation.patient_id == patient_id
+            Consultation.clinic_id == clinic_id,
+            Consultation.patient_id == patient_id,
         )
         .order_by(
             Consultation.started_at.desc()
@@ -626,18 +728,36 @@ def get_consultations_for_patient(
 
 def get_consultations_for_staff(
     staff_id: int,
+    clinic_id: int,
     status: ConsultationStatus | None = None,
 ) -> list[Consultation]:
     """
-    Return consultation history associated with a staff member.
+    Return consultation history associated with a staff member
+    within the authenticated clinic.
 
     Historical consultations remain accessible regardless of
     clinic status.
     """
-    get_staff(staff_id)
+    if staff_id <= 0:
+        raise ValidationError(
+            "Staff ID must be greater than 0"
+        )
+
+    if clinic_id <= 0:
+        raise ValidationError(
+            "Clinic ID must be greater than 0"
+        )
+
+    staff = get_staff(staff_id)
+
+    if staff.clinic_id != clinic_id:
+        raise NotFoundError(
+            f"Staff member {staff_id} not found"
+        )
 
     query = Consultation.query.filter(
-        Consultation.staff_id == staff_id
+        Consultation.clinic_id == clinic_id,
+        Consultation.staff_id == staff_id,
     )
 
     if status is not None:
@@ -672,6 +792,10 @@ def create_consultation_template(
     If clinic_id is supplied, the clinic must be ACTIVE.
 
     If clinic_id is None, the template is global.
+
+    Authorization for creating a global template belongs to the
+    route/authentication layer. The service only persists the
+    already-resolved clinic scope.
     """
     if not name or not name.strip():
         raise ValidationError(
@@ -683,15 +807,31 @@ def create_consultation_template(
             "Template structure must be an object"
         )
 
+    if not structure:
+        raise ValidationError(
+            "Template structure cannot be empty"
+        )
+
     if clinic_id is not None:
+        if clinic_id <= 0:
+            raise ValidationError(
+                "Clinic ID must be greater than 0"
+            )
+
         ensure_clinic_active(
             clinic_id
         )
 
+    cleaned_specialty = (
+        specialty.strip()
+        if isinstance(specialty, str)
+        else specialty
+    )
+
     template = ConsultationTemplate(
         clinic_id=clinic_id,
         name=name.strip(),
-        specialty=specialty,
+        specialty=cleaned_specialty,
         structure=structure,
         is_active=is_active,
     )
@@ -710,7 +850,7 @@ def create_consultation_template(
         new_value={
             "clinic_id": clinic_id,
             "name": template.name,
-            "specialty": specialty,
+            "specialty": cleaned_specialty,
             "is_active": is_active,
         },
     )
@@ -723,22 +863,30 @@ def get_active_templates(
 ) -> list[ConsultationTemplate]:
     """
     Return active consultation templates.
+
     When clinic_id is supplied:
-    
+
     - global templates are included
     - clinic-specific templates for that clinic are included
+
     When clinic_id is omitted:
-    
+
     - all active templates are returned
-    Inactive templates are never returned.
+
+    The route controls whether omitting clinic_id is authorized.
     """
+    if clinic_id is not None and clinic_id <= 0:
+        raise ValidationError(
+            "Clinic ID must be greater than 0"
+        )
+
     query = ConsultationTemplate.query.filter(
         ConsultationTemplate.is_active.is_(True)
     )
 
     if clinic_id is not None:
         query = query.filter(
-            db.or_(
+            or_(
                 ConsultationTemplate.clinic_id.is_(None),
                 ConsultationTemplate.clinic_id == clinic_id,
             )

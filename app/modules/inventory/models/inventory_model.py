@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.core.enums.inventory_enums import (
@@ -9,14 +11,28 @@ from app.core.enums.inventory_enums import (
 from app.extensions import db
 
 
-def _utcnow():
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
 class InventoryItem(db.Model):
     __tablename__ = "inventory_items"
 
-    id = db.Column(db.Integer, primary_key=True)
+    __table_args__ = (
+        db.CheckConstraint(
+            "quantity_on_hand >= 0",
+            name="ck_inventory_item_quantity_nonnegative",
+        ),
+        db.CheckConstraint(
+            "reorder_level >= 0",
+            name="ck_inventory_item_reorder_level_nonnegative",
+        ),
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     clinic_id = db.Column(
         db.Integer,
@@ -211,6 +227,13 @@ class InventorySupplier(db.Model):
 class InventoryBatch(db.Model):
     __tablename__ = "inventory_batches"
 
+    __table_args__ = (
+        db.CheckConstraint(
+            "quantity_on_hand >= 0",
+            name="ck_inventory_batch_quantity_nonnegative",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
@@ -340,6 +363,10 @@ class StockMovement(db.Model):
         index=True,
     )
 
+    # This remains without a positive CHECK constraint because
+    # adjustment requests may legitimately be signed at the
+    # service layer. The service converts adjustments to an
+    # effective positive quantity before persistence.
     quantity = db.Column(
         db.Integer,
         nullable=False,
@@ -403,6 +430,17 @@ class StockMovement(db.Model):
 
 class InventoryTransfer(db.Model):
     __tablename__ = "inventory_transfers"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "quantity > 0",
+            name="ck_inventory_transfer_quantity_positive",
+        ),
+        db.CheckConstraint(
+            "source_clinic_id <> destination_clinic_id",
+            name="ck_inventory_transfer_distinct_clinics",
+        ),
+    )
 
     id = db.Column(
         db.Integer,

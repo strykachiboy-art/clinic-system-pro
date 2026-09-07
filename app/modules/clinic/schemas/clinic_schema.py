@@ -1,7 +1,7 @@
 from datetime import time
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums.clinic_enums import ClinicStatus, ClinicType
 
@@ -21,6 +21,7 @@ class ClinicCreateSchema(BaseModel):
 
     parent_clinic_id: Optional[int] = Field(
         None,
+        gt=0,
         description="ID of the parent clinic when creating a branch",
     )
 
@@ -76,8 +77,21 @@ class ClinicCreateSchema(BaseModel):
         description="Clinic closing time",
     )
 
+    @model_validator(mode="after")
+    def validate_opening_hours(self):
+        if (
+            self.opening_time is not None
+            and self.closing_time is not None
+            and self.opening_time >= self.closing_time
+        ):
+            raise ValueError(
+                "Opening time must be earlier than closing time"
+            )
+        return self
+
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )
 
 
@@ -141,8 +155,21 @@ class ClinicBranchCreateSchema(BaseModel):
         description="Branch closing time",
     )
 
+    @model_validator(mode="after")
+    def validate_opening_hours(self):
+        if (
+            self.opening_time is not None
+            and self.closing_time is not None
+            and self.opening_time >= self.closing_time
+        ):
+            raise ValueError(
+                "Opening time must be earlier than closing time"
+            )
+        return self
+
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )
 
 
@@ -206,6 +233,18 @@ class ClinicUpdateSchema(BaseModel):
         description="Updated clinic closing time",
     )
 
+    @model_validator(mode="after")
+    def validate_opening_hours(self):
+        if (
+            self.opening_time is not None
+            and self.closing_time is not None
+            and self.opening_time >= self.closing_time
+        ):
+            raise ValueError(
+                "Opening time must be earlier than closing time"
+            )
+        return self
+
     model_config = ConfigDict(
         from_attributes=True,
         extra="forbid",
@@ -215,6 +254,7 @@ class ClinicUpdateSchema(BaseModel):
 class ClinicBranchConfigurationSchema(BaseModel):
     parent_clinic_id: Optional[int] = Field(
         None,
+        gt=0,
         description=(
             "Parent clinic ID. Set to null to detach "
             "the clinic from its current parent."
@@ -240,6 +280,7 @@ class ClinicStatusUpdateSchema(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )
 
 
@@ -252,4 +293,5 @@ class ClinicAICreditsUpdateSchema(BaseModel):
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )

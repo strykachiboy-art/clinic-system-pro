@@ -19,6 +19,20 @@ class Clinic(db.Model):
             "id != parent_clinic_id",
             name="ck_clinics_not_self_parent",
         ),
+        db.CheckConstraint(
+            "ai_credits >= 0",
+            name="ck_clinics_ai_credits_non_negative",
+        ),
+        db.CheckConstraint(
+            "ai_requests_this_month >= 0",
+            name="ck_clinics_ai_requests_non_negative",
+        ),
+        db.CheckConstraint(
+            "opening_time IS NULL "
+            "OR closing_time IS NULL "
+            "OR opening_time < closing_time",
+            name="ck_clinics_valid_opening_hours",
+        ),
     )
 
     id = db.Column(
@@ -152,15 +166,15 @@ class Clinic(db.Model):
         "Appointment",
         back_populates="clinic",
     )
-    
+
     drugs = db.relationship(
-       "Drug",
-       back_populates="clinic",
+        "Drug",
+        back_populates="clinic",
     )
 
     drug_batches = db.relationship(
         "DrugBatch",
-       back_populates="clinic",
+        back_populates="clinic",
     )
 
     invoices = db.relationship(

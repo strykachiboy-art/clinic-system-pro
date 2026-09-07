@@ -1,10 +1,12 @@
 from flask import Blueprint, jsonify, request, g
+from flask_limiter import Limiter
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
 from app.core.utils.decorators import role_required
+from app.extensions import limiter
 
 from app.modules.ai.schemas.ai_schema import (
     DrugInteractionCheckSchema,
@@ -34,6 +36,9 @@ AI_ROLES = (
 )
 
 
+AI_RATE_LIMIT = "10 per minute"
+
+
 def _current_user() -> User:
     """
     Return the authenticated User from the decorator-provided
@@ -42,10 +47,14 @@ def _current_user() -> User:
     user = User.query.get(g.current_user_id)
 
     if user is None:
-        raise ValidationError("Authenticated user was not found")
+        raise ValidationError(
+            "Authenticated user was not found"
+        )
 
     if not user.is_active:
-        raise ValidationError("User account is inactive")
+        raise ValidationError(
+            "User account is inactive"
+        )
 
     return user
 
@@ -67,6 +76,7 @@ def _current_clinic_id() -> int:
 
 
 @ai_bp.post("/drug-interactions")
+@limiter.limit(AI_RATE_LIMIT)
 @role_required(*AI_ROLES)
 def drug_interactions():
     try:
@@ -107,6 +117,7 @@ def drug_interactions():
 
 
 @ai_bp.post("/triage")
+@limiter.limit(AI_RATE_LIMIT)
 @role_required(*AI_ROLES)
 def triage():
     try:
@@ -148,6 +159,7 @@ def triage():
 
 
 @ai_bp.post("/lab-results/interpret")
+@limiter.limit(AI_RATE_LIMIT)
 @role_required(*AI_ROLES)
 def lab_results():
     try:

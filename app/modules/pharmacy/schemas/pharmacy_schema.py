@@ -30,6 +30,22 @@ def _normalize_text(value: str | None) -> str | None:
     return value or None
 
 
+def _validate_future_expiry(value: date) -> date:
+    """
+    Pharmacy batches must expire strictly after today.
+
+    A batch expiring today is treated as non-receivable because it cannot
+    safely be considered valid stock for dispensing.
+    """
+
+    if value <= date.today():
+        raise ValueError(
+            "Expiry date must be in the future"
+        )
+
+    return value
+
+
 # ============================================================================
 # DRUG SCHEMAS
 # ============================================================================
@@ -38,11 +54,6 @@ def _normalize_text(value: str | None) -> str | None:
 class DrugCreateSchema(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-    )
-
-    clinic_id: int | None = Field(
-        default=None,
-        gt=0,
     )
 
     name: str = Field(
@@ -95,6 +106,7 @@ class DrugCreateSchema(BaseModel):
     )
 
     @field_validator(
+        "name",
         "generic_name",
         "rxnorm_code",
         "barcode",
@@ -105,7 +117,10 @@ class DrugCreateSchema(BaseModel):
     )
     @classmethod
     def normalize_text_fields(cls, value):
-        return _normalize_text(value)
+        if isinstance(value, str):
+            value = value.strip()
+
+        return value
 
 
 class DrugUpdateSchema(BaseModel):
@@ -163,6 +178,7 @@ class DrugUpdateSchema(BaseModel):
     )
 
     @field_validator(
+        "name",
         "generic_name",
         "rxnorm_code",
         "barcode",
@@ -173,7 +189,10 @@ class DrugUpdateSchema(BaseModel):
     )
     @classmethod
     def normalize_text_fields(cls, value):
-        return _normalize_text(value)
+        if isinstance(value, str):
+            value = value.strip()
+
+        return value
 
 
 class DrugResponseSchema(BaseModel):
@@ -218,11 +237,6 @@ class DrugBatchCreateSchema(BaseModel):
         extra="forbid",
     )
 
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-    )
-
     drug_id: int = Field(
         ...,
         gt=0,
@@ -258,6 +272,13 @@ class DrugBatchCreateSchema(BaseModel):
     @classmethod
     def normalize_batch_number(cls, value):
         return _normalize_text(value)
+
+    @field_validator(
+        "expiry_date",
+    )
+    @classmethod
+    def validate_expiry_date(cls, value: date) -> date:
+        return _validate_future_expiry(value)
 
 
 class DrugBatchResponseSchema(BaseModel):
@@ -322,6 +343,11 @@ class DispenseItemInputSchema(BaseModel):
         gt=0,
     )
 
+    batch_id: int = Field(
+        ...,
+        gt=0,
+    )
+
     quantity: int = Field(
         ...,
         gt=0,
@@ -333,17 +359,7 @@ class DispenseRecordCreateSchema(BaseModel):
         extra="forbid",
     )
 
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-    )
-
     prescription_id: int = Field(
-        ...,
-        gt=0,
-    )
-
-    dispensed_by_id: int = Field(
         ...,
         gt=0,
     )
@@ -375,11 +391,6 @@ class DispenseRecordCreateSchema(BaseModel):
 class DispenseRecordCancelSchema(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-    )
-
-    clinic_id: int = Field(
-        ...,
-        gt=0,
     )
 
 

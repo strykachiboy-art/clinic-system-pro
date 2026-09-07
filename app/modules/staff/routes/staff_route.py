@@ -115,11 +115,7 @@ EXCUSE_REVIEW_ROLES = (
 # ============================================================================
 
 def _current_user() -> User:
-    user_id = getattr(
-        g,
-        "current_user_id",
-        None,
-    )
+    user_id = getattr(g, "current_user_id", None)
 
     if user_id is None:
         raise ValidationError(
@@ -163,6 +159,15 @@ def _current_staff_id() -> int:
     return user.staff.id
 
 
+def _is_admin(user: User) -> bool:
+    role = user.role
+
+    if isinstance(role, Role):
+        return role == Role.ADMIN
+
+    return str(role) == Role.ADMIN.value
+
+
 # ============================================================================
 # REQUEST VALIDATION
 # ============================================================================
@@ -180,6 +185,22 @@ def _validate_json(schema):
 
     try:
         return schema.model_validate(payload), None
+
+    except PydanticValidationError as exc:
+        return None, (
+            jsonify({
+                "error": "Validation failed",
+                "details": exc.errors(),
+            }),
+            422,
+        )
+
+
+def _validate_query(schema):
+    try:
+        return schema.model_validate(
+            request.args.to_dict()
+        ), None
 
     except PydanticValidationError as exc:
         return None, (
@@ -242,8 +263,16 @@ def _serialize_leave(leave):
             if hasattr(leave.status, "value")
             else leave.status
         ),
-        "start_date": leave.start_date.isoformat(),
-        "end_date": leave.end_date.isoformat(),
+        "start_date": (
+            leave.start_date.isoformat()
+            if leave.start_date
+            else None
+        ),
+        "end_date": (
+            leave.end_date.isoformat()
+            if leave.end_date
+            else None
+        ),
         "reason": leave.reason,
         "reviewed_by_user_id": leave.reviewed_by_user_id,
         "reviewed_at": (
@@ -265,22 +294,28 @@ def _serialize_leave(leave):
 
 
 def _serialize_payroll(record):
+    paid_at = getattr(record, "paid_at", None)
+
     return {
         "id": record.id,
         "staff_id": record.staff_id,
         "pay_period_start": (
             record.pay_period_start.isoformat()
+            if record.pay_period_start
+            else None
         ),
         "pay_period_end": (
             record.pay_period_end.isoformat()
+            if record.pay_period_end
+            else None
         ),
         "base_salary": str(record.base_salary),
         "bonuses": str(record.bonuses),
         "deductions": str(record.deductions),
         "net_pay": str(record.net_pay),
         "paid_at": (
-            record.paid_at.isoformat()
-            if record.paid_at
+            paid_at.isoformat()
+            if paid_at
             else None
         ),
         "created_at": (
@@ -313,6 +348,15 @@ def _serialize_excuse(excuse):
         ),
         "description": excuse.description,
         "document_url": excuse.document_url,
+
+        # Important:
+        # rejection_reason belongs in the response, not creation.
+        "rejection_reason": getattr(
+            excuse,
+            "rejection_reason",
+            None,
+        ),
+
         "reviewed_by_user_id": excuse.reviewed_by_user_id,
         "reviewed_at": (
             excuse.reviewed_at.isoformat()
@@ -341,7 +385,7 @@ def _serialize_excuse(excuse):
 @role_required(*MANAGEMENT_ROLES)
 def create_staff_route():
     payload, error = _validate_json(
-        StaffCreateSchema,
+        StaffCreateSchema
     )
 
     if error:
@@ -377,9 +421,12 @@ def create_staff_route():
 @role_required(*STAFF_VIEW_ROLES)
 def list_staff_route():
     try:
-        payload = StaffListQuerySchema.model_validate(
-            request.args.to_dict(),
+        payload, error = _validate_query(
+            StaffListQuerySchema
         )
+
+        if error:
+            return error
 
         clinic_id = _current_clinic_id()
 
@@ -395,12 +442,6 @@ def list_staff_route():
                 for item in staff
             ],
         }), 200
-
-    except PydanticValidationError as exc:
-        return jsonify({
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }), 422
 
     except DomainError as exc:
         return jsonify({
@@ -435,7 +476,7 @@ def get_staff_route(staff_id: int):
 @role_required(*MANAGEMENT_ROLES)
 def update_staff_route(staff_id: int):
     payload, error = _validate_json(
-        StaffUpdateSchema,
+        StaffUpdateSchema
     )
 
     if error:
@@ -445,7 +486,7 @@ def update_staff_route(staff_id: int):
         clinic_id = _current_clinic_id()
 
         fields = payload.model_dump(
-            exclude_unset=True,
+            exclude_unset=True
         )
 
         staff = update_staff(
@@ -470,7 +511,7 @@ def update_staff_route(staff_id: int):
 @role_required(*MANAGEMENT_ROLES)
 def change_staff_status_route(staff_id: int):
     payload, error = _validate_json(
-        StaffStatusUpdateSchema,
+        StaffStatusUpdateSchema
     )
 
     if error:
@@ -505,7 +546,7 @@ def change_staff_status_route(staff_id: int):
 @role_required(*STAFF_VIEW_ROLES)
 def request_leave_route():
     payload, error = _validate_json(
-        LeaveRequestCreateSchema,
+        LeaveRequestCreateSchema
     )
 
     if error:
@@ -545,13 +586,17 @@ def list_leave_route():
         user = _current_user()
         clinic_id = _current_clinic_id()
 
-        payload = LeaveListQuerySchema.model_validate(
-            request.args.to_dict(),
+        payload, error = _validate_query(
+            LeaveListQuerySchema
         )
+
+        if error:
+            return error
 
         staff_id = payload.staff_id
 
-        if user.role != Role.ADMIN:
+        # Non-admin users may only view their own leave.
+        if not _is_admin(user):
             staff_id = _current_staff_id()
 
         leaves = list_leave_requests(
@@ -566,12 +611,6 @@ def list_leave_route():
                 for leave in leaves
             ],
         }), 200
-
-    except PydanticValidationError as exc:
-        return jsonify({
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }), 422
 
     except DomainError as exc:
         return jsonify({
@@ -592,7 +631,8 @@ def get_leave_route(leave_id: int):
             clinic_id=clinic_id,
         )
 
-        if user.role != Role.ADMIN:
+        # Non-admin users cannot inspect another staff member's leave.
+        if not _is_admin(user):
             staff_id = _current_staff_id()
 
             if leave.staff_id != staff_id:
@@ -614,8 +654,8 @@ def get_leave_route(leave_id: int):
 @jwt_required()
 @role_required(*LEAVE_MANAGEMENT_ROLES)
 def approve_leave_route(leave_id: int):
-    _, error = _validate_json(
-        LeaveReviewSchema,
+    payload, error = _validate_json(
+        LeaveReviewSchema
     )
 
     if error:
@@ -647,7 +687,7 @@ def approve_leave_route(leave_id: int):
 @role_required(*LEAVE_MANAGEMENT_ROLES)
 def reject_leave_route(leave_id: int):
     payload, error = _validate_json(
-        LeaveRejectSchema,
+        LeaveRejectSchema
     )
 
     if error:
@@ -684,7 +724,7 @@ def reject_leave_route(leave_id: int):
 @role_required(*STAFF_VIEW_ROLES)
 def create_excuse_route():
     payload, error = _validate_json(
-        ExcuseCreateSchema,
+        ExcuseCreateSchema
     )
 
     if error:
@@ -724,11 +764,14 @@ def list_excuses_route():
         user = _current_user()
         clinic_id = _current_clinic_id()
 
-        payload = ExcuseListQuerySchema.model_validate(
-            request.args.to_dict(),
+        payload, error = _validate_query(
+            ExcuseListQuerySchema
         )
 
-        if user.role == Role.ADMIN:
+        if error:
+            return error
+
+        if _is_admin(user):
             excuses = list_excuses(
                 clinic_id=clinic_id,
                 staff_id=payload.staff_id,
@@ -754,18 +797,13 @@ def list_excuses_route():
             ],
         }), 200
 
-    except PydanticValidationError as exc:
-        return jsonify({
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }), 422
-
     except DomainError as exc:
         return jsonify({
             "error": str(exc),
         }), exc.status_code
 
 
+# Keep /me before /<int:excuse_id>.
 @staff_bp.get("/excuses/me")
 @jwt_required()
 @role_required(*STAFF_VIEW_ROLES)
@@ -805,7 +843,8 @@ def get_excuse_route(excuse_id: int):
             clinic_id=clinic_id,
         )
 
-        if user.role != Role.ADMIN:
+        # Non-admin users may only inspect their own excuses.
+        if not _is_admin(user):
             staff_id = _current_staff_id()
 
             if excuse.staff_id != staff_id:
@@ -827,8 +866,8 @@ def get_excuse_route(excuse_id: int):
 @jwt_required()
 @role_required(*EXCUSE_REVIEW_ROLES)
 def approve_excuse_route(excuse_id: int):
-    _, error = _validate_json(
-        ExcuseReviewSchema,
+    payload, error = _validate_json(
+        ExcuseReviewSchema
     )
 
     if error:
@@ -860,7 +899,7 @@ def approve_excuse_route(excuse_id: int):
 @role_required(*EXCUSE_REVIEW_ROLES)
 def reject_excuse_route(excuse_id: int):
     payload, error = _validate_json(
-        ExcuseRejectSchema,
+        ExcuseRejectSchema
     )
 
     if error:
@@ -897,7 +936,7 @@ def reject_excuse_route(excuse_id: int):
 @role_required(*PAYROLL_ROLES)
 def create_payroll_route():
     payload, error = _validate_json(
-        PayrollCreateSchema,
+        PayrollCreateSchema
     )
 
     if error:
@@ -932,7 +971,7 @@ def create_payroll_route():
 @role_required(*PAYROLL_ROLES)
 def generate_payroll_route():
     payload, error = _validate_json(
-        PayrollGenerateSchema,
+        PayrollGenerateSchema
     )
 
     if error:
@@ -969,9 +1008,12 @@ def list_payroll_route():
     try:
         clinic_id = _current_clinic_id()
 
-        payload = PayrollListQuerySchema.model_validate(
-            request.args.to_dict(),
+        payload, error = _validate_query(
+            PayrollListQuerySchema
         )
+
+        if error:
+            return error
 
         if payload.staff_id is not None:
             records = list_payroll_for_staff(
@@ -989,12 +1031,6 @@ def list_payroll_route():
                 for record in records
             ],
         }), 200
-
-    except PydanticValidationError as exc:
-        return jsonify({
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }), 422
 
     except DomainError as exc:
         return jsonify({

@@ -21,7 +21,7 @@ from app.core.enums.inventory_enums import (
 
 
 # ============================================================================
-# SHARED HELPERS
+# HELPERS
 # ============================================================================
 
 
@@ -38,59 +38,31 @@ def _normalize_text(value: str | None) -> str | None:
 
 
 # ============================================================================
-# INVENTORY ITEM SCHEMAS
+# INVENTORY ITEMS
 # ============================================================================
 
 
 class InventoryItemCreateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    clinic_id: int = Field(
-        ...,
-        gt=0,
-    )
+    # Retained for API compatibility.
+    # Route/service must derive the authoritative clinic from JWT.
+    clinic_id: int = Field(..., gt=0)
 
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=150,
-    )
-
+    name: str = Field(..., min_length=1, max_length=150)
     category: InventoryCategory = Field(
-        default=InventoryCategory.MEDICAL_SUPPLY,
+        default=InventoryCategory.MEDICAL_SUPPLY
     )
+    sku: str | None = Field(default=None, max_length=80)
+    barcode: str | None = Field(default=None, max_length=80)
+    unit: str | None = Field(default=None, max_length=30)
 
-    sku: str | None = Field(
-        default=None,
-        max_length=80,
-    )
+    initial_quantity: int = Field(default=0, ge=0)
+    reorder_level: int = Field(default=10, ge=0)
 
-    barcode: str | None = Field(
-        default=None,
-        max_length=80,
-    )
-
-    unit: str | None = Field(
-        default=None,
-        max_length=30,
-    )
-
-    initial_quantity: int = Field(
-        default=0,
-        ge=0,
-    )
-
-    reorder_level: int = Field(
-        default=10,
-        ge=0,
-    )
-
-    performed_by_id: int | None = Field(
-        default=None,
-        gt=0,
-    )
+    # Retained for API compatibility.
+    # Route must derive the authenticated staff actor.
+    performed_by_id: int | None = Field(default=None, gt=0)
 
     @field_validator(
         "name",
@@ -105,42 +77,33 @@ class InventoryItemCreateSchema(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_name(cls, value):
         if not value:
-            raise ValueError(
-                "Item name cannot be empty"
-            )
+            raise ValueError("Item name cannot be empty")
 
         return value
 
 
 class InventoryItemUpdateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(
         default=None,
         max_length=150,
     )
-
     category: InventoryCategory | None = None
-
     sku: str | None = Field(
         default=None,
         max_length=80,
     )
-
     barcode: str | None = Field(
         default=None,
         max_length=80,
     )
-
     unit: str | None = Field(
         default=None,
         max_length=30,
     )
-
     reorder_level: int | None = Field(
         default=None,
         ge=0,
@@ -159,19 +122,15 @@ class InventoryItemUpdateSchema(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str | None):
+    def validate_name(cls, value):
         if value is not None and not value:
-            raise ValueError(
-                "Item name cannot be empty"
-            )
+            raise ValueError("Item name cannot be empty")
 
         return value
 
 
 class InventoryItemResponseSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     clinic_id: int
@@ -188,14 +147,12 @@ class InventoryItemResponseSchema(BaseModel):
 
 
 # ============================================================================
-# INVENTORY SUPPLIER SCHEMAS
+# SUPPLIERS
 # ============================================================================
 
 
 class InventorySupplierCreateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(
         ...,
@@ -203,6 +160,10 @@ class InventorySupplierCreateSchema(BaseModel):
         max_length=150,
     )
 
+    # None intentionally remains supported because the model permits
+    # globally shared suppliers.
+    #
+    # The route must never allow a non-admin user to select another clinic.
     clinic_id: int | None = Field(
         default=None,
         gt=0,
@@ -212,14 +173,11 @@ class InventorySupplierCreateSchema(BaseModel):
         default=None,
         max_length=120,
     )
-
     phone: str | None = Field(
         default=None,
         max_length=30,
     )
-
     email: EmailStr | None = None
-
     address: str | None = Field(
         default=None,
         max_length=255,
@@ -238,42 +196,33 @@ class InventorySupplierCreateSchema(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_name(cls, value):
         if not value:
-            raise ValueError(
-                "Supplier name cannot be empty"
-            )
+            raise ValueError("Supplier name cannot be empty")
 
         return value
 
 
 class InventorySupplierUpdateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(
         default=None,
         max_length=150,
     )
-
     contact_person: str | None = Field(
         default=None,
         max_length=120,
     )
-
     phone: str | None = Field(
         default=None,
         max_length=30,
     )
-
     email: EmailStr | None = None
-
     address: str | None = Field(
         default=None,
         max_length=255,
     )
-
     is_active: bool | None = None
 
     @field_validator(
@@ -289,19 +238,15 @@ class InventorySupplierUpdateSchema(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str | None):
+    def validate_name(cls, value):
         if value is not None and not value:
-            raise ValueError(
-                "Supplier name cannot be empty"
-            )
+            raise ValueError("Supplier name cannot be empty")
 
         return value
 
 
 class InventorySupplierResponseSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     clinic_id: int | None
@@ -316,19 +261,14 @@ class InventorySupplierResponseSchema(BaseModel):
 
 
 # ============================================================================
-# INVENTORY BATCH SCHEMAS
+# INVENTORY BATCHES
 # ============================================================================
 
 
 class InventoryBatchCreateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    item_id: int = Field(
-        ...,
-        gt=0,
-    )
+    item_id: int = Field(..., gt=0)
 
     batch_number: str = Field(
         ...,
@@ -349,6 +289,8 @@ class InventoryBatchCreateSchema(BaseModel):
 
     expiry_date: date | None = None
 
+    # Retained for API compatibility.
+    # Route/service must derive clinic from the item's clinic.
     clinic_id: int | None = Field(
         default=None,
         gt=0,
@@ -361,20 +303,15 @@ class InventoryBatchCreateSchema(BaseModel):
 
     @field_validator("batch_number")
     @classmethod
-    def validate_batch_number(cls, value: str) -> str:
+    def validate_batch_number(cls, value):
         if not value:
-            raise ValueError(
-                "Batch number cannot be empty"
-            )
+            raise ValueError("Batch number cannot be empty")
 
         return value
 
     @field_validator("expiry_date")
     @classmethod
-    def validate_expiry_date(
-        cls,
-        value: date | None,
-    ):
+    def validate_expiry_date(cls, value):
         if value is not None and value < date.today():
             raise ValueError(
                 "Expiry date cannot be in the past"
@@ -384,9 +321,7 @@ class InventoryBatchCreateSchema(BaseModel):
 
 
 class InventoryBatchUpdateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     batch_number: str | None = Field(
         default=None,
@@ -413,10 +348,7 @@ class InventoryBatchUpdateSchema(BaseModel):
 
     @field_validator("batch_number")
     @classmethod
-    def validate_batch_number(
-        cls,
-        value: str | None,
-    ):
+    def validate_batch_number(cls, value):
         if value is not None and not value:
             raise ValueError(
                 "Batch number cannot be empty"
@@ -426,10 +358,7 @@ class InventoryBatchUpdateSchema(BaseModel):
 
     @field_validator("expiry_date")
     @classmethod
-    def validate_expiry_date(
-        cls,
-        value: date | None,
-    ):
+    def validate_expiry_date(cls, value):
         if value is not None and value < date.today():
             raise ValueError(
                 "Expiry date cannot be in the past"
@@ -439,9 +368,7 @@ class InventoryBatchUpdateSchema(BaseModel):
 
 
 class InventoryBatchResponseSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     item_id: int
@@ -457,19 +384,14 @@ class InventoryBatchResponseSchema(BaseModel):
 
 
 # ============================================================================
-# STOCK MOVEMENT SCHEMAS
+# STOCK MOVEMENTS
 # ============================================================================
 
 
 class StockMovementCreateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    item_id: int = Field(
-        ...,
-        gt=0,
-    )
+    item_id: int = Field(..., gt=0)
 
     batch_id: int | None = Field(
         default=None,
@@ -478,6 +400,10 @@ class StockMovementCreateSchema(BaseModel):
 
     movement_type: StockMovementType
 
+    # Positive for normal movements.
+    #
+    # ADJUSTMENT intentionally permits negative values because an
+    # adjustment may decrease stock.
     quantity: int
 
     reason: str | None = Field(
@@ -485,6 +411,8 @@ class StockMovementCreateSchema(BaseModel):
         max_length=255,
     )
 
+    # Retained for API compatibility.
+    # Route must derive the authenticated staff actor.
     performed_by_id: int = Field(
         ...,
         gt=0,
@@ -500,6 +428,8 @@ class StockMovementCreateSchema(BaseModel):
         gt=0,
     )
 
+    # Retained for API compatibility.
+    # Route/service must derive clinic from authenticated context.
     clinic_id: int | None = Field(
         default=None,
         gt=0,
@@ -521,6 +451,7 @@ class StockMovementCreateSchema(BaseModel):
                 raise ValueError(
                     "Adjustment quantity cannot be zero"
                 )
+
         elif self.quantity <= 0:
             raise ValueError(
                 "Quantity must be greater than zero"
@@ -530,9 +461,7 @@ class StockMovementCreateSchema(BaseModel):
 
 
 class StockMovementResponseSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     item_id: int
@@ -548,25 +477,22 @@ class StockMovementResponseSchema(BaseModel):
 
 
 # ============================================================================
-# INVENTORY TRANSFER SCHEMAS
+# INVENTORY TRANSFERS
 # ============================================================================
 
 
 class InventoryTransferCreateSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
-    item_id: int = Field(
-        ...,
-        gt=0,
-    )
+    item_id: int = Field(..., gt=0)
 
     batch_id: int | None = Field(
         default=None,
         gt=0,
     )
 
+    # Retained for API compatibility.
+    # Route/service must verify the source against the authenticated clinic.
     source_clinic_id: int = Field(
         ...,
         gt=0,
@@ -582,6 +508,8 @@ class InventoryTransferCreateSchema(BaseModel):
         gt=0,
     )
 
+    # Retained for API compatibility.
+    # Route must derive this from authenticated staff.
     requested_by_id: int = Field(
         ...,
         gt=0,
@@ -604,18 +532,17 @@ class InventoryTransferCreateSchema(BaseModel):
             == self.destination_clinic_id
         ):
             raise ValueError(
-                "Source and destination clinics "
-                "cannot be the same"
+                "Source and destination clinics cannot be the same"
             )
 
         return self
 
 
 class InventoryTransferApproveSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
+    # Retained for API compatibility.
+    # Route must derive the authenticated approving staff.
     approved_by_id: int = Field(
         ...,
         gt=0,
@@ -623,10 +550,10 @@ class InventoryTransferApproveSchema(BaseModel):
 
 
 class InventoryTransferCompleteSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
+    # Retained for API compatibility.
+    # Route must derive the authenticated performing staff.
     performed_by_id: int = Field(
         ...,
         gt=0,
@@ -634,10 +561,10 @@ class InventoryTransferCompleteSchema(BaseModel):
 
 
 class InventoryTransferCancelSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
+    # Retained for API compatibility.
+    # Route must derive the authenticated cancelling staff.
     cancelled_by_id: int = Field(
         ...,
         gt=0,
@@ -655,80 +582,59 @@ class InventoryTransferCancelSchema(BaseModel):
 
 
 class InventoryTransferResponseSchema(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     item_id: int
     batch_id: int | None
-
     source_clinic_id: int
     destination_clinic_id: int
-
     quantity: int
-
     status: InventoryTransferStatus
-
     reason: str | None
-
     requested_by_id: int
     approved_by_id: int | None
-
     requested_at: datetime
     approved_at: datetime | None
     completed_at: datetime | None
     cancelled_at: datetime | None
-
     created_at: datetime
     updated_at: datetime
 
 
 # ============================================================================
-# QUERY / FILTER SCHEMAS
+# FILTERS
 # ============================================================================
 
 
 class InventoryItemFilterSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     category: InventoryCategory | None = None
-
     low_stock_only: bool = False
-
     include_inactive: bool = False
 
 
 class InventorySupplierFilterSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     include_inactive: bool = False
 
 
 class InventoryBatchFilterSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     include_inactive: bool = False
 
 
 class InventoryTransferFilterSchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     status: InventoryTransferStatus | None = None
 
 
 class ExpiringInventoryBatchQuerySchema(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     days: int = Field(
         default=30,

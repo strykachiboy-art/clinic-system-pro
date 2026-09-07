@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func
 
 from app.extensions import db
+
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.pharmacy_enums import DispenseStatus
@@ -30,16 +33,45 @@ from app.modules.prescription.models.prescription_model import (
 from app.modules.staff.models.staff_model import Staff
 
 
-def _utcnow():
+# ============================================================================
+# TIME HELPERS
+# ============================================================================
+
+
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _utc_today() -> date:
+    return _utcnow().date()
+
+
 # ============================================================================
-# GETTERS
+# TENANT-SCOPED GETTERS
 # ============================================================================
 
-def _get_drug_or_404(drug_id: int) -> Drug:
-    drug = db.session.get(Drug, drug_id)
+
+def _get_drug_or_404(
+    drug_id: int,
+    clinic_id: int | None = None,
+) -> Drug:
+    query = db.session.query(Drug).filter(
+        Drug.id == drug_id,
+    )
+
+    if clinic_id is not None:
+        query = query.filter(
+            db.or_(
+                Drug.clinic_id.is_(None),
+                Drug.clinic_id == clinic_id,
+            )
+        )
+    else:
+        query = query.filter(
+            Drug.clinic_id.is_(None)
+        )
+
+    drug = query.first()
 
     if drug is None:
         raise NotFoundError(
@@ -49,8 +81,18 @@ def _get_drug_or_404(drug_id: int) -> Drug:
     return drug
 
 
-def _get_batch_or_404(batch_id: int) -> DrugBatch:
-    batch = db.session.get(DrugBatch, batch_id)
+def _get_batch_or_404(
+    batch_id: int,
+    clinic_id: int,
+) -> DrugBatch:
+    batch = (
+        db.session.query(DrugBatch)
+        .filter(
+            DrugBatch.id == batch_id,
+            DrugBatch.clinic_id == clinic_id,
+        )
+        .first()
+    )
 
     if batch is None:
         raise NotFoundError(
@@ -62,10 +104,15 @@ def _get_batch_or_404(batch_id: int) -> DrugBatch:
 
 def _get_prescription_or_404(
     prescription_id: int,
+    clinic_id: int,
 ) -> Prescription:
-    prescription = db.session.get(
-        Prescription,
-        prescription_id,
+    prescription = (
+        db.session.query(Prescription)
+        .filter(
+            Prescription.id == prescription_id,
+            Prescription.clinic_id == clinic_id,
+        )
+        .first()
     )
 
     if prescription is None:
@@ -78,15 +125,21 @@ def _get_prescription_or_404(
 
 def _get_prescription_item_or_404(
     prescription_item_id: int,
+    prescription: Prescription,
 ) -> PrescriptionItem:
-    item = db.session.get(
-        PrescriptionItem,
-        prescription_item_id,
+    item = (
+        db.session.query(PrescriptionItem)
+        .filter(
+            PrescriptionItem.id == prescription_item_id,
+            PrescriptionItem.prescription_id == prescription.id,
+        )
+        .first()
     )
 
     if item is None:
         raise NotFoundError(
-            f"Prescription item {prescription_item_id} not found"
+            f"Prescription item {prescription_item_id} "
+            f"not found on prescription {prescription.id}"
         )
 
     return item
@@ -94,10 +147,20 @@ def _get_prescription_item_or_404(
 
 def _get_dispense_record_or_404(
     dispense_record_id: int,
+    clinic_id: int,
 ) -> DispenseRecord:
-    record = db.session.get(
-        DispenseRecord,
-        dispense_record_id,
+    record = (
+        db.session.query(DispenseRecord)
+        .join(
+            Prescription,
+            DispenseRecord.prescription_id
+            == Prescription.id,
+        )
+        .filter(
+            DispenseRecord.id == dispense_record_id,
+            Prescription.clinic_id == clinic_id,
+        )
+        .first()
     )
 
     if record is None:
@@ -112,12 +175,13 @@ def _get_dispense_record_or_404(
 # VALIDATION
 # ============================================================================
 
+
 def _validate_drug_catalog_scope(
     drug: Drug,
-    clinic_id: int | None,
+    clinic_id: int,
 ) -> None:
     """
-    Global drugs may be used by any clinic.
+    Global drugs are readable/usable by every clinic.
 
     Clinic-specific drugs may only be used by their owning clinic.
     """
@@ -125,9 +189,28 @@ def _validate_drug_catalog_scope(
     if drug.clinic_id is None:
         return
 
-    if clinic_id is None:
+    if drug.clinic_id != clinic_id:
         raise ValidationError(
-            "Clinic-specific drug requires a clinic context"
+            f"Drug {drug.id} does not belong to clinic {clinic_id}"
+        )
+
+
+def _validate_clinic_specific_drug_for_management(
+    drug: Drug,
+    clinic_id: int,
+) -> None:
+    """
+    Clinic users may manage only clinic-specific drugs belonging
+    to their own clinic.
+
+    Global catalog drugs may be read and used, but cannot be
+    modified by ordinary clinic-scoped pharmacy operations.
+    """
+
+    if drug.clinic_id is None:
+        raise ValidationError(
+            "Global catalog drugs cannot be modified "
+            "through clinic-scoped pharmacy operations"
         )
 
     if drug.clinic_id != clinic_id:
@@ -136,7 +219,9 @@ def _validate_drug_catalog_scope(
         )
 
 
-def _validate_active_drug(drug: Drug) -> None:
+def _validate_active_drug(
+    drug: Drug,
+) -> None:
     if not drug.is_active:
         raise ValidationError(
             f"Drug {drug.id} is inactive"
@@ -192,7 +277,17 @@ def _validate_staff_for_pharmacy(
 
 def _validate_supplier(
     supplier_id: int | None,
+    clinic_id: int,
 ) -> InventorySupplier | None:
+    """
+    Suppliers may be:
+
+    - global/shared: clinic_id IS NULL
+    - clinic-specific: clinic_id == authenticated clinic
+
+    Suppliers belonging to another clinic are rejected.
+    """
+
     if supplier_id is None:
         return None
 
@@ -206,7 +301,61 @@ def _validate_supplier(
             f"Inventory supplier {supplier_id} not found"
         )
 
+    if not supplier.is_active:
+        raise ValidationError(
+            f"Inventory supplier {supplier_id} is inactive"
+        )
+
+    if (
+        supplier.clinic_id is not None
+        and supplier.clinic_id != clinic_id
+    ):
+        raise ValidationError(
+            f"Inventory supplier {supplier_id} does not belong "
+            f"to clinic {clinic_id}"
+        )
+
     return supplier
+
+
+def _validate_batch_scope(
+    batch: DrugBatch,
+    clinic_id: int,
+) -> None:
+    if batch.clinic_id != clinic_id:
+        raise ValidationError(
+            f"Drug batch {batch.id} does not belong "
+            f"to clinic {clinic_id}"
+        )
+
+
+def _validate_batch_for_dispensing(
+    *,
+    batch: DrugBatch,
+    clinic_id: int,
+    drug_id: int,
+) -> None:
+    _validate_batch_scope(
+        batch,
+        clinic_id,
+    )
+
+    if batch.drug_id != drug_id:
+        raise ValidationError(
+            f"Drug batch {batch.id} does not belong "
+            f"to drug {drug_id}"
+        )
+
+    if batch.expiry_date <= _utc_today():
+        raise ValidationError(
+            f"Drug batch {batch.id} has expired "
+            f"or expires today"
+        )
+
+    if batch.quantity_on_hand < 0:
+        raise ValidationError(
+            f"Drug batch {batch.id} has invalid stock"
+        )
 
 
 def _validate_prescription_scope(
@@ -250,13 +399,6 @@ def _validate_prescription_item_scope(
 def _validate_prescription_for_dispensing(
     prescription: Prescription,
 ) -> None:
-    """
-    Pharmacy may only dispense a prescription that is still valid.
-
-    We intentionally inspect the enum value rather than inventing
-    additional prescription states.
-    """
-
     if prescription.status.value != "active":
         raise ValidationError(
             f"Prescription {prescription.id} is not active"
@@ -274,11 +416,6 @@ def _validate_prescription_for_dispensing(
 def _get_dispensed_quantity_for_prescription_item(
     prescription_item_id: int,
 ) -> int:
-    """
-    Sum all non-cancelled dispensing transactions for one
-    prescription item.
-    """
-
     total = (
         db.session.query(
             func.coalesce(
@@ -320,60 +457,70 @@ def _get_remaining_prescription_quantity(
             f"has an invalid quantity"
         )
 
-    dispensed = _get_dispensed_quantity_for_prescription_item(
-        prescription_item.id
+    dispensed_quantity = (
+        _get_dispensed_quantity_for_prescription_item(
+            prescription_item.id
+        )
     )
 
-    return max(
-        prescription_item.quantity - dispensed,
-        0,
+    remaining_quantity = (
+        prescription_item.quantity
+        - dispensed_quantity
     )
+
+    if remaining_quantity < 0:
+        raise ConflictError(
+            f"Prescription item {prescription_item.id} "
+            f"has already been dispensed beyond its prescribed quantity"
+        )
+
+    return remaining_quantity
+
+
+def _validate_expiry_date(
+    expiry_date: date,
+) -> None:
+    if expiry_date <= _utc_today():
+        raise ValidationError(
+            "Drug batch expiry date must be in the future"
+        )
 
 
 # ============================================================================
 # DRUG CATALOG
 # ============================================================================
 
+
 def get_drug(
     drug_id: int,
+    clinic_id: int,
 ) -> Drug:
     """
-    Historical retrieval remains available even when the owning
-    clinic is inactive or suspended.
+    Clinic-scoped drug retrieval.
+
+    Global drugs are visible to the clinic.
+    Other clinics' private drugs are invisible.
     """
 
-    return _get_drug_or_404(drug_id)
+    return _get_drug_or_404(
+        drug_id,
+        clinic_id,
+    )
 
 
 def list_drugs(
-    clinic_id: int | None = None,
+    clinic_id: int,
     include_inactive: bool = False,
 ) -> list[Drug]:
-    """
-    With a clinic_id:
-
-        - global drugs are included
-        - that clinic's private drugs are included
-        - other clinics' private drugs are excluded
-
-    Without a clinic_id:
-
-        - only global drugs are returned
-    """
-
-    query = db.session.query(Drug)
-
-    if clinic_id is None:
-        query = query.filter(
-            Drug.clinic_id.is_(None)
-        )
-    else:
-        query = query.filter(
+    query = (
+        db.session.query(Drug)
+        .filter(
             db.or_(
                 Drug.clinic_id.is_(None),
                 Drug.clinic_id == clinic_id,
             )
         )
+    )
 
     if not include_inactive:
         query = query.filter(
@@ -405,24 +552,30 @@ def create_drug(
     clinic_id: int | None = None,
 ) -> Drug:
     """
-    Create a global or clinic-specific drug.
+    Create a clinic-specific drug.
 
-    clinic_id=None:
-        Global/shared catalog entry.
+    The route must provide the authenticated clinic_id.
 
-    clinic_id=<id>:
-        Clinic-specific catalog entry.
+    clinic_id=None is retained only for compatibility with the
+    underlying service/API design and should not be supplied by
+    ordinary clinic-scoped routes.
     """
 
-    if not name or not name.strip():
+    if clinic_id is None:
+        raise ValidationError(
+            "Clinic context is required to create a drug"
+        )
+
+    ensure_clinic_active(
+        clinic_id
+    )
+
+    if not isinstance(name, str) or not name.strip():
         raise ValidationError(
             "Drug name is required"
         )
 
     name = name.strip()
-
-    if clinic_id is not None:
-        ensure_clinic_active(clinic_id)
 
     if unit_price is not None and unit_price < 0:
         raise ValidationError(
@@ -430,10 +583,12 @@ def create_drug(
         )
 
     if barcode:
+        barcode = barcode.strip()
+
         existing = (
             db.session.query(Drug)
             .filter(
-                Drug.barcode == barcode
+                Drug.barcode == barcode,
             )
             .first()
         )
@@ -458,7 +613,10 @@ def create_drug(
         is_active=True,
     )
 
-    db.session.add(drug)
+    db.session.add(
+        drug
+    )
+
     db.session.flush()
 
     create_audit_log(
@@ -478,16 +636,22 @@ def create_drug(
 @transactional
 def update_drug(
     drug_id: int,
+    clinic_id: int,
     **updates,
 ) -> Drug:
-    drug = _get_drug_or_404(
-        drug_id
+    ensure_clinic_active(
+        clinic_id
     )
 
-    if drug.clinic_id is not None:
-        ensure_clinic_active(
-            drug.clinic_id
-        )
+    drug = _get_drug_or_404(
+        drug_id,
+        clinic_id,
+    )
+
+    _validate_clinic_specific_drug_for_management(
+        drug,
+        clinic_id,
+    )
 
     allowed_fields = {
         "name",
@@ -503,7 +667,8 @@ def update_drug(
     }
 
     unknown_fields = (
-        set(updates) - allowed_fields
+        set(updates)
+        - allowed_fields
     )
 
     if unknown_fields:
@@ -517,7 +682,7 @@ def update_drug(
     if "name" in updates:
         name = updates["name"]
 
-        if not name or not name.strip():
+        if not isinstance(name, str) or not name.strip():
             raise ValidationError(
                 "Drug name cannot be empty"
             )
@@ -527,13 +692,21 @@ def update_drug(
     if "unit_price" in updates:
         unit_price = updates["unit_price"]
 
-        if unit_price is not None and unit_price < 0:
+        if (
+            unit_price is not None
+            and unit_price < 0
+        ):
             raise ValidationError(
                 "Unit price cannot be negative"
             )
 
     if "barcode" in updates:
         barcode = updates["barcode"]
+
+        if isinstance(barcode, str):
+            barcode = barcode.strip()
+
+        updates["barcode"] = barcode
 
         if barcode:
             existing = (
@@ -564,7 +737,7 @@ def update_drug(
         entity_type="Drug",
         entity_id=drug.id,
         details={
-            "clinic_id": drug.clinic_id,
+            "clinic_id": clinic_id,
             "updated_fields": list(
                 updates.keys()
             ),
@@ -577,28 +750,42 @@ def update_drug(
 @transactional
 def set_drug_active_status(
     drug_id: int,
+    clinic_id: int,
     is_active: bool,
 ) -> Drug:
-    drug = _get_drug_or_404(
-        drug_id
+    ensure_clinic_active(
+        clinic_id
     )
 
-    if drug.clinic_id is not None:
-        ensure_clinic_active(
-            drug.clinic_id
+    drug = _get_drug_or_404(
+        drug_id,
+        clinic_id,
+    )
+
+    _validate_clinic_specific_drug_for_management(
+        drug,
+        clinic_id,
+    )
+
+    if not isinstance(is_active, bool):
+        raise ValidationError(
+            "is_active must be a boolean"
         )
+
+    previous_status = drug.is_active
 
     drug.is_active = is_active
 
     db.session.flush()
 
     create_audit_log(
-        action=AuditAction.UPDATE,
+        action=AuditAction.STATUS_CHANGE,
         entity_type="Drug",
         entity_id=drug.id,
         details={
-            "clinic_id": drug.clinic_id,
-            "is_active": is_active,
+            "clinic_id": clinic_id,
+            "previous_status": previous_status,
+            "new_status": is_active,
         },
     )
 
@@ -606,24 +793,28 @@ def set_drug_active_status(
 
 
 # ============================================================================
-# BATCHES / INVENTORY
+# BATCHES / STOCK
 # ============================================================================
+
 
 def get_batch(
     batch_id: int,
+    clinic_id: int,
 ) -> DrugBatch:
     return _get_batch_or_404(
-        batch_id
+        batch_id,
+        clinic_id,
     )
 
 
 def list_batches(
     drug_id: int,
-    clinic_id: int | None = None,
+    clinic_id: int,
     include_expired: bool = True,
 ) -> list[DrugBatch]:
     drug = _get_drug_or_404(
-        drug_id
+        drug_id,
+        clinic_id,
     )
 
     _validate_drug_catalog_scope(
@@ -634,18 +825,14 @@ def list_batches(
     query = (
         db.session.query(DrugBatch)
         .filter(
-            DrugBatch.drug_id == drug_id
+            DrugBatch.drug_id == drug_id,
+            DrugBatch.clinic_id == clinic_id,
         )
     )
 
-    if clinic_id is not None:
-        query = query.filter(
-            DrugBatch.clinic_id == clinic_id
-        )
-
     if not include_expired:
         query = query.filter(
-            DrugBatch.expiry_date >= date.today()
+            DrugBatch.expiry_date > _utc_today()
         )
 
     return (
@@ -667,16 +854,18 @@ def list_expiring_batches(
             "Days cannot be negative"
         )
 
-    today = date.today()
-    expiry_limit = today + timedelta(
-        days=days
+    today = _utc_today()
+
+    expiry_limit = (
+        today
+        + timedelta(days=days)
     )
 
     return (
         db.session.query(DrugBatch)
         .filter(
             DrugBatch.clinic_id == clinic_id,
-            DrugBatch.expiry_date >= today,
+            DrugBatch.expiry_date > today,
             DrugBatch.expiry_date <= expiry_limit,
             DrugBatch.quantity_on_hand > 0,
         )
@@ -703,7 +892,8 @@ def add_batch(
     )
 
     drug = _get_drug_or_404(
-        drug_id
+        drug_id,
+        clinic_id,
     )
 
     _validate_drug_catalog_scope(
@@ -715,16 +905,35 @@ def add_batch(
         drug
     )
 
-    if not batch_number or not batch_number.strip():
+    if (
+        not isinstance(batch_number, str)
+        or not batch_number.strip()
+    ):
         raise ValidationError(
             "Batch number is required"
         )
 
     batch_number = batch_number.strip()
 
+    if (
+        not isinstance(quantity_on_hand, int)
+        or isinstance(quantity_on_hand, bool)
+    ):
+        raise ValidationError(
+            "Quantity on hand must be an integer"
+        )
+
     if quantity_on_hand < 0:
         raise ValidationError(
             "Quantity on hand cannot be negative"
+        )
+
+    if (
+        not isinstance(reorder_level, int)
+        or isinstance(reorder_level, bool)
+    ):
+        raise ValidationError(
+            "Reorder level must be an integer"
         )
 
     if reorder_level < 0:
@@ -732,13 +941,18 @@ def add_batch(
             "Reorder level cannot be negative"
         )
 
-    if expiry_date < date.today():
+    if not isinstance(expiry_date, date):
         raise ValidationError(
-            "Cannot receive an already expired drug batch"
+            "Expiry date must be a valid date"
         )
 
+    _validate_expiry_date(
+        expiry_date
+    )
+
     supplier = _validate_supplier(
-        supplier_id
+        supplier_id,
+        clinic_id,
     )
 
     existing = (
@@ -771,7 +985,10 @@ def add_batch(
         expiry_date=expiry_date,
     )
 
-    db.session.add(batch)
+    db.session.add(
+        batch
+    )
+
     db.session.flush()
 
     create_audit_log(
@@ -783,6 +1000,8 @@ def add_batch(
             "drug_id": drug_id,
             "batch_number": batch.batch_number,
             "quantity": quantity_on_hand,
+            "expiry_date": batch.expiry_date.isoformat(),
+            "supplier_id": batch.supplier_id,
         },
     )
 
@@ -794,7 +1013,8 @@ def get_stock_summary(
     drug_id: int,
 ) -> dict:
     drug = _get_drug_or_404(
-        drug_id
+        drug_id,
+        clinic_id,
     )
 
     _validate_drug_catalog_scope(
@@ -802,7 +1022,7 @@ def get_stock_summary(
         clinic_id,
     )
 
-    today = date.today()
+    today = _utc_today()
 
     quantity, batch_count = (
         db.session.query(
@@ -819,7 +1039,7 @@ def get_stock_summary(
         .filter(
             DrugBatch.clinic_id == clinic_id,
             DrugBatch.drug_id == drug_id,
-            DrugBatch.expiry_date >= today,
+            DrugBatch.expiry_date > today,
         )
         .one()
     )
@@ -837,91 +1057,13 @@ def get_stock_summary(
     }
 
 
-def _allocate_fefo(
-    clinic_id: int,
-    drug_id: int,
-    quantity_needed: int,
-) -> list[tuple[DrugBatch, int]]:
-    """
-    Allocate stock using FEFO:
-
-        First Expiry, First Out.
-
-    Eligible batches are row-locked before their quantities
-    are modified.
-    """
-
-    if quantity_needed <= 0:
-        raise ValidationError(
-            "Quantity needed must be greater than zero"
-        )
-
-    today = date.today()
-
-    batches = (
-        db.session.query(DrugBatch)
-        .filter(
-            DrugBatch.clinic_id == clinic_id,
-            DrugBatch.drug_id == drug_id,
-            DrugBatch.expiry_date >= today,
-            DrugBatch.quantity_on_hand > 0,
-        )
-        .order_by(
-            DrugBatch.expiry_date.asc(),
-            DrugBatch.id.asc(),
-        )
-        .with_for_update()
-        .all()
-    )
-
-    remaining = quantity_needed
-    allocations: list[
-        tuple[DrugBatch, int]
-    ] = []
-
-    for batch in batches:
-        if remaining <= 0:
-            break
-
-        allocated = min(
-            batch.quantity_on_hand,
-            remaining,
-        )
-
-        if allocated <= 0:
-            continue
-
-        batch.quantity_on_hand -= allocated
-
-        allocations.append(
-            (
-                batch,
-                allocated,
-            )
-        )
-
-        remaining -= allocated
-
-    if remaining > 0:
-        available = (
-            quantity_needed - remaining
-        )
-
-        raise ConflictError(
-            f"Insufficient stock for drug {drug_id} "
-            f"in clinic {clinic_id}. "
-            f"Requested {quantity_needed}, "
-            f"available {available}."
-        )
-
-    return allocations
-
-
 # ============================================================================
-# DISPENSING
+# DISPENSING VALIDATION
 # ============================================================================
+
 
 def _validate_dispense_entry(
+    *,
     clinic_id: int,
     prescription: Prescription,
     prescription_item: PrescriptionItem,
@@ -932,12 +1074,9 @@ def _validate_dispense_entry(
         prescription,
     )
 
-    if not isinstance(
-        requested_quantity,
-        int,
-    ) or isinstance(
-        requested_quantity,
-        bool,
+    if (
+        not isinstance(requested_quantity, int)
+        or isinstance(requested_quantity, bool)
     ):
         raise ValidationError(
             "Dispense quantity must be an integer"
@@ -948,8 +1087,22 @@ def _validate_dispense_entry(
             "Dispense quantity must be greater than zero"
         )
 
+    remaining_quantity = (
+        _get_remaining_prescription_quantity(
+            prescription_item
+        )
+    )
+
+    if requested_quantity > remaining_quantity:
+        raise ConflictError(
+            f"Requested quantity {requested_quantity} for "
+            f"prescription item {prescription_item.id} exceeds "
+            f"the remaining quantity of {remaining_quantity}"
+        )
+
     drug = _get_drug_or_404(
-        prescription_item.drug_id
+        prescription_item.drug_id,
+        clinic_id,
     )
 
     _validate_drug_catalog_scope(
@@ -961,22 +1114,39 @@ def _validate_dispense_entry(
         drug
     )
 
-    remaining = _get_remaining_prescription_quantity(
-        prescription_item
+
+# ============================================================================
+# PRESCRIPTION ACCESS FOR PHARMACY
+# ============================================================================
+
+
+def get_prescription_for_pharmacy(
+    prescription_id: int,
+    clinic_id: int,
+) -> Prescription:
+    """
+    Public pharmacy-facing prescription getter.
+
+    This prevents routes from importing private prescription
+    service helpers merely to perform tenant validation.
+    """
+
+    prescription = _get_prescription_or_404(
+        prescription_id,
+        clinic_id,
     )
 
-    if remaining <= 0:
-        raise ConflictError(
-            f"Prescription item {prescription_item.id} "
-            f"has already been fully dispensed"
-        )
+    _validate_prescription_scope(
+        prescription,
+        clinic_id,
+    )
 
-    if requested_quantity > remaining:
-        raise ValidationError(
-            f"Cannot dispense {requested_quantity} units "
-            f"for prescription item {prescription_item.id}. "
-            f"Only {remaining} remain."
-        )
+    return prescription
+
+
+# ============================================================================
+# DISPENSING
+# ============================================================================
 
 
 @transactional
@@ -987,30 +1157,24 @@ def create_dispense_record(
     items: list[dict],
     notes: str | None = None,
 ) -> DispenseRecord:
-    """
-    Dispense one or more prescription items.
-
-    Expected item structure:
-
-        {
-            "prescription_item_id": 123,
-            "quantity": 10,
-        }
-
-    Each drug is allocated independently using FEFO.
-
-    The transaction is atomic. If any requested medication cannot
-    be fulfilled, the entire transaction rolls back.
-    """
-
     ensure_clinic_active(
         clinic_id
     )
 
+    if not items:
+        raise ValidationError(
+            "At least one dispensing item is required"
+        )
+
+    # ------------------------------------------------------------------------
+    # Lock prescription first.
+    # ------------------------------------------------------------------------
+
     prescription = (
         db.session.query(Prescription)
         .filter(
-            Prescription.id == prescription_id
+            Prescription.id == prescription_id,
+            Prescription.clinic_id == clinic_id,
         )
         .with_for_update()
         .first()
@@ -1030,21 +1194,24 @@ def create_dispense_record(
         prescription
     )
 
+    # ------------------------------------------------------------------------
+    # Validate dispensing pharmacist.
+    # ------------------------------------------------------------------------
+
     staff = _validate_staff_for_pharmacy(
         dispensed_by_id,
         clinic_id,
     )
 
-    if not items:
-        raise ValidationError(
-            "At least one dispensing item is required"
-        )
+    # ------------------------------------------------------------------------
+    # Normalize request entries.
+    # ------------------------------------------------------------------------
 
-    seen_item_ids: set[int] = set()
+    normalized_entries: list[dict] = []
 
-    prepared_items: list[
-        tuple[PrescriptionItem, int]
-    ] = []
+    seen_pairs: set[tuple[int, int]] = set()
+
+    prescription_item_ids: set[int] = set()
 
     for entry in items:
         if not isinstance(entry, dict):
@@ -1054,6 +1221,10 @@ def create_dispense_record(
 
         prescription_item_id = entry.get(
             "prescription_item_id"
+        )
+
+        batch_id = entry.get(
+            "batch_id"
         )
 
         quantity = entry.get(
@@ -1066,197 +1237,442 @@ def create_dispense_record(
                 "prescription_item_id"
             )
 
-        if prescription_item_id in seen_item_ids:
+        if batch_id is None:
             raise ValidationError(
-                f"Duplicate prescription item "
-                f"{prescription_item_id}"
+                "Each dispensing item requires "
+                "batch_id"
             )
 
-        seen_item_ids.add(
+        if (
+            not isinstance(prescription_item_id, int)
+            or isinstance(prescription_item_id, bool)
+            or prescription_item_id <= 0
+        ):
+            raise ValidationError(
+                "Prescription item ID must be a positive integer"
+            )
+
+        if (
+            not isinstance(batch_id, int)
+            or isinstance(batch_id, bool)
+            or batch_id <= 0
+        ):
+            raise ValidationError(
+                "Batch ID must be a positive integer"
+            )
+
+        if (
+            not isinstance(quantity, int)
+            or isinstance(quantity, bool)
+            or quantity <= 0
+        ):
+            raise ValidationError(
+                "Dispense quantity must be a positive integer"
+            )
+
+        pair = (
+            prescription_item_id,
+            batch_id,
+        )
+
+        if pair in seen_pairs:
+            raise ValidationError(
+                f"Duplicate batch {batch_id} for "
+                f"prescription item {prescription_item_id}"
+            )
+
+        seen_pairs.add(pair)
+
+        prescription_item_ids.add(
             prescription_item_id
         )
 
-        prescription_item = (
-            db.session.query(PrescriptionItem)
-            .filter(
-                PrescriptionItem.id
-                == prescription_item_id,
-                PrescriptionItem.prescription_id
-                == prescription.id,
-            )
-            .with_for_update()
-            .first()
+        normalized_entries.append(
+            {
+                "prescription_item_id": prescription_item_id,
+                "batch_id": batch_id,
+                "quantity": quantity,
+            }
         )
 
-        if prescription_item is None:
-            raise NotFoundError(
-                f"Prescription item "
-                f"{prescription_item_id} not found "
-                f"on prescription {prescription.id}"
+    # ------------------------------------------------------------------------
+    # Lock prescription items in deterministic order.
+    # ------------------------------------------------------------------------
+
+    locked_items = (
+        db.session.query(PrescriptionItem)
+        .filter(
+            PrescriptionItem.prescription_id
+            == prescription.id,
+            PrescriptionItem.id.in_(
+                prescription_item_ids
+            ),
+        )
+        .order_by(
+            PrescriptionItem.id.asc()
+        )
+        .with_for_update()
+        .all()
+    )
+
+    items_by_id = {
+        item.id: item
+        for item in locked_items
+    }
+
+    if len(items_by_id) != len(
+        prescription_item_ids
+    ):
+        missing_ids = (
+            prescription_item_ids
+            - set(items_by_id)
+        )
+
+        missing_text = ", ".join(
+            str(item_id)
+            for item_id in sorted(
+                missing_ids
             )
+        )
+
+        raise NotFoundError(
+            f"Prescription item(s) {missing_text} "
+            f"not found on prescription {prescription.id}"
+        )
+
+    # ------------------------------------------------------------------------
+    # Aggregate request by prescription item.
+    # ------------------------------------------------------------------------
+
+    requested_by_item: dict[int, int] = {}
+
+    for entry in normalized_entries:
+        prescription_item_id = entry[
+            "prescription_item_id"
+        ]
+
+        quantity = entry[
+            "quantity"
+        ]
+
+        requested_by_item[
+            prescription_item_id
+        ] = (
+            requested_by_item.get(
+                prescription_item_id,
+                0,
+            )
+            + quantity
+        )
+
+    # ------------------------------------------------------------------------
+    # Validate prescribed quantities.
+    # ------------------------------------------------------------------------
+
+    for (
+        prescription_item_id,
+        requested_quantity,
+    ) in requested_by_item.items():
+
+        prescription_item = items_by_id[
+            prescription_item_id
+        ]
 
         _validate_dispense_entry(
             clinic_id=clinic_id,
             prescription=prescription,
             prescription_item=prescription_item,
-            requested_quantity=quantity,
+            requested_quantity=requested_quantity,
         )
 
-        prepared_items.append(
-            (
-                prescription_item,
-                quantity,
+    # ------------------------------------------------------------------------
+    # Lock selected batches in deterministic order.
+    # ------------------------------------------------------------------------
+
+    batch_ids = {
+        entry["batch_id"]
+        for entry in normalized_entries
+    }
+
+    locked_batches = (
+        db.session.query(DrugBatch)
+        .filter(
+            DrugBatch.id.in_(
+                batch_ids
+            ),
+            DrugBatch.clinic_id == clinic_id,
+        )
+        .order_by(
+            DrugBatch.id.asc()
+        )
+        .with_for_update()
+        .all()
+    )
+
+    batches_by_id = {
+        batch.id: batch
+        for batch in locked_batches
+    }
+
+    if len(batches_by_id) != len(
+        batch_ids
+    ):
+        missing_batch_ids = (
+            batch_ids
+            - set(batches_by_id)
+        )
+
+        missing_text = ", ".join(
+            str(batch_id)
+            for batch_id in sorted(
+                missing_batch_ids
             )
         )
 
-    record = DispenseRecord(
+        raise NotFoundError(
+            f"Drug batch(es) {missing_text} "
+            f"not found in clinic {clinic_id}"
+        )
+
+    # ------------------------------------------------------------------------
+    # Validate selected batches.
+    # ------------------------------------------------------------------------
+
+    requested_by_batch: dict[int, int] = {}
+
+    for entry in normalized_entries:
+        prescription_item = items_by_id[
+            entry["prescription_item_id"]
+        ]
+
+        batch = batches_by_id[
+            entry["batch_id"]
+        ]
+
+        _validate_batch_for_dispensing(
+            batch=batch,
+            clinic_id=clinic_id,
+            drug_id=prescription_item.drug_id,
+        )
+
+        batch_id = batch.id
+        quantity = entry["quantity"]
+
+        requested_by_batch[
+            batch_id
+        ] = (
+            requested_by_batch.get(
+                batch_id,
+                0,
+            )
+            + quantity
+        )
+
+    # ------------------------------------------------------------------------
+    # Verify stock after locks.
+    # ------------------------------------------------------------------------
+
+    for (
+        batch_id,
+        requested_quantity,
+    ) in requested_by_batch.items():
+
+        batch = batches_by_id[
+            batch_id
+        ]
+
+        if requested_quantity > batch.quantity_on_hand:
+            raise ConflictError(
+                f"Insufficient stock in drug batch {batch.id}. "
+                f"Requested {requested_quantity}, "
+                f"available {batch.quantity_on_hand}"
+            )
+
+    # ------------------------------------------------------------------------
+    # Create dispense record.
+    # ------------------------------------------------------------------------
+
+    dispense_record = DispenseRecord(
         prescription_id=prescription.id,
         dispensed_by_id=staff.id,
         status=DispenseStatus.PENDING,
         notes=notes,
     )
 
-    db.session.add(record)
-    db.session.flush()
-
-    total_dispensed = 0
-
-    for prescription_item, quantity in prepared_items:
-        allocations = _allocate_fefo(
-            clinic_id=clinic_id,
-            drug_id=prescription_item.drug_id,
-            quantity_needed=quantity,
-        )
-
-        for batch, allocated_quantity in allocations:
-            dispense_item = DispenseItem(
-                dispense_record_id=record.id,
-                batch_id=batch.id,
-                prescription_item_id=prescription_item.id,
-                quantity_dispensed=allocated_quantity,
-            )
-
-            db.session.add(
-                dispense_item
-            )
-
-            total_dispensed += (
-                allocated_quantity
-            )
-
-    db.session.flush()
-
-    requested_total = sum(
-        quantity
-        for _, quantity in prepared_items
+    db.session.add(
+        dispense_record
     )
 
-    if total_dispensed != requested_total:
-        raise ConflictError(
-            "Dispensing transaction did not "
-            "fulfill the requested quantities"
+    db.session.flush()
+
+    # ------------------------------------------------------------------------
+    # Deduct selected stock.
+    # ------------------------------------------------------------------------
+
+    for entry in normalized_entries:
+        prescription_item = items_by_id[
+            entry["prescription_item_id"]
+        ]
+
+        batch = batches_by_id[
+            entry["batch_id"]
+        ]
+
+        quantity = entry["quantity"]
+
+        batch.quantity_on_hand -= quantity
+
+        dispense_item = DispenseItem(
+            dispense_record_id=dispense_record.id,
+            batch_id=batch.id,
+            prescription_item_id=prescription_item.id,
+            quantity_dispensed=quantity,
         )
 
-    all_requested_items_fulfilled = True
-
-    for prescription_item, _ in prepared_items:
-        remaining = (
-            _get_remaining_prescription_quantity(
-                prescription_item
-            )
+        db.session.add(
+            dispense_item
         )
 
-        if remaining > 0:
-            all_requested_items_fulfilled = False
+    db.session.flush()
+
+    # ------------------------------------------------------------------------
+    # Determine fulfillment status.
+    # ------------------------------------------------------------------------
+
+    all_fulfilled = True
+
+    for prescription_item in prescription.items:
+        if prescription_item.quantity is None:
+            all_fulfilled = False
             break
 
-    record.status = (
-        DispenseStatus.DISPENSED
-        if all_requested_items_fulfilled
-        else DispenseStatus.PARTIALLY_DISPENSED
-    )
+        dispensed_quantity = (
+            _get_dispensed_quantity_for_prescription_item(
+                prescription_item.id
+            )
+        )
 
-    record.dispensed_at = _utcnow()
+        if (
+            dispensed_quantity
+            < prescription_item.quantity
+        ):
+            all_fulfilled = False
+            break
+
+    if all_fulfilled:
+        dispense_record.status = (
+            DispenseStatus.DISPENSED
+        )
+    else:
+        dispense_record.status = (
+            DispenseStatus.PARTIALLY_DISPENSED
+        )
+
+    dispense_record.dispensed_at = _utcnow()
 
     db.session.flush()
+
+    # ------------------------------------------------------------------------
+    # Audit.
+    # ------------------------------------------------------------------------
 
     create_audit_log(
         action=AuditAction.CREATE,
         entity_type="DispenseRecord",
-        entity_id=record.id,
+        entity_id=dispense_record.id,
+        user_id=(
+            staff.user.id
+            if staff.user is not None
+            else None
+        ),
         details={
             "clinic_id": clinic_id,
             "prescription_id": prescription.id,
             "dispensed_by_id": staff.id,
-            "status": record.status.value,
-            "quantity_dispensed": total_dispensed,
+            "status": dispense_record.status.value,
+            "items": [
+                {
+                    "prescription_item_id": entry[
+                        "prescription_item_id"
+                    ],
+                    "batch_id": entry[
+                        "batch_id"
+                    ],
+                    "quantity": entry[
+                        "quantity"
+                    ],
+                }
+                for entry in normalized_entries
+            ],
         },
     )
 
-    return record
+    return dispense_record
+
+
+# ============================================================================
+# DISPENSE RECORD RETRIEVAL
+# ============================================================================
 
 
 def get_dispense_record(
     dispense_record_id: int,
+    clinic_id: int,
 ) -> DispenseRecord:
-    """
-    Historical retrieval.
-
-    No clinic-active check is performed.
-    """
-
     return _get_dispense_record_or_404(
-        dispense_record_id
+        dispense_record_id,
+        clinic_id,
     )
 
 
 def list_dispense_records_for_prescription(
     prescription_id: int,
+    clinic_id: int,
 ) -> list[DispenseRecord]:
-    """
-    Historical retrieval.
+    prescription = _get_prescription_or_404(
+        prescription_id,
+        clinic_id,
+    )
 
-    No clinic-active check is performed.
-    """
-
-    _get_prescription_or_404(
-        prescription_id
+    _validate_prescription_scope(
+        prescription,
+        clinic_id,
     )
 
     return (
         db.session.query(DispenseRecord)
         .filter(
             DispenseRecord.prescription_id
-            == prescription_id
+            == prescription.id
         )
         .order_by(
-            DispenseRecord.created_at.desc(),
-            DispenseRecord.id.desc(),
+            DispenseRecord.created_at.asc(),
+            DispenseRecord.id.asc(),
         )
         .all()
     )
 
 
+# ============================================================================
+# DISPENSE CANCELLATION
+# ============================================================================
+
+
 @transactional
 def cancel_dispense_record(
-    clinic_id: int,
     dispense_record_id: int,
+    clinic_id: int,
 ) -> DispenseRecord:
     """
-    Cancel a dispensing transaction and restore every quantity
-    deducted by that transaction.
+    Cancel a pharmacy dispensing transaction.
 
-    PENDING:
-        Can be cancelled.
+    The operation is clinic-scoped and transactional.
 
-    PARTIALLY_DISPENSED:
-        Can be cancelled and stock restored.
+    Every DispenseItem stores the exact DrugBatch and quantity
+    deducted during dispensing. Cancellation restores those
+    exact quantities.
 
-    DISPENSED:
-        Cannot be cancelled.
-
-    CANCELLED:
-        Cannot be cancelled again.
+    A fully DISPENSED transaction cannot be cancelled.
     """
 
     ensure_clinic_active(
@@ -1265,9 +1681,14 @@ def cancel_dispense_record(
 
     record = (
         db.session.query(DispenseRecord)
+        .join(
+            Prescription,
+            DispenseRecord.prescription_id
+            == Prescription.id,
+        )
         .filter(
-            DispenseRecord.id
-            == dispense_record_id
+            DispenseRecord.id == dispense_record_id,
+            Prescription.clinic_id == clinic_id,
         )
         .with_for_update()
         .first()
@@ -1278,81 +1699,130 @@ def cancel_dispense_record(
             f"Dispense record {dispense_record_id} not found"
         )
 
+    prescription = (
+        db.session.query(Prescription)
+        .filter(
+            Prescription.id == record.prescription_id,
+            Prescription.clinic_id == clinic_id,
+        )
+        .first()
+    )
+
+    if prescription is None:
+        raise NotFoundError(
+            f"Prescription {record.prescription_id} not found"
+        )
+
     _validate_prescription_scope(
-        record.prescription,
+        prescription,
         clinic_id,
     )
 
     if record.status == DispenseStatus.CANCELLED:
         raise ConflictError(
-            f"Dispense record {record.id} "
-            f"is already cancelled"
+            f"Dispense record {record.id} is already cancelled"
         )
 
     if record.status == DispenseStatus.DISPENSED:
         raise ConflictError(
-            f"Dispense record {record.id} "
-            f"is fully dispensed and cannot be cancelled"
+            f"Dispense record {record.id} has already been fully "
+            f"dispensed and cannot be cancelled"
         )
 
     if record.status not in {
         DispenseStatus.PENDING,
         DispenseStatus.PARTIALLY_DISPENSED,
     }:
-        raise ValidationError(
-            f"Dispense record {record.id} "
-            f"cannot be cancelled from status "
-            f"{record.status.value}"
+        raise ConflictError(
+            f"Dispense record {record.id} cannot be cancelled "
+            f"from status {record.status.value}"
         )
 
-    items = (
+    previous_status = record.status.value
+
+    dispense_items = (
         db.session.query(DispenseItem)
         .filter(
             DispenseItem.dispense_record_id
             == record.id
         )
+        .order_by(
+            DispenseItem.id.asc()
+        )
         .all()
     )
 
+    if not dispense_items:
+        raise ConflictError(
+            f"Dispense record {record.id} has no dispensing items"
+        )
+
+    # ------------------------------------------------------------------------
+    # Lock affected batches in deterministic order.
+    # ------------------------------------------------------------------------
+
     batch_ids = {
         item.batch_id
-        for item in items
+        for item in dispense_items
     }
 
-    locked_batches: dict[
-        int,
-        DrugBatch,
-    ] = {}
+    locked_batches = (
+        db.session.query(DrugBatch)
+        .filter(
+            DrugBatch.id.in_(
+                batch_ids
+            ),
+            DrugBatch.clinic_id == clinic_id,
+        )
+        .order_by(
+            DrugBatch.id.asc()
+        )
+        .with_for_update()
+        .all()
+    )
 
-    if batch_ids:
-        batches = (
-            db.session.query(DrugBatch)
-            .filter(
-                DrugBatch.id.in_(batch_ids),
-                DrugBatch.clinic_id == clinic_id,
-            )
-            .with_for_update()
-            .all()
+    batches_by_id = {
+        batch.id: batch
+        for batch in locked_batches
+    }
+
+    if len(batches_by_id) != len(
+        batch_ids
+    ):
+        missing_batch_ids = (
+            batch_ids
+            - set(batches_by_id)
         )
 
-        locked_batches = {
-            batch.id: batch
-            for batch in batches
-        }
-
-    for item in items:
-        batch = locked_batches.get(
-            item.batch_id
+        missing_text = ", ".join(
+            str(batch_id)
+            for batch_id in sorted(
+                missing_batch_ids
+            )
         )
 
-        if batch is None:
-            raise ValidationError(
-                f"Dispense item {item.id} references "
-                f"a batch outside clinic {clinic_id}"
-            )
+        raise NotFoundError(
+            f"Drug batch(es) {missing_text} "
+            f"not found in clinic {clinic_id}"
+        )
+
+    # ------------------------------------------------------------------------
+    # Restore exact quantities.
+    # ------------------------------------------------------------------------
+
+    restored_quantity = 0
+
+    for dispense_item in dispense_items:
+        batch = batches_by_id[
+            dispense_item.batch_id
+        ]
 
         batch.quantity_on_hand += (
-            item.quantity_dispensed
+            dispense_item.quantity_dispensed
+        )
+
+        restored_quantity += (
+            dispense_item.quantity_dispensed
         )
 
     record.status = (
@@ -1363,14 +1833,27 @@ def cancel_dispense_record(
 
     db.session.flush()
 
+    # ------------------------------------------------------------------------
+    # Audit cancellation.
+    # ------------------------------------------------------------------------
+
     create_audit_log(
-        action=AuditAction.UPDATE,
+        action=AuditAction.STATUS_CHANGE,
         entity_type="DispenseRecord",
         entity_id=record.id,
         details={
             "clinic_id": clinic_id,
-            "status": DispenseStatus.CANCELLED.value,
-            "restored_items": len(items),
+            "prescription_id": prescription.id,
+            "previous_status": previous_status,
+            "new_status": DispenseStatus.CANCELLED.value,
+            "restored_quantity": restored_quantity,
+            "restored_batches": [
+                {
+                    "batch_id": item.batch_id,
+                    "quantity": item.quantity_dispensed,
+                }
+                for item in dispense_items
+            ],
         },
     )
 

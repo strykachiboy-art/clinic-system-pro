@@ -1,6 +1,7 @@
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, jsonify, request, g, session
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError
@@ -64,9 +65,7 @@ def _current_user() -> User:
     from the verified JWT.
     """
 
-    user = db_user = User.query.get(
-        g.current_user_id
-    )
+    user = db.session.get(User, g.current_user_id)
 
     if user is None:
         raise DomainError("Authenticated user not found")

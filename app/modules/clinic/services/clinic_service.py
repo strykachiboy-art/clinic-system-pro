@@ -1,4 +1,8 @@
 import secrets
+from datetime import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy import select
 
 from app.extensions import celery, db
 from app.core.utils.decorators import transactional
@@ -25,20 +29,34 @@ def _enum_value(value):
     return value.value if hasattr(value, "value") else value
 
 
+def _utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
 def _validate_name(name: str) -> str:
     """Validate and normalize a clinic name."""
-    if not name or not name.strip():
+    if not isinstance(name, str):
+        raise ValidationError("Clinic name must be a string")
+
+    name = name.strip()
+
+    if not name:
         raise ValidationError("Clinic name is required")
 
-    return name.strip()
+    return name
 
 
-def _validate_operating_hours(opening_time, closing_time):
+def _validate_operating_hours(
+    opening_time: time | None,
+    closing_time: time | None,
+):
     """
     Validate clinic operating hours.
 
-    Both values are optional, but when supplied together the opening
-    time must be earlier than the closing time.
+    Both values are optional. When both are supplied, opening must
+    occur before closing.
     """
     if (
         opening_time is not None
@@ -50,9 +68,48 @@ def _validate_operating_hours(opening_time, closing_time):
         )
 
 
-def _get_parent_clinic(parent_clinic_id: int) -> Clinic:
-    """Resolve a parent clinic or raise 404."""
-    parent = Clinic.query.get(parent_clinic_id)
+def _validate_timezone(timezone: str) -> str:
+    """Validate that a timezone is a real IANA timezone."""
+    if not isinstance(timezone, str):
+        raise ValidationError("Timezone must be a string")
+
+    timezone = timezone.strip()
+
+    if not timezone:
+        raise ValidationError("Timezone is required")
+
+    try:
+        ZoneInfo(timezone)
+    except ZoneInfoNotFoundError:
+        raise ValidationError(
+            f"Invalid timezone '{timezone}'"
+        )
+
+    return timezone
+
+
+def _get_parent_clinic(
+    parent_clinic_id: int,
+    *,
+    for_update: bool = False,
+) -> Clinic:
+    """
+    Resolve a parent clinic.
+
+    Row locking is used when the caller is about to modify hierarchy
+    beneath the parent.
+    """
+    if parent_clinic_id <= 0:
+        raise ValidationError("Invalid parent clinic ID")
+
+    query = Clinic.query.filter(
+        Clinic.id == parent_clinic_id
+    )
+
+    if for_update:
+        query = query.with_for_update()
+
+    parent = query.first()
 
     if parent is None:
         raise NotFoundError(
@@ -69,14 +126,10 @@ def _check_name_conflict(
 ):
     """
     Prevent duplicate clinic names within the same hierarchy.
-
-    A headquarters/root clinic and a branch may technically have the
-    same name under different parents, but two clinics under the same
-    parent should not.
     """
-    query = Clinic.query.filter_by(
-        name=name,
-        parent_clinic_id=parent_clinic_id,
+    query = Clinic.query.filter(
+        Clinic.name == name,
+        Clinic.parent_clinic_id == parent_clinic_id,
     )
 
     if exclude_clinic_id is not None:
@@ -89,22 +142,79 @@ def _check_name_conflict(
     if existing is not None:
         raise ConflictError(
             f"A clinic named '{name}' already exists under "
-            f"this parent clinic"
+            "this parent clinic"
         )
+
+
+def _ensure_active_clinic(clinic: Clinic):
+    """Ensure a clinic can participate in operational writes."""
+    if clinic.status != ClinicStatus.ACTIVE:
+        raise ValidationError(
+            f"Clinic {clinic.id} is not active"
+        )
+
+
+def _ensure_no_hierarchy_cycle(
+    clinic: Clinic,
+    proposed_parent: Clinic,
+):
+    """
+    Ensure assigning proposed_parent cannot create a cycle.
+
+    Example:
+
+        A -> B -> C
+
+    C cannot become the parent of A.
+    """
+    current = proposed_parent
+
+    visited = set()
+
+    while current is not None:
+        if current.id in visited:
+            raise ConflictError(
+                "Existing clinic hierarchy contains a cycle"
+            )
+
+        visited.add(current.id)
+
+        if current.id == clinic.id:
+            raise ConflictError(
+                "This parent assignment would create "
+                "a circular clinic hierarchy"
+            )
+
+        current = current.parent_clinic
 
 
 # =====================================================================
 # GET CLINIC
 # =====================================================================
 
-def get_clinic(clinic_id: int) -> Clinic:
+def get_clinic(
+    clinic_id: int,
+    *,
+    for_update: bool = False,
+) -> Clinic:
     """
     Retrieve a clinic by ID.
 
-    Raises:
-        NotFoundError: when the clinic does not exist.
+    Args:
+        clinic_id: Clinic primary key.
+        for_update: Lock the row for transactional mutation.
     """
-    clinic = Clinic.query.get(clinic_id)
+    if clinic_id <= 0:
+        raise ValidationError("Invalid clinic ID")
+
+    query = Clinic.query.filter(
+        Clinic.id == clinic_id
+    )
+
+    if for_update:
+        query = query.with_for_update()
+
+    clinic = query.first()
 
     if clinic is None:
         raise NotFoundError(
@@ -123,16 +233,19 @@ def list_clinics(
 ) -> list[Clinic]:
     """
     List clinics optionally filtered by status.
+
+    Read-only operation.
     """
     query = Clinic.query
 
     if status is not None:
-        query = query.filter_by(
-            status=status
+        query = query.filter(
+            Clinic.status == status
         )
 
     return query.order_by(
-        Clinic.name.asc()
+        Clinic.name.asc(),
+        Clinic.id.asc(),
     ).all()
 
 
@@ -140,18 +253,23 @@ def list_clinics(
 # LIST BRANCHES
 # =====================================================================
 
-def list_branches(clinic_id: int) -> list[Clinic]:
+def list_branches(
+    clinic_id: int,
+) -> list[Clinic]:
     """
     Return all direct branches belonging to a clinic.
-
-    The parent clinic must exist.
     """
     get_clinic(clinic_id)
 
     return (
         Clinic.query
-        .filter_by(parent_clinic_id=clinic_id)
-        .order_by(Clinic.name.asc())
+        .filter(
+            Clinic.parent_clinic_id == clinic_id
+        )
+        .order_by(
+            Clinic.name.asc(),
+            Clinic.id.asc(),
+        )
         .all()
     )
 
@@ -176,56 +294,50 @@ def create_clinic(
     closing_time=None,
 ) -> Clinic:
     """
-    Create a clinic.
-
-    This supports both:
-
-        - a root/headquarters clinic
-        - a clinic attached to an existing parent
-
-    Branch-specific creation should normally go through create_branch().
+    Create a root clinic or a clinic attached to an existing parent.
     """
     name = _validate_name(name)
+    timezone = _validate_timezone(timezone)
 
     _validate_operating_hours(
         opening_time,
         closing_time,
     )
 
+    if parent_clinic_id is not None and parent_clinic_id <= 0:
+        raise ValidationError(
+            "Invalid parent clinic ID"
+        )
+
+    if is_headquarters and parent_clinic_id is not None:
+        raise ValidationError(
+            "A headquarters clinic cannot have a parent clinic"
+        )
+
     parent = None
 
     if parent_clinic_id is not None:
         parent = _get_parent_clinic(
-            parent_clinic_id
+            parent_clinic_id,
+            for_update=True,
         )
 
-    # A clinic cannot be its own parent.
-    # This is also protected at the DB level by:
-    # ck_clinics_not_self_parent.
-    #
-    # This explicit check gives callers a clean application error.
-    if parent_clinic_id is not None:
-        if parent_clinic_id == 0:
-            raise ValidationError(
-                "Invalid parent clinic ID"
-            )
+        _ensure_active_clinic(parent)
 
     _check_name_conflict(
         name=name,
         parent_clinic_id=parent_clinic_id,
     )
 
-    # A headquarters is expected to be a root clinic.
-    if is_headquarters and parent_clinic_id is not None:
-        raise ValidationError(
-            "A headquarters clinic cannot have a parent clinic"
-        )
-
     clinic = Clinic(
         name=name,
         clinic_type=clinic_type,
         status=ClinicStatus.ACTIVE,
-        parent_clinic_id=parent_clinic_id,
+        parent_clinic_id=(
+            parent.id
+            if parent is not None
+            else None
+        ),
         is_headquarters=is_headquarters,
         address=address,
         city=city,
@@ -284,18 +396,17 @@ def create_branch(
     closing_time=None,
 ) -> Clinic:
     """
-    Create a branch under an existing clinic.
-
-    Branches are always:
-        - ACTIVE
-        - non-headquarters
-        - attached to parent_clinic_id
+    Create an active non-headquarters branch under an active clinic.
     """
     parent = _get_parent_clinic(
-        parent_clinic_id
+        parent_clinic_id,
+        for_update=True,
     )
 
+    _ensure_active_clinic(parent)
+
     name = _validate_name(name)
+    timezone = _validate_timezone(timezone)
 
     _validate_operating_hours(
         opening_time,
@@ -362,9 +473,12 @@ def update_clinic(
     Update editable clinic profile fields.
 
     Relationship configuration, status, AI credits and API tokens
-    are intentionally handled by their dedicated services.
+    are handled by dedicated operations.
     """
-    clinic = get_clinic(clinic_id)
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
 
     allowed_fields = {
         "name",
@@ -390,6 +504,11 @@ def update_clinic(
     if "name" in fields:
         fields["name"] = _validate_name(
             fields["name"]
+        )
+
+    if "timezone" in fields:
+        fields["timezone"] = _validate_timezone(
+            fields["timezone"]
         )
 
     opening_time = fields.get(
@@ -469,18 +588,11 @@ def update_branch_configuration(
 ) -> Clinic:
     """
     Update parent/headquarters configuration.
-
-    Supported fields:
-
-        parent_clinic_id:
-            - integer -> attach to parent
-            - None -> detach from parent
-
-        is_headquarters:
-            - True -> make headquarters
-            - False -> make non-headquarters
     """
-    clinic = get_clinic(clinic_id)
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
 
     allowed_fields = {
         "parent_clinic_id",
@@ -508,51 +620,44 @@ def update_branch_configuration(
         clinic.is_headquarters,
     )
 
-    # -------------------------------------------------------------
-    # Parent validation
-    # -------------------------------------------------------------
+    if new_parent_id is not None:
+        if new_parent_id <= 0:
+            raise ValidationError(
+                "Invalid parent clinic ID"
+            )
 
-    if new_parent_id == clinic.id:
-        raise ValidationError(
-            "A clinic cannot be its own parent"
-        )
+        if new_parent_id == clinic.id:
+            raise ValidationError(
+                "A clinic cannot be its own parent"
+            )
 
     new_parent = None
 
     if new_parent_id is not None:
         new_parent = _get_parent_clinic(
-            new_parent_id
+            new_parent_id,
+            for_update=True,
         )
 
-        # Prevent circular hierarchy.
-        #
-        # Example:
-        #
-        # A -> B -> C
-        #
-        # C cannot become parent of A.
-        #
-        # Walk upward from the proposed parent and ensure that we
-        # never encounter the clinic being modified.
-        current = new_parent
+        _ensure_active_clinic(new_parent)
 
-        while current is not None:
-            if current.id == clinic.id:
-                raise ConflictError(
-                    "This parent assignment would create "
-                    "a circular clinic hierarchy"
-                )
+        _ensure_no_hierarchy_cycle(
+            clinic,
+            new_parent,
+        )
 
-            current = current.parent_clinic
+        _check_name_conflict(
+            name=clinic.name,
+            parent_clinic_id=new_parent.id,
+            exclude_clinic_id=clinic.id,
+        )
 
-    # Headquarters must be a root clinic.
     if new_is_headquarters and new_parent_id is not None:
         raise ValidationError(
             "A headquarters clinic cannot have a parent clinic"
         )
 
-    # If explicitly detaching a clinic, it is now a root.
-    # is_headquarters remains whatever the caller requested.
+    # If a clinic is detached from a parent, it becomes a root.
     clinic.parent_clinic_id = new_parent_id
     clinic.is_headquarters = new_is_headquarters
 
@@ -593,7 +698,10 @@ def change_status(
     """
     Change clinic status.
     """
-    clinic = get_clinic(clinic_id)
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
 
     if clinic.status == new_status:
         return clinic
@@ -633,14 +741,23 @@ def add_ai_credits(
     """
     Add AI credits to a clinic.
 
-    Credits can only be added in positive amounts.
+    The clinic row is locked so concurrent credit operations cannot
+    overwrite one another.
     """
-    clinic = get_clinic(clinic_id)
+    if not isinstance(amount, int):
+        raise ValidationError(
+            "AI credit amount must be an integer"
+        )
 
     if amount <= 0:
         raise ValidationError(
             "AI credit amount must be greater than zero"
         )
+
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
 
     old_credits = clinic.ai_credits
 
@@ -674,15 +791,17 @@ def regenerate_api_token(
     clinic_id: int,
 ) -> str:
     """
-    Generate and store a new API token for a clinic.
+    Generate and store a new API token.
 
-    The previous token is invalidated immediately.
+    The previous token becomes invalid once the transaction commits.
     """
-    clinic = get_clinic(clinic_id)
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
 
     old_token_exists = clinic.api_token is not None
 
-    # secrets.token_urlsafe provides a cryptographically secure token.
     new_token = secrets.token_urlsafe(48)
 
     clinic.api_token = new_token
@@ -696,9 +815,11 @@ def regenerate_api_token(
             f"'{clinic.name}'"
         ),
         old_value={
-            "api_token": "present"
-            if old_token_exists
-            else None,
+            "api_token": (
+                "present"
+                if old_token_exists
+                else None
+            ),
         },
         new_value={
             "api_token": "present",
@@ -708,36 +829,102 @@ def regenerate_api_token(
     return new_token
 
 
-def consume_ai_credit(clinic_id: int) -> Clinic:
-    clinic = get_clinic(clinic_id)
+# =====================================================================
+# CONSUME AI CREDIT
+# =====================================================================
+
+@transactional
+def consume_ai_credit(
+    clinic_id: int,
+) -> Clinic:
+    """
+    Atomically consume one AI credit.
+
+    The clinic row is locked before checking the balance. This prevents
+    concurrent requests from consuming the same available credit.
+    """
+    clinic = get_clinic(
+        clinic_id,
+        for_update=True,
+    )
+
+    _ensure_active_clinic(clinic)
 
     if clinic.ai_credits <= 0:
-        raise ValidationError("Insufficient AI credits")
+        raise ValidationError(
+            "Insufficient AI credits"
+        )
+
+    old_credits = clinic.ai_credits
+    old_requests = clinic.ai_requests_this_month
 
     clinic.ai_credits -= 1
     clinic.ai_requests_this_month += 1
 
+    create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="Clinic",
+        entity_id=clinic.id,
+        description=(
+            f"AI credit consumed by clinic "
+            f"'{clinic.name}'"
+        ),
+        old_value={
+            "ai_credits": old_credits,
+            "ai_requests_this_month": old_requests,
+        },
+        new_value={
+            "ai_credits": clinic.ai_credits,
+            "ai_requests_this_month": (
+                clinic.ai_requests_this_month
+            ),
+        },
+    )
+
     return clinic
 
 
+# =====================================================================
+# RESET MONTHLY AI USAGE
+# =====================================================================
+
 @celery.task(name="reset_monthly_ai_usage")
 def reset_monthly_ai_usage():
-    """Reset the monthly AI request counter for every clinic."""
-    updated = Clinic.query.update(
-        {Clinic.ai_requests_this_month: 0},
-        synchronize_session=False,
-    )
-    db.session.commit()
-    return updated
+    """
+    Reset monthly AI request counters for every clinic.
+
+    This operation is intentionally global because the Celery task
+    operates independently of an authenticated clinic.
+    """
+    try:
+        updated = Clinic.query.update(
+            {
+                Clinic.ai_requests_this_month: 0,
+            },
+            synchronize_session=False,
+        )
+
+        db.session.commit()
+
+        return updated
+
+    except Exception:
+        db.session.rollback()
+        raise
 
 
-def ensure_clinic_active(clinic_id: int) -> Clinic:
-    """Return a clinic only when it is active for operational writes."""
+# =====================================================================
+# ENSURE CLINIC ACTIVE
+# =====================================================================
+
+def ensure_clinic_active(
+    clinic_id: int,
+) -> Clinic:
+    """
+    Return a clinic only when it is active for operational writes.
+    """
     clinic = get_clinic(clinic_id)
 
-    if clinic.status != ClinicStatus.ACTIVE:
-        raise ValidationError(
-            f"Clinic {clinic_id} is not active"
-        )
+    _ensure_active_clinic(clinic)
 
     return clinic

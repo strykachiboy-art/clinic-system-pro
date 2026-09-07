@@ -1,14 +1,15 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.role_enums import Role
-from app.core.utils.decorators import role_required
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
+from app.core.auth.user.models.user_model import User
+from app.core.utils.decorators import role_required
 
 from app.modules.clinic.schemas.clinic_schema import (
     ClinicAICreditsUpdateSchema,
@@ -72,6 +73,13 @@ CLINIC_MANAGEMENT_ROLES = (
 # ============================================================================
 
 def _serialize_clinic(clinic):
+    """
+    Serialize a clinic without exposing sensitive internal fields.
+
+    IMPORTANT:
+    api_token is intentionally excluded.
+    """
+
     return {
         "id": clinic.id,
         "name": clinic.name,
@@ -111,15 +119,152 @@ def _serialize_clinic(clinic):
 
 
 # ============================================================================
-# HELPERS
+# AUTHORIZATION HELPERS
+# ============================================================================
+
+def _is_admin():
+    """
+    Determine whether the authenticated user has the ADMIN role.
+
+    role_required() has already populated g.current_user_role.
+    """
+
+    role = getattr(g, "current_user_role", None)
+
+    if isinstance(role, Role):
+        return role == Role.ADMIN
+
+    return role == Role.ADMIN.value
+
+
+def _get_current_user():
+    """
+    Load the authenticated user from the identity populated by
+    the authentication decorator.
+
+    Returns:
+        User instance or None.
+    """
+
+    user_id = getattr(g, "current_user_id", None)
+
+    if user_id is None:
+        return None
+
+    return User.query.get(user_id)
+
+
+def _get_authorized_clinic(clinic_id: int):
+    """
+    Enforce clinic tenant isolation.
+
+    ADMIN users may access any clinic.
+
+    Non-admin users may only access their authenticated
+    clinic.
+
+    Returns:
+        Clinic instance or an HTTP response tuple.
+    """
+
+    if clinic_id <= 0:
+        return (
+            jsonify(
+                {
+                    "error": "Invalid clinic ID",
+                }
+            ),
+            400,
+        )
+
+    user = _get_current_user()
+
+    if user is None:
+        return (
+            jsonify(
+                {
+                    "error": "Authenticated user not found",
+                }
+            ),
+            401,
+        )
+
+    if _is_admin():
+        return None
+
+    user_clinic_id = getattr(user, "clinic_id", None)
+
+    if user_clinic_id is None:
+        return (
+            jsonify(
+                {
+                    "error": "User is not assigned to a clinic",
+                }
+            ),
+            403,
+        )
+
+    if user_clinic_id != clinic_id:
+        return (
+            jsonify(
+                {
+                    "error": "You do not have access to this clinic",
+                }
+            ),
+            403,
+        )
+
+    return None
+
+
+def _get_authorized_user_clinic():
+    """
+    Return the authenticated user's clinic ID.
+
+    ADMIN users may not have a clinic_id because they can operate
+    at the system level.
+
+    Returns:
+        int | None
+        or an HTTP response tuple.
+    """
+
+    user = _get_current_user()
+
+    if user is None:
+        return (
+            jsonify(
+                {
+                    "error": "Authenticated user not found",
+                }
+            ),
+            401,
+        )
+
+    clinic_id = getattr(user, "clinic_id", None)
+
+    if clinic_id is None:
+        return (
+            jsonify(
+                {
+                    "error": "User is not assigned to a clinic",
+                }
+            ),
+            403,
+        )
+
+    return clinic_id
+
+
+# ============================================================================
+# VALIDATION HELPERS
 # ============================================================================
 
 def _sanitize_pydantic_errors(errors):
     """
     Convert Pydantic validation errors into JSON-safe dictionaries.
 
-    Pydantic v2 can place exception objects inside the `ctx` field.
-    Those exception objects are not directly JSON serializable.
+    Pydantic v2 can place exception objects inside the ctx field.
     """
 
     sanitized = []
@@ -171,16 +316,19 @@ def _validate_json(schema):
         )
 
 
-def _parse_status():
+def _parse_status(raw_status=None):
     """
-    Parse ?status=... query parameter.
+    Parse a clinic status value.
+
+    If raw_status is omitted, read ?status= from the request.
 
     Returns:
         ClinicStatus | None
-        or a Flask error response tuple.
+        or an HTTP error response tuple.
     """
 
-    raw_status = request.args.get("status")
+    if raw_status is None:
+        raw_status = request.args.get("status")
 
     if raw_status is None:
         return None
@@ -260,9 +408,28 @@ def list_clinics_route():
         return parsed_status
 
     try:
-        clinics = list_clinics(
-            status=parsed_status,
-        )
+        # ADMIN is allowed to view the clinic directory.
+        if _is_admin():
+            clinics = list_clinics(
+                status=parsed_status,
+            )
+
+        # Non-admin users must never receive a cross-clinic directory.
+        else:
+            clinic_id = _get_authorized_user_clinic()
+
+            if isinstance(clinic_id, tuple):
+                return clinic_id
+
+            clinic = get_clinic(clinic_id)
+
+            if (
+                parsed_status is not None
+                and clinic.status != parsed_status
+            ):
+                clinics = []
+            else:
+                clinics = [clinic]
 
         return jsonify(
             {
@@ -272,6 +439,13 @@ def list_clinics_route():
                 ],
             }
         ), 200
+
+    except NotFoundError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 404
 
     except (ValidationError, ConflictError) as exc:
         return jsonify(
@@ -284,6 +458,11 @@ def list_clinics_route():
 @clinic_bp.get("/<int:clinic_id>")
 @role_required(*CLINIC_VIEW_ROLES)
 def get_clinic_route(clinic_id: int):
+    authorization_error = _get_authorized_clinic(clinic_id)
+
+    if authorization_error:
+        return authorization_error
+
     try:
         clinic = get_clinic(clinic_id)
 
@@ -308,6 +487,11 @@ def get_clinic_route(clinic_id: int):
 @clinic_bp.get("/<int:clinic_id>/branches")
 @role_required(*CLINIC_VIEW_ROLES)
 def list_clinic_branches_route(clinic_id: int):
+    authorization_error = _get_authorized_clinic(clinic_id)
+
+    if authorization_error:
+        return authorization_error
+
     try:
         branches = list_branches(
             clinic_id=clinic_id,

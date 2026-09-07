@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
@@ -86,7 +88,9 @@ def _json_body() -> dict:
         return {}
 
     if not isinstance(payload, dict):
-        raise ValidationError("JSON body must be an object")
+        raise ValidationError(
+            "JSON body must be an object"
+        )
 
     return payload
 
@@ -94,14 +98,7 @@ def _json_body() -> dict:
 def _sanitize_pydantic_errors(
     exc: PydanticValidationError,
 ) -> list[dict]:
-    """
-    Convert Pydantic validation errors into JSON-safe dictionaries.
-
-    Pydantic can place non-JSON-serializable exception objects such as
-    ValueError inside the `ctx` field. Flask's jsonify cannot serialize
-    those objects directly.
-    """
-    sanitized = []
+    sanitized: list[dict] = []
 
     for error in exc.errors():
         item = dict(error)
@@ -146,7 +143,9 @@ def _validation_response(
 
 def _validate_json(schema):
     try:
-        return schema.model_validate(_json_body()), None
+        return schema.model_validate(
+            _json_body()
+        ), None
 
     except PydanticValidationError as exc:
         return None, _validation_response(exc)
@@ -172,45 +171,6 @@ def _query_without(*excluded: str) -> dict:
     }
 
 
-def _required_query_int(name: str) -> int:
-    raw_value = request.args.get(name)
-
-    if raw_value is None:
-        raise ValidationError(
-            f"{name} query parameter is required and must be greater than zero"
-        )
-
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError):
-        raise ValidationError(
-            f"{name} query parameter is required and must be greater than zero"
-        )
-
-    if value <= 0:
-        raise ValidationError(
-            f"{name} query parameter is required and must be greater than zero"
-        )
-
-    return value
-
-
-def _optional_query_int(name: str) -> int | None:
-    raw_value = request.args.get(name)
-
-    if raw_value is None:
-        return None
-
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError):
-        raise ValidationError(
-            f"{name} query parameter must be an integer"
-        )
-
-    return value
-
-
 def _serialize(schema, value):
     return schema.model_validate(value).model_dump(
         mode="json"
@@ -219,17 +179,144 @@ def _serialize(schema, value):
 
 def _serialize_many(schema, values):
     return [
-        schema.model_validate(value).model_dump(mode="json")
+        schema.model_validate(value).model_dump(
+            mode="json"
+        )
         for value in values
     ]
 
 
+def _get_current_user() -> User:
+    """
+    Resolve the authenticated application user from JWT.
+
+    User identity is never accepted from request parameters
+    or request bodies.
+    """
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = User.query.get(user_id)
+
+    if user is None:
+        raise ValidationError(
+            "Authenticated user not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "Authenticated user is inactive"
+        )
+
+    return user
+
+
+def _get_current_clinic_id() -> int:
+    """
+    Resolve the authoritative clinic from the authenticated user.
+
+    Client-supplied clinic_id values are never used as the
+    authoritative tenant identity.
+    """
+    user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a clinic"
+        )
+
+    return user.clinic_id
+
+
+def _get_current_staff_id() -> int:
+    """
+    Resolve the Staff record belonging to the authenticated user.
+
+    Actor identity is always derived from JWT context.
+    """
+    from app.modules.staff.models.staff_model import Staff
+
+    user = _get_current_user()
+
+    staff = (
+        Staff.query
+        .filter(
+            Staff.user_id == user.id,
+            Staff.clinic_id == user.clinic_id,
+        )
+        .first()
+    )
+
+    if staff is None:
+        raise ValidationError(
+            "Authenticated user is not associated "
+            "with a staff record"
+        )
+
+    return staff.id
+
+
+def _get_requested_clinic_id(
+    payload_clinic_id: int | None,
+    *,
+    allow_global: bool = False,
+) -> int | None:
+    """
+    Validate a client-supplied clinic ID against the
+    authenticated clinic.
+
+    A client cannot select another clinic.
+
+    When allow_global=True, None may represent a global/shared
+    resource. Explicit global creation is restricted to ADMIN.
+    """
+    current_clinic_id = _get_current_clinic_id()
+
+    if payload_clinic_id is None:
+        if allow_global:
+            user = _get_current_user()
+
+            if getattr(user, "role", None) == Role.ADMIN:
+                return None
+
+        return current_clinic_id
+
+    if payload_clinic_id != current_clinic_id:
+        raise ValidationError(
+            "Requested clinic does not match "
+            "the authenticated user's clinic"
+        )
+
+    return current_clinic_id
+
+
 def _service_error_response(exc):
     if isinstance(exc, NotFoundError):
-        return jsonify({"error": str(exc)}), 404
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 404
 
-    if isinstance(exc, (ValidationError, ConflictError)):
-        return jsonify({"error": str(exc)}), 400
+    if isinstance(exc, ConflictError):
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 409
+
+    if isinstance(exc, ValidationError):
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 400
 
     raise exc
 
@@ -243,7 +330,7 @@ def _service_error_response(exc):
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def list_items():
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         filters = InventoryItemFilterSchema.model_validate(
             _query_without("clinic_id")
@@ -269,7 +356,11 @@ def list_items():
     except PydanticValidationError as exc:
         return _validation_response(exc)
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -277,7 +368,7 @@ def list_items():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def low_stock_items():
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         items = get_low_stock_items(
             clinic_id=clinic_id,
@@ -293,7 +384,11 @@ def low_stock_items():
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -301,7 +396,7 @@ def low_stock_items():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def get_item(item_id: int):
     try:
-        clinic_id = _optional_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         item = get_inventory_item(
             item_id=item_id,
@@ -318,7 +413,11 @@ def get_item(item_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -333,10 +432,20 @@ def create_item():
         return error
 
     try:
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
+        item_data = payload.model_dump(
+            exclude_unset=True
+        )
+
+        # Tenant and actor identity are authoritative
+        # from the authenticated JWT context.
+        item_data["clinic_id"] = clinic_id
+        item_data["performed_by_id"] = staff_id
+
         item = create_inventory_item(
-            **payload.model_dump(
-                exclude_unset=True
-            )
+            **item_data
         )
 
         return jsonify(
@@ -349,7 +458,11 @@ def create_item():
             }
         ), 201
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -357,7 +470,7 @@ def create_item():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def update_item(item_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         payload, error = _validate_json(
             InventoryItemUpdateSchema
@@ -384,7 +497,11 @@ def update_item(item_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -392,7 +509,7 @@ def update_item(item_id: int):
 @role_required(Role.ADMIN)
 def deactivate_item(item_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         item = deactivate_inventory_item(
             item_id=item_id,
@@ -409,7 +526,11 @@ def deactivate_item(item_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -417,7 +538,7 @@ def deactivate_item(item_id: int):
 @role_required(Role.ADMIN)
 def reactivate_item(item_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         item = reactivate_inventory_item(
             item_id=item_id,
@@ -434,7 +555,11 @@ def reactivate_item(item_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -447,7 +572,7 @@ def reactivate_item(item_id: int):
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def list_batches(item_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         filters = InventoryBatchFilterSchema.model_validate(
             _query_without("clinic_id")
@@ -472,7 +597,11 @@ def list_batches(item_id: int):
     except PydanticValidationError as exc:
         return _validation_response(exc)
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -480,7 +609,7 @@ def list_batches(item_id: int):
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def get_batch(batch_id: int):
     try:
-        clinic_id = _optional_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         batch = get_inventory_batch(
             batch_id=batch_id,
@@ -497,7 +626,11 @@ def get_batch(batch_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -512,10 +645,19 @@ def create_batch():
         return error
 
     try:
+        clinic_id = _get_current_clinic_id()
+
+        batch_data = payload.model_dump(
+            exclude_unset=True
+        )
+
+        # InventoryBatch inherits its authoritative clinic
+        # through InventoryItem. The compatibility clinic_id
+        # argument is still forced to the authenticated clinic.
+        batch_data["clinic_id"] = clinic_id
+
         batch = create_inventory_batch(
-            **payload.model_dump(
-                exclude_unset=True
-            )
+            **batch_data
         )
 
         return jsonify(
@@ -528,7 +670,11 @@ def create_batch():
             }
         ), 201
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -536,7 +682,7 @@ def create_batch():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def update_batch(batch_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         payload, error = _validate_json(
             InventoryBatchUpdateSchema
@@ -563,7 +709,11 @@ def update_batch(batch_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -571,7 +721,7 @@ def update_batch(batch_id: int):
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def expiring_batches():
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         filters = ExpiringInventoryBatchQuerySchema.model_validate(
             _query_without("clinic_id")
@@ -595,7 +745,11 @@ def expiring_batches():
     except PydanticValidationError as exc:
         return _validation_response(exc)
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -608,7 +762,7 @@ def expiring_batches():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def list_movements(item_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         movements = get_stock_movements(
             item_id=item_id,
@@ -625,7 +779,11 @@ def list_movements(item_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -640,10 +798,20 @@ def create_movement():
         return error
 
     try:
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
+        movement_data = payload.model_dump(
+            exclude_unset=True
+        )
+
+        # Tenant and actor identity are authoritative
+        # from the authenticated JWT context.
+        movement_data["clinic_id"] = clinic_id
+        movement_data["performed_by_id"] = staff_id
+
         movement = record_stock_movement(
-            **payload.model_dump(
-                exclude_unset=True
-            )
+            **movement_data
         )
 
         return jsonify(
@@ -656,7 +824,11 @@ def create_movement():
             }
         ), 201
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -669,7 +841,7 @@ def create_movement():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def list_inventory_suppliers():
     try:
-        clinic_id = _optional_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         filters = InventorySupplierFilterSchema.model_validate(
             _query_without("clinic_id")
@@ -693,7 +865,11 @@ def list_inventory_suppliers():
     except PydanticValidationError as exc:
         return _validation_response(exc)
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -701,7 +877,7 @@ def list_inventory_suppliers():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def get_inventory_supplier(supplier_id: int):
     try:
-        clinic_id = _optional_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         supplier = get_supplier(
             supplier_id=supplier_id,
@@ -718,7 +894,11 @@ def get_inventory_supplier(supplier_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -733,10 +913,24 @@ def create_inventory_supplier():
         return error
 
     try:
+        supplier_data = payload.model_dump(
+            exclude_unset=True
+        )
+
+        requested_clinic_id = supplier_data.get(
+            "clinic_id"
+        )
+
+        # A normal supplier belongs to the authenticated
+        # clinic. Only ADMIN can explicitly create a global
+        # supplier by supplying clinic_id=None.
+        supplier_data["clinic_id"] = _get_requested_clinic_id(
+            requested_clinic_id,
+            allow_global=True,
+        )
+
         supplier = create_supplier(
-            **payload.model_dump(
-                exclude_unset=True
-            )
+            **supplier_data
         )
 
         return jsonify(
@@ -749,7 +943,11 @@ def create_inventory_supplier():
             }
         ), 201
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -757,7 +955,7 @@ def create_inventory_supplier():
 @role_required(Role.ADMIN)
 def update_inventory_supplier(supplier_id: int):
     try:
-        clinic_id = _optional_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         payload, error = _validate_json(
             InventorySupplierUpdateSchema
@@ -784,7 +982,11 @@ def update_inventory_supplier(supplier_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -792,7 +994,7 @@ def update_inventory_supplier(supplier_id: int):
 @role_required(Role.ADMIN)
 def deactivate_inventory_supplier(supplier_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         supplier = deactivate_supplier(
             supplier_id=supplier_id,
@@ -809,7 +1011,11 @@ def deactivate_inventory_supplier(supplier_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -817,7 +1023,7 @@ def deactivate_inventory_supplier(supplier_id: int):
 @role_required(Role.ADMIN)
 def reactivate_inventory_supplier(supplier_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         supplier = reactivate_supplier(
             supplier_id=supplier_id,
@@ -834,7 +1040,11 @@ def reactivate_inventory_supplier(supplier_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -847,7 +1057,7 @@ def reactivate_inventory_supplier(supplier_id: int):
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def list_transfers():
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         filters = InventoryTransferFilterSchema.model_validate(
             _query_without("clinic_id")
@@ -871,7 +1081,11 @@ def list_transfers():
     except PydanticValidationError as exc:
         return _validation_response(exc)
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -879,7 +1093,7 @@ def list_transfers():
 @role_required(Role.ADMIN, Role.PHARMACIST)
 def get_transfer(transfer_id: int):
     try:
-        clinic_id = _required_query_int("clinic_id")
+        clinic_id = _get_current_clinic_id()
 
         transfer = get_inventory_transfer(
             transfer_id=transfer_id,
@@ -896,7 +1110,11 @@ def get_transfer(transfer_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -911,10 +1129,30 @@ def create_transfer():
         return error
 
     try:
-        transfer = create_inventory_transfer(
-            **payload.model_dump(
-                exclude_unset=True
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
+        transfer_data = payload.model_dump(
+            exclude_unset=True
+        )
+
+        supplied_source_clinic_id = transfer_data.get(
+            "source_clinic_id"
+        )
+
+        # Source clinic is always the authenticated clinic.
+        # A client cannot create a transfer from another tenant.
+        if supplied_source_clinic_id != clinic_id:
+            raise ValidationError(
+                "Source clinic does not match "
+                "the authenticated user's clinic"
             )
+
+        transfer_data["source_clinic_id"] = clinic_id
+        transfer_data["requested_by_id"] = staff_id
+
+        transfer = create_inventory_transfer(
+            **transfer_data
         )
 
         return jsonify(
@@ -927,7 +1165,11 @@ def create_transfer():
             }
         ), 201
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -941,12 +1183,17 @@ def approve_transfer(transfer_id: int):
     if error:
         return error
 
+    # Payload is intentionally not used for actor identity.
+    del payload
+
     try:
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
         transfer = approve_inventory_transfer(
             transfer_id=transfer_id,
-            **payload.model_dump(
-                exclude_unset=True
-            ),
+            clinic_id=clinic_id,
+            approved_by_id=staff_id,
         )
 
         return jsonify(
@@ -959,7 +1206,11 @@ def approve_transfer(transfer_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -973,12 +1224,17 @@ def complete_transfer(transfer_id: int):
     if error:
         return error
 
+    # Payload is intentionally not used for actor identity.
+    del payload
+
     try:
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
         transfer = complete_inventory_transfer(
             transfer_id=transfer_id,
-            **payload.model_dump(
-                exclude_unset=True
-            ),
+            clinic_id=clinic_id,
+            performed_by_id=staff_id,
         )
 
         return jsonify(
@@ -991,7 +1247,11 @@ def complete_transfer(transfer_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)
 
 
@@ -1006,11 +1266,14 @@ def cancel_transfer(transfer_id: int):
         return error
 
     try:
+        clinic_id = _get_current_clinic_id()
+        staff_id = _get_current_staff_id()
+
         transfer = cancel_inventory_transfer(
             transfer_id=transfer_id,
-            **payload.model_dump(
-                exclude_unset=True
-            ),
+            clinic_id=clinic_id,
+            cancelled_by_id=staff_id,
+            reason=payload.reason,
         )
 
         return jsonify(
@@ -1023,5 +1286,9 @@ def cancel_transfer(transfer_id: int):
             }
         ), 200
 
-    except (ValidationError, ConflictError, NotFoundError) as exc:
+    except (
+        ValidationError,
+        ConflictError,
+        NotFoundError,
+    ) as exc:
         return _service_error_response(exc)

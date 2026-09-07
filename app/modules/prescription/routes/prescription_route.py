@@ -1,7 +1,14 @@
-from flask import Blueprint, jsonify, request
+from __future__ import annotations
 
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity
+
+from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
+from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
+from app.modules.staff.models.staff_model import Staff
+
 from app.modules.prescription.schemas.prescription_schema import (
     DrugInteractionCheckSchema,
     DrugInteractionCreateSchema,
@@ -17,6 +24,7 @@ from app.modules.prescription.services.prescription_service import (
     get_prescription,
     list_prescriptions_for_patient,
 )
+
 
 prescription_bp = Blueprint(
     "prescription",
@@ -44,9 +52,125 @@ DRUG_INTERACTION_MANAGEMENT_ROLES = (
 )
 
 
-# =====================================================================
-# Serializers
-# =====================================================================
+# ============================================================================
+# ROUTE HELPERS
+# ============================================================================
+
+def _json_body() -> dict:
+    payload = request.get_json(
+        silent=True
+    )
+
+    if payload is None:
+        return {}
+
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            "JSON body must be an object"
+        )
+
+    return payload
+
+
+def _get_current_user() -> User:
+    """
+    Resolve the authenticated application user from JWT identity.
+
+    The user identity comes from the JWT and is never accepted from
+    request parameters or request bodies.
+    """
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (
+        TypeError,
+        ValueError,
+    ):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = User.query.get(
+        user_id
+    )
+
+    if user is None:
+        raise ValidationError(
+            "Authenticated user not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "Authenticated user is inactive"
+        )
+
+    return user
+
+
+def _get_current_clinic_id() -> int:
+    """
+    Resolve the authenticated user's clinic.
+
+    Prescription operations are tenant-scoped and must never trust
+    a client-supplied clinic_id.
+    """
+    user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a clinic"
+        )
+
+    return user.clinic_id
+
+
+def _get_current_staff() -> Staff:
+    """
+    Resolve the Staff record belonging to the authenticated user.
+
+    Prescription creation must use the authenticated doctor rather
+    than accepting prescribed_by_id from the request.
+    """
+    user = _get_current_user()
+
+    staff = (
+        Staff.query
+        .filter(
+            Staff.user_id == user.id,
+            Staff.clinic_id == user.clinic_id,
+        )
+        .first()
+    )
+
+    if staff is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a staff record"
+        )
+
+    return staff
+
+
+def _ensure_prescription_clinic(
+    prescription,
+    clinic_id: int,
+) -> None:
+    """
+    Prevent cross-clinic prescription access.
+
+    Historical reads are allowed, including for inactive clinics,
+    but a prescription must still belong to the authenticated clinic.
+    """
+    if prescription.clinic_id != clinic_id:
+        raise ValidationError(
+            f"Prescription {prescription.id} does not belong "
+            f"to clinic {clinic_id}"
+        )
+
+
+# ============================================================================
+# SERIALIZERS
+# ============================================================================
 
 def _serialize_prescription_item(item):
     return {
@@ -61,7 +185,9 @@ def _serialize_prescription_item(item):
     }
 
 
-def _serialize_prescription(prescription):
+def _serialize_prescription(
+    prescription,
+):
     return {
         "id": prescription.id,
         "clinic_id": prescription.clinic_id,
@@ -81,13 +207,17 @@ def _serialize_prescription(prescription):
             else None
         ),
         "items": [
-            _serialize_prescription_item(item)
+            _serialize_prescription_item(
+                item
+            )
             for item in prescription.items
         ],
     }
 
 
-def _serialize_drug_interaction(interaction):
+def _serialize_drug_interaction(
+    interaction,
+):
     return {
         "id": interaction.id,
         "drug_a_id": interaction.drug_a_id,
@@ -97,21 +227,31 @@ def _serialize_drug_interaction(interaction):
     }
 
 
-# =====================================================================
-# Prescription Routes
-# =====================================================================
+# ============================================================================
+# PRESCRIPTION ROUTES
+# ============================================================================
 
 @prescription_bp.post("")
-@role_required(*PRESCRIPTION_WRITE_ROLES)
+@role_required(
+    *PRESCRIPTION_WRITE_ROLES
+)
 def create_prescription_route():
+    clinic_id = _get_current_clinic_id()
+    staff = _get_current_staff()
+
     payload = PrescriptionCreateSchema.model_validate(
-        request.get_json() or {}
+        _json_body()
     )
 
+    if staff.id != payload.prescribed_by_id:
+        raise ValidationError(
+            "Authenticated doctor must be the prescribing staff member"
+        )
+
     prescription, warnings = create_prescription(
-        clinic_id=payload.clinic_id,
+        clinic_id=clinic_id,
         patient_id=payload.patient_id,
-        prescribed_by_id=payload.prescribed_by_id,
+        prescribed_by_id=staff.id,
         items=[
             item.model_dump()
             for item in payload.items
@@ -125,34 +265,68 @@ def create_prescription_route():
         {
             "success": True,
             "message": "Prescription created successfully",
-            "data": _serialize_prescription(prescription),
+            "data": _serialize_prescription(
+                prescription
+            ),
             "interaction_warnings": warnings,
         }
     ), 201
 
 
-@prescription_bp.get("/<int:prescription_id>")
-@role_required(*PRESCRIPTION_VIEW_ROLES)
-def get_prescription_route(prescription_id: int):
-    prescription = get_prescription(prescription_id)
+@prescription_bp.get(
+    "/<int:prescription_id>"
+)
+@role_required(
+    *PRESCRIPTION_VIEW_ROLES
+)
+def get_prescription_route(
+    prescription_id: int,
+):
+    clinic_id = _get_current_clinic_id()
+
+    prescription = get_prescription(
+        prescription_id
+    )
+
+    _ensure_prescription_clinic(
+        prescription=prescription,
+        clinic_id=clinic_id,
+    )
 
     return jsonify(
         {
             "success": True,
-            "data": _serialize_prescription(prescription),
+            "data": _serialize_prescription(
+                prescription
+            ),
         }
     ), 200
 
 
-@prescription_bp.get("/patients/<int:patient_id>")
-@role_required(*PRESCRIPTION_VIEW_ROLES)
-def list_patient_prescriptions_route(patient_id: int):
+@prescription_bp.get(
+    "/patients/<int:patient_id>"
+)
+@role_required(
+    *PRESCRIPTION_VIEW_ROLES
+)
+def list_patient_prescriptions_route(
+    patient_id: int,
+):
+    clinic_id = _get_current_clinic_id()
+
     active_only = (
-        request.args.get("active_only", "false").lower() == "true"
+        request.args
+        .get(
+            "active_only",
+            "false",
+        )
+        .lower()
+        == "true"
     )
 
     prescriptions = list_prescriptions_for_patient(
         patient_id=patient_id,
+        clinic_id=clinic_id,
         active_only=active_only,
     )
 
@@ -160,22 +334,33 @@ def list_patient_prescriptions_route(patient_id: int):
         {
             "success": True,
             "data": [
-                _serialize_prescription(prescription)
+                _serialize_prescription(
+                    prescription
+                )
                 for prescription in prescriptions
             ],
         }
     ), 200
 
 
-@prescription_bp.post("/<int:prescription_id>/cancel")
-@role_required(*PRESCRIPTION_WRITE_ROLES)
-def cancel_prescription_route(prescription_id: int):
+@prescription_bp.post(
+    "/<int:prescription_id>/cancel"
+)
+@role_required(
+    *PRESCRIPTION_WRITE_ROLES
+)
+def cancel_prescription_route(
+    prescription_id: int,
+):
+    clinic_id = _get_current_clinic_id()
+
     payload = PrescriptionCancelSchema.model_validate(
-        request.get_json() or {}
+        _json_body()
     )
 
     prescription = cancel_prescription(
         prescription_id=prescription_id,
+        clinic_id=clinic_id,
         reason=payload.reason,
     )
 
@@ -183,40 +368,60 @@ def cancel_prescription_route(prescription_id: int):
         {
             "success": True,
             "message": "Prescription cancelled successfully",
-            "data": _serialize_prescription(prescription),
+            "data": _serialize_prescription(
+                prescription
+            ),
         }
     ), 200
 
 
-@prescription_bp.post("/<int:prescription_id>/complete")
-@role_required(*PRESCRIPTION_LIFECYCLE_ROLES)
-def complete_prescription_route(prescription_id: int):
+@prescription_bp.post(
+    "/<int:prescription_id>/complete"
+)
+@role_required(
+    *PRESCRIPTION_LIFECYCLE_ROLES
+)
+def complete_prescription_route(
+    prescription_id: int,
+):
+    clinic_id = _get_current_clinic_id()
+
     prescription = complete_prescription(
         prescription_id=prescription_id,
+        clinic_id=clinic_id,
     )
 
     return jsonify(
         {
             "success": True,
             "message": "Prescription completed successfully",
-            "data": _serialize_prescription(prescription),
+            "data": _serialize_prescription(
+                prescription
+            ),
         }
     ), 200
 
 
-# =====================================================================
-# Drug Interaction Routes
-# =====================================================================
+# ============================================================================
+# DRUG INTERACTION ROUTES
+# ============================================================================
 
-@prescription_bp.post("/interactions/check")
-@role_required(*PRESCRIPTION_VIEW_ROLES)
+@prescription_bp.post(
+    "/interactions/check"
+)
+@role_required(
+    *PRESCRIPTION_VIEW_ROLES
+)
 def check_drug_interactions_route():
+    clinic_id = _get_current_clinic_id()
+
     payload = DrugInteractionCheckSchema.model_validate(
-        request.get_json() or {}
+        _json_body()
     )
 
     interactions = check_interactions(
         drug_ids=payload.drug_ids,
+        clinic_id=clinic_id,
     )
 
     return jsonify(
@@ -224,18 +429,24 @@ def check_drug_interactions_route():
             "success": True,
             "data": {
                 "drug_ids": payload.drug_ids,
-                "has_interactions": bool(interactions),
+                "has_interactions": bool(
+                    interactions
+                ),
                 "interaction_warnings": interactions,
             },
         }
     ), 200
 
 
-@prescription_bp.post("/interactions")
-@role_required(*DRUG_INTERACTION_MANAGEMENT_ROLES)
+@prescription_bp.post(
+    "/interactions"
+)
+@role_required(
+    *DRUG_INTERACTION_MANAGEMENT_ROLES
+)
 def create_drug_interaction_route():
     payload = DrugInteractionCreateSchema.model_validate(
-        request.get_json() or {}
+        _json_body()
     )
 
     interaction = create_drug_interaction(
@@ -249,6 +460,8 @@ def create_drug_interaction_route():
         {
             "success": True,
             "message": "Drug interaction created successfully",
-            "data": _serialize_drug_interaction(interaction),
+            "data": _serialize_drug_interaction(
+                interaction
+            ),
         }
     ), 201

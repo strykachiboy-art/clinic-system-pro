@@ -1,6 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from app.core.enums.prescription_enums import DrugInteractionSeverity
 
@@ -132,6 +137,24 @@ class PrescriptionCreateSchema(BaseModel):
         if len(drug_ids) != len(set(drug_ids)):
             raise ValueError(
                 "A drug cannot appear more than once in a prescription"
+            )
+
+        return value
+
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expiration(cls, value):
+        if value is None:
+            return None
+
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                "expires_at must include timezone information"
+            )
+
+        if value <= datetime.now(timezone.utc):
+            raise ValueError(
+                "expires_at must be in the future"
             )
 
         return value

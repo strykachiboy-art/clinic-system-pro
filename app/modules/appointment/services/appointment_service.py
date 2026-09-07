@@ -2,11 +2,16 @@ from datetime import datetime, timedelta, timezone
 
 from app.extensions import db, celery
 
-from app.core.audit.services.audit_service import create_audit_log
+from app.modules.appointment.models.appointment_model import Appointment
+from app.modules.patient.services.patient_service import get_patient
+from app.modules.staff.services.staff_service import get_staff
+from app.modules.clinic.services.clinic_service import get_clinic
+
 from app.core.enums.appointment_enums import (
     AppointmentStatus,
     AppointmentType,
 )
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import (
     ConflictError,
@@ -15,16 +20,10 @@ from app.core.exceptions import (
 )
 from app.core.utils.decorators import transactional
 
-from app.modules.appointment.models.appointment_model import Appointment
-from app.modules.patient.services.patient_service import get_patient
-from app.modules.staff.services.staff_service import get_staff
-from app.modules.clinic.services.clinic_service import get_clinic
 
-
-# ---------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# INTERNAL HELPERS
+# ============================================================================
 
 def _utcnow():
     """Return the current timezone-aware UTC datetime."""
@@ -32,24 +31,27 @@ def _utcnow():
 
 
 def _get_appointment(
-    appointment_id: int,
-    clinic_id: int | None = None,
-) -> Appointment:
+    appointment_id,
+    clinic_id=None,
+    lock=False,
+):
     """
     Fetch an appointment.
 
-    When clinic_id is supplied, the appointment MUST belong to
-    that clinic. This prevents cross-clinic access through a known
-    appointment ID.
+    When clinic_id is supplied, the lookup is tenant-scoped.
     """
+
     query = Appointment.query.filter(
-        Appointment.id == appointment_id
+        Appointment.id == appointment_id,
     )
 
     if clinic_id is not None:
         query = query.filter(
-            Appointment.clinic_id == clinic_id
+            Appointment.clinic_id == clinic_id,
         )
+
+    if lock:
+        query = query.with_for_update()
 
     appointment = query.first()
 
@@ -66,6 +68,7 @@ def _validate_schedule_times(
     scheduled_end,
 ):
     """Validate appointment start/end times."""
+
     if scheduled_start is None or scheduled_end is None:
         raise ValidationError(
             "scheduled_start and scheduled_end are required"
@@ -82,6 +85,7 @@ def _validate_reschedule_times(
     new_end,
 ):
     """Validate new appointment start/end times."""
+
     if new_start is None or new_end is None:
         raise ValidationError(
             "new_start and new_end are required"
@@ -94,12 +98,13 @@ def _validate_reschedule_times(
 
 
 def _ensure_status(
-    appointment: Appointment,
+    appointment,
     *allowed_statuses,
 ):
     """
     Ensure an appointment is currently in one of the allowed states.
     """
+
     if appointment.status not in allowed_statuses:
         allowed = ", ".join(
             status.value
@@ -108,26 +113,33 @@ def _ensure_status(
 
         raise ConflictError(
             f"Appointment {appointment.id} is currently "
-            f"'{appointment.status.value}' and cannot perform "
-            f"this action. Allowed status: {allowed}"
+            f"'{appointment.status.value}' and cannot perform this action. "
+            f"Allowed status: {allowed}"
         )
 
 
 def _validate_appointment_participants(
-    clinic_id: int,
-    patient_id: int,
-    staff_id: int,
+    clinic_id,
+    patient_id,
+    staff_id,
 ):
     """
-    Validate that the clinic, patient, and staff exist and that
-    both participants belong to the authenticated clinic.
-
-    Returns:
-        tuple: clinic, patient, staff
+    Validate that clinic, patient, and staff all exist and that both
+    patient and staff belong to the clinic.
     """
-    clinic = get_clinic(clinic_id)
-    patient = get_patient(patient_id)
-    staff = get_staff(staff_id)
+
+    clinic = get_clinic(
+        clinic_id
+    )
+
+    patient = get_patient(
+        patient_id
+    )
+
+    staff = get_staff(
+        staff_id=staff_id,
+        clinic_id=clinic_id,
+    )
 
     if patient.clinic_id != clinic.id:
         raise ConflictError(
@@ -135,26 +147,15 @@ def _validate_appointment_participants(
             f"clinic {clinic_id}"
         )
 
-    if staff.clinic_id != clinic.id:
-        raise ConflictError(
-            f"Staff {staff_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
-
     return clinic, patient, staff
 
 
-# ---------------------------------------------------------------------
-# Schedule conflict helpers
-# ---------------------------------------------------------------------
-
-
 def _find_patient_overlap(
-    patient_id: int,
+    patient_id,
     scheduled_start,
     scheduled_end,
-    clinic_id: int | None = None,
-    exclude_appointment_id: int | None = None,
+    clinic_id=None,
+    exclude_appointment_id=None,
 ):
     """
     Find an active appointment belonging to the patient that overlaps
@@ -162,6 +163,7 @@ def _find_patient_overlap(
 
     Only SCHEDULED and CONFIRMED appointments block availability.
     """
+
     query = Appointment.query.filter(
         Appointment.patient_id == patient_id,
         Appointment.status.in_(
@@ -176,30 +178,29 @@ def _find_patient_overlap(
 
     if clinic_id is not None:
         query = query.filter(
-            Appointment.clinic_id == clinic_id
+            Appointment.clinic_id == clinic_id,
         )
 
     if exclude_appointment_id is not None:
         query = query.filter(
-            Appointment.id != exclude_appointment_id
+            Appointment.id != exclude_appointment_id,
         )
 
     return query.first()
 
 
 def _find_staff_overlap(
-    staff_id: int,
+    staff_id,
     scheduled_start,
     scheduled_end,
-    clinic_id: int | None = None,
-    exclude_appointment_id: int | None = None,
+    clinic_id=None,
+    exclude_appointment_id=None,
 ):
     """
     Find an active appointment belonging to the staff member that
     overlaps the requested period.
-
-    Only SCHEDULED and CONFIRMED appointments block availability.
     """
+
     query = Appointment.query.filter(
         Appointment.staff_id == staff_id,
         Appointment.status.in_(
@@ -214,29 +215,30 @@ def _find_staff_overlap(
 
     if clinic_id is not None:
         query = query.filter(
-            Appointment.clinic_id == clinic_id
+            Appointment.clinic_id == clinic_id,
         )
 
     if exclude_appointment_id is not None:
         query = query.filter(
-            Appointment.id != exclude_appointment_id
+            Appointment.id != exclude_appointment_id,
         )
 
     return query.first()
 
 
 def _ensure_no_schedule_conflict(
-    patient_id: int,
-    staff_id: int,
+    patient_id,
+    staff_id,
     scheduled_start,
     scheduled_end,
-    clinic_id: int | None = None,
-    exclude_appointment_id: int | None = None,
+    clinic_id=None,
+    exclude_appointment_id=None,
 ):
     """
-    Ensure neither the patient nor staff member already has an
-    overlapping active appointment.
+    Ensure neither patient nor staff has an overlapping active
+    appointment.
     """
+
     patient_conflict = _find_patient_overlap(
         patient_id=patient_id,
         scheduled_start=scheduled_start,
@@ -268,22 +270,26 @@ def _ensure_no_schedule_conflict(
         )
 
 
-# ---------------------------------------------------------------------
-# Appointment creation
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# APPOINTMENT CREATION
+# ============================================================================
 
 @transactional
 def create_appointment(
-    clinic_id: int,
-    patient_id: int,
-    staff_id: int,
+    clinic_id,
+    patient_id,
+    staff_id,
     scheduled_start,
     scheduled_end,
     appointment_type=AppointmentType.IN_PERSON,
     reason=None,
-    notes=None,
 ):
+    """
+    Create a new appointment.
+
+    New appointments always begin in SCHEDULED status.
+    """
+
     _validate_schedule_times(
         scheduled_start,
         scheduled_end,
@@ -312,7 +318,6 @@ def create_appointment(
         appointment_type=appointment_type,
         status=AppointmentStatus.SCHEDULED,
         reason=reason,
-        notes=notes,
     )
 
     db.session.add(appointment)
@@ -323,49 +328,53 @@ def create_appointment(
         entity_type="Appointment",
         entity_id=appointment.id,
         description=(
-            f"Appointment created for patient {patient_id} "
-            f"with staff {staff_id}"
+            f"Appointment created for patient "
+            f"{patient_id} with staff {staff_id}"
         ),
         new_value={
             "clinic_id": clinic_id,
             "patient_id": patient_id,
             "staff_id": staff_id,
-            "scheduled_start": scheduled_start.isoformat(),
-            "scheduled_end": scheduled_end.isoformat(),
+            "scheduled_start": (
+                scheduled_start.isoformat()
+            ),
+            "scheduled_end": (
+                scheduled_end.isoformat()
+            ),
             "appointment_type": (
                 appointment.appointment_type.value
             ),
-            "status": appointment.status.value,
+            "status": (
+                appointment.status.value
+            ),
             "reason": reason,
-            "notes": notes,
         },
     )
 
     return appointment
 
 
-# ---------------------------------------------------------------------
-# Rescheduling
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESCHEDULING
+# ============================================================================
 
 @transactional
 def reschedule_appointment(
-    appointment_id: int,
-    clinic_id: int,
+    appointment_id,
     new_start,
     new_end,
+    clinic_id=None,
 ):
     """
     Reschedule an existing appointment.
 
-    Only SCHEDULED or CONFIRMED appointments can be rescheduled.
-
-    The appointment must belong to clinic_id.
+    Only scheduled or confirmed appointments can be rescheduled.
     """
+
     appointment = _get_appointment(
-        appointment_id,
+        appointment_id=appointment_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     _ensure_status(
@@ -384,7 +393,7 @@ def reschedule_appointment(
         staff_id=appointment.staff_id,
         scheduled_start=new_start,
         scheduled_end=new_end,
-        clinic_id=clinic_id,
+        clinic_id=appointment.clinic_id,
         exclude_appointment_id=appointment.id,
     )
 
@@ -400,7 +409,7 @@ def reschedule_appointment(
     appointment.scheduled_start = new_start
     appointment.scheduled_end = new_end
 
-    # The old reminder is no longer valid.
+    # Existing reminder is no longer valid.
     appointment.reminder_sent = False
 
     create_audit_log(
@@ -410,32 +419,35 @@ def reschedule_appointment(
         description="Appointment rescheduled",
         old_value=old_value,
         new_value={
-            "scheduled_start": new_start.isoformat(),
-            "scheduled_end": new_end.isoformat(),
+            "scheduled_start": (
+                new_start.isoformat()
+            ),
+            "scheduled_end": (
+                new_end.isoformat()
+            ),
         },
     )
 
     return appointment
 
 
-# ---------------------------------------------------------------------
-# Appointment status transitions
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# APPOINTMENT STATUS TRANSITIONS
+# ============================================================================
 
 @transactional
 def confirm_appointment(
-    appointment_id: int,
-    clinic_id: int,
+    appointment_id,
+    clinic_id=None,
 ):
     """
     Confirm a scheduled appointment.
-
-    The appointment must belong to clinic_id.
     """
+
     appointment = _get_appointment(
-        appointment_id,
+        appointment_id=appointment_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     _ensure_status(
@@ -465,20 +477,20 @@ def confirm_appointment(
 
 @transactional
 def cancel_appointment(
-    appointment_id: int,
-    clinic_id: int,
+    appointment_id,
     reason=None,
+    clinic_id=None,
 ):
     """
     Cancel an appointment.
 
     Scheduled and confirmed appointments may be cancelled.
-
-    The appointment must belong to clinic_id.
     """
+
     appointment = _get_appointment(
-        appointment_id,
+        appointment_id=appointment_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     _ensure_status(
@@ -512,18 +524,18 @@ def cancel_appointment(
 
 @transactional
 def complete_appointment(
-    appointment_id: int,
-    clinic_id: int,
+    appointment_id,
     notes=None,
+    clinic_id=None,
 ):
     """
     Mark a confirmed appointment as completed.
-
-    The appointment must belong to clinic_id.
     """
+
     appointment = _get_appointment(
-        appointment_id,
+        appointment_id=appointment_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     _ensure_status(
@@ -556,17 +568,17 @@ def complete_appointment(
 
 @transactional
 def mark_no_show(
-    appointment_id: int,
-    clinic_id: int,
+    appointment_id,
+    clinic_id=None,
 ):
     """
     Mark a confirmed appointment as a no-show.
-
-    The appointment must belong to clinic_id.
     """
+
     appointment = _get_appointment(
-        appointment_id,
+        appointment_id=appointment_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     _ensure_status(
@@ -594,35 +606,39 @@ def mark_no_show(
     return appointment
 
 
-# ---------------------------------------------------------------------
-# Appointment queries
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# APPOINTMENT QUERIES
+# ============================================================================
 
 def get_appointments_for_patient(
-    clinic_id: int,
-    patient_id: int,
+    patient_id,
+    clinic_id=None,
 ):
     """
-    Return all appointments belonging to a patient within the
-    authenticated clinic.
-
-    This prevents a user from retrieving another clinic's
-    appointment history by supplying a patient ID.
+    Return all appointments belonging to a clinic-owned patient.
     """
-    patient = get_patient(patient_id)
 
-    if patient.clinic_id != clinic_id:
-        raise NotFoundError(
-            f"Patient {patient_id} not found"
+    patient = get_patient(
+        patient_id
+    )
+
+    if clinic_id is not None:
+        if patient.clinic_id != clinic_id:
+            raise NotFoundError(
+                f"Patient {patient_id} not found"
+            )
+
+    query = Appointment.query.filter(
+        Appointment.patient_id == patient_id,
+    )
+
+    if clinic_id is not None:
+        query = query.filter(
+            Appointment.clinic_id == clinic_id,
         )
 
     return (
-        Appointment.query
-        .filter(
-            Appointment.clinic_id == clinic_id,
-            Appointment.patient_id == patient_id,
-        )
+        query
         .order_by(
             Appointment.scheduled_start.desc()
         )
@@ -631,22 +647,20 @@ def get_appointments_for_patient(
 
 
 def get_appointments_for_staff(
-    clinic_id: int,
-    staff_id: int,
+    clinic_id,
+    staff_id,
     date_=None,
 ):
     """
-    Return staff appointments within the authenticated clinic.
+    Return appointments for a clinic-owned staff member.
 
-    If date_ is provided, only appointments on that date are
-    returned.
+    If date_ is provided, only appointments on that date are returned.
     """
-    staff = get_staff(staff_id)
 
-    if staff.clinic_id != clinic_id:
-        raise NotFoundError(
-            f"Staff member {staff_id} not found"
-        )
+    get_staff(
+        staff_id=staff_id,
+        clinic_id=clinic_id,
+    )
 
     query = Appointment.query.filter(
         Appointment.clinic_id == clinic_id,
@@ -669,24 +683,23 @@ def get_appointments_for_staff(
     )
 
 
-# ---------------------------------------------------------------------
-# Celery reminders
-# ---------------------------------------------------------------------
+# ============================================================================
+# CELERY REMINDERS
+# ============================================================================
 
-
-@celery.task(name="send_appointment_reminder")
+@celery.task(
+    name="send_appointment_reminder"
+)
 def send_appointment_reminder(
     appointment_id: int,
 ):
     """
     Send an appointment reminder.
 
-    This is a background task and therefore does not use authenticated
-    clinic context.
-
-    Notification integration is intentionally left as a stub until
-    the notifications module is implemented.
+    Notification integration remains intentionally isolated until the
+    notifications module is implemented.
     """
+
     appointment = db.session.get(
         Appointment,
         appointment_id,
@@ -712,18 +725,24 @@ def send_appointment_reminder(
     db.session.commit()
 
 
-@celery.task(name="check_upcoming_appointments")
+@celery.task(
+    name="check_upcoming_appointments"
+)
 def check_upcoming_appointments():
     """
-    Find appointments occurring approximately 24 hours from now
-    and queue reminder tasks for them.
-
-    This task can be scheduled periodically through Celery Beat.
+    Find appointments occurring approximately 24 hours from now and
+    queue reminder tasks.
     """
+
     now = _utcnow()
 
-    tomorrow = now + timedelta(days=1)
-    reminder_window_end = tomorrow + timedelta(hours=1)
+    tomorrow = (
+        now + timedelta(days=1)
+    )
+
+    reminder_window_end = (
+        tomorrow + timedelta(hours=1)
+    )
 
     upcoming = (
         Appointment.query
