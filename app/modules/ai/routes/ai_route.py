@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify, request, g
 from flask_jwt_extended import get_jwt_identity
-from flask_limiter import Limiter
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
@@ -39,6 +38,28 @@ AI_ROLES = (
 
 
 AI_RATE_LIMIT = "10 per minute"
+
+
+def _pydantic_error_details(exc: PydanticValidationError):
+    """
+    Return JSON-serializable Pydantic validation details.
+
+    Pydantic may include exception objects such as ValueError
+    inside the error context. Those objects are not directly
+    JSON serializable by Flask's jsonify().
+    """
+    details = exc.errors()
+
+    for error in details:
+        ctx = error.get("ctx")
+
+        if isinstance(ctx, dict):
+            error["ctx"] = {
+                key: str(value)
+                for key, value in ctx.items()
+            }
+
+    return details
 
 
 def _current_user():
@@ -113,7 +134,7 @@ def drug_interactions():
             {
                 "success": False,
                 "error": "Invalid request payload",
-                "details": exc.errors(),
+                "details": _pydantic_error_details(exc),
             }
         ), 422
 
@@ -155,7 +176,7 @@ def triage():
             {
                 "success": False,
                 "error": "Invalid request payload",
-                "details": exc.errors(),
+                "details": _pydantic_error_details(exc),
             }
         ), 422
 
@@ -197,7 +218,7 @@ def lab_results():
             {
                 "success": False,
                 "error": "Invalid request payload",
-                "details": exc.errors(),
+                "details": _pydantic_error_details(exc),
             }
         ), 422
 
