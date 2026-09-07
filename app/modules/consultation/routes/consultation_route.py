@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, jsonify, request, g, session
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core.exceptions import DomainError, ValidationError
+from app.extensions import db
 from app.core.enums.consultation_enums import (
     ConsultationStatus,
     ConsultationType,
@@ -134,17 +136,29 @@ def _get_current_user():
     """
     Return the authenticated user.
     """
-    user_id = getattr(g, "current_user_id", None)
+    identity = get_jwt_identity()
 
-    if user_id is None:
-        try:
-            user_id = int(get_jwt_identity())
-        except (TypeError, ValueError):
-            return None
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
 
-    return User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
+    if user is None:
+        raise ValidationError(
+            "Authenticated user could not be resolved"
+        )
 
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
+        )
+
+    return user
+    
 def _get_authenticated_clinic_id():
     """
     Resolve the authenticated user's clinic.

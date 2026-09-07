@@ -9,13 +9,19 @@ from app.extensions import db
 
 
 def _utcnow() -> datetime:
+    """
+    Return the current UTC time as a timezone-aware datetime.
+    """
     return datetime.now(timezone.utc)
 
 
 class HIEIntegration(db.Model):
     __tablename__ = "hie_integrations"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     clinic_id = db.Column(
         db.Integer,
@@ -54,18 +60,18 @@ class HIEIntegration(db.Model):
     )
 
     last_sync_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -95,7 +101,10 @@ class HIEIntegration(db.Model):
 class HIESubmission(db.Model):
     __tablename__ = "hie_submissions"
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     integration_id = db.Column(
         db.Integer,
@@ -164,19 +173,19 @@ class HIESubmission(db.Model):
     )
 
     submitted_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
         index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,

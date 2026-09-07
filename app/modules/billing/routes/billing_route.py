@@ -1,6 +1,8 @@
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, session
+from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
@@ -35,22 +37,28 @@ billing_bp = Blueprint(
 
 
 def _current_user():
-    user_id = getattr(
-        g,
-        "current_user_id",
-        None,
-    )
+    """
+    Return the authenticated user.
+    """
+    identity = get_jwt_identity()
 
-    if user_id is None:
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
         raise ValidationError(
-            "Authenticated user could not be resolved"
+            "Invalid authentication identity"
         )
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(
             "Authenticated user could not be resolved"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
         )
 
     return user

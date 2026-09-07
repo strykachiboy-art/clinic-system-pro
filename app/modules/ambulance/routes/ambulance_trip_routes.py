@@ -3,7 +3,12 @@ from flask import (
     g,
     jsonify,
     request,
+    session
 )
+from flask_jwt_extended import get_jwt_identity
+
+from app.extensions import db
+
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -121,20 +126,24 @@ def _payload(schema):
         )
 
 
-def _current_user() -> User:
+def _current_user():
     """
     Return the authenticated user.
-
-    role_required() has already verified the JWT and populated
-    g.current_user_id.
     """
-    user = User.query.get(
-        g.current_user_id,
-    )
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(
-            "Authenticated user was not found"
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
@@ -143,7 +152,6 @@ def _current_user() -> User:
         )
 
     return user
-
 
 def _current_clinic_id() -> int:
     """

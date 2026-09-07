@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
+from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
@@ -72,37 +73,29 @@ def _json_body() -> dict:
     return payload
 
 
-def _get_current_user() -> User:
+def _get_current_user():
     """
-    Resolve the authenticated application user from JWT identity.
-
-    The user identity comes from the JWT and is never accepted from
-    request parameters or request bodies.
+    Return the authenticated user.
     """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (
-        TypeError,
-        ValueError,
-    ):
+    except (TypeError, ValueError):
         raise ValidationError(
             "Invalid authentication identity"
         )
 
-    user = User.query.get(
-        user_id
-    )
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(
-            "Authenticated user not found"
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
         raise ValidationError(
-            "Authenticated user is inactive"
+            "User account is inactive"
         )
 
     return user

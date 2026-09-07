@@ -2,6 +2,8 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
+from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError
@@ -81,35 +83,28 @@ LAB_VIEW_ROLES = (
 # Authentication / tenancy helpers
 # ---------------------------------------------------------------------
 
-def _get_current_user() -> User:
+def _get_current_user():
     """
-    Resolve the authenticated user from the JWT.
-
-    Tenant ownership is derived from this authenticated user.
-    Client-supplied clinic_id values are never trusted.
+    Return the authenticated user.
     """
-
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
     except (TypeError, ValueError):
-        raise DomainError(
+        raise ValidationError(
             "Invalid authentication identity"
         )
 
-    user = db.session.get(
-        User,
-        user_id,
-    )
+    user = db.session.get(User, user_id)
 
     if user is None:
-        raise DomainError(
-            "Authenticated user not found"
+        raise ValidationError(
+            "Authenticated user could not be resolved"
         )
 
-    if not user.active:
-        raise DomainError(
+    if not user.is_active:
+        raise ValidationError(
             "User account is inactive"
         )
 

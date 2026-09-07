@@ -1,10 +1,12 @@
 from flask import Blueprint, jsonify, request, g, session
+from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
+from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.exceptions import DomainError
+from app.core.exceptions import DomainError, ValidationError
 from app.core.utils.decorators import role_required
 
 from app.modules.appointment.schemas.appointment_schema import (
@@ -57,18 +59,30 @@ APPOINTMENT_ROLES = (
 # ============================================================================
 
 
-def _current_user() -> User:
+def _current_user():
     """
     Return the authenticated user.
-
-    The authentication decorator populates g.current_user_id
-    from the verified JWT.
     """
+    identity = get_jwt_identity()
 
-    user = db.session.get(User, g.current_user_id)
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(User, user_id)
 
     if user is None:
-        raise DomainError("Authenticated user not found")
+        raise ValidationError(
+            "Authenticated user could not be resolved"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
+        )
 
     return user
 

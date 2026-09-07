@@ -4,6 +4,8 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
+from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError
@@ -58,33 +60,28 @@ REPORT_VIEW_ROLES = (
 # ---------------------------------------------------------------------------
 
 
-def _get_current_user() -> User:
+def _get_current_user():
+    """
+    Return the authenticated user.
+    """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (TypeError, ValueError) as exc:
-        raise DomainError(
-            "Invalid authentication identity"
-        ) from exc
-
-    if user_id <= 0:
-        raise DomainError(
+    except (TypeError, ValueError):
+        raise ValidationError(
             "Invalid authentication identity"
         )
 
-    user = db.session.get(
-        User,
-        user_id,
-    )
+    user = db.session.get(User, user_id)
 
     if user is None:
-        raise DomainError(
-            "Authenticated user not found"
+        raise ValidationError(
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
-        raise DomainError(
+        raise ValidationError(
             "User account is inactive"
         )
 

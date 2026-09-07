@@ -55,9 +55,9 @@ patient_bp = Blueprint(
 # Helpers
 # ============================================================================
 
-def _get_current_user() -> User:
+def _get_current_user():
     """
-    Load the authenticated user from the JWT identity.
+    Return the authenticated user.
     """
     identity = get_jwt_identity()
 
@@ -72,12 +72,12 @@ def _get_current_user() -> User:
 
     if user is None:
         raise ValidationError(
-            "Authenticated user not found"
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
         raise ValidationError(
-            "Authenticated user is inactive"
+            "User account is inactive"
         )
 
     return user

@@ -1,7 +1,9 @@
-from flask import Blueprint, g, jsonify, request
-from flask_jwt_extended import jwt_required
+from flask import Blueprint, g, jsonify, request, session
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
+from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.enums.ward_enums import (
@@ -95,34 +97,29 @@ VIEW_ROLES = (
 # AUTH HELPERS
 # ============================================================================
 
-def _current_user() -> User:
+def _current_user():
     """
-    Return the authenticated and active user.
-
-    The user ID is populated by the authentication decorator/context.
+    Return the authenticated user.
     """
+    identity = get_jwt_identity()
 
-    user_id = getattr(
-        g,
-        "current_user_id",
-        None,
-    )
-
-    if user_id is None:
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
         raise ValidationError(
-            "Authenticated user is required"
+            "Invalid authentication identity"
         )
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(
-            "Authenticated user no longer exists"
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
         raise ValidationError(
-            "Authenticated user is inactive"
+            "User account is inactive"
         )
 
     return user

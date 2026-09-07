@@ -1,7 +1,9 @@
 from flask import Blueprint, jsonify, request, g
+from flask_jwt_extended import get_jwt_identity
 from flask_limiter import Limiter
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
@@ -39,16 +41,24 @@ AI_ROLES = (
 AI_RATE_LIMIT = "10 per minute"
 
 
-def _current_user() -> User:
+def _current_user():
     """
-    Return the authenticated User from the decorator-provided
-    authentication context.
+    Return the authenticated user.
     """
-    user = User.query.get(g.current_user_id)
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(
-            "Authenticated user was not found"
+            "Authenticated user could not be resolved"
         )
 
     if not user.is_active:
