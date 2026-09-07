@@ -9,7 +9,6 @@ from flask_jwt_extended import get_jwt_identity
 
 from app.extensions import db
 
-
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.auth.user.models.user_model import User
@@ -51,11 +50,6 @@ from app.modules.ambulance.services.ambulance_service import (
 )
 
 
-# ============================================================
-# BLUEPRINT
-# ============================================================
-
-
 trip_bp = Blueprint(
     "ambulance_trips",
     __name__,
@@ -63,17 +57,11 @@ trip_bp = Blueprint(
 )
 
 
-# ============================================================
-# ROLE GROUPS
-# ============================================================
-
-
 TRIP_MANAGEMENT_ROLES = (
     Role.ADMIN,
     Role.AMBULANCE_COORDINATOR,
     Role.AMBULANCE_DISPATCHER,
 )
-
 
 TRIP_VIEW_ROLES = (
     Role.ADMIN,
@@ -84,7 +72,6 @@ TRIP_VIEW_ROLES = (
     Role.EMT,
 )
 
-
 TRIP_CREW_ROLES = (
     Role.ADMIN,
     Role.AMBULANCE_COORDINATOR,
@@ -93,11 +80,6 @@ TRIP_CREW_ROLES = (
     Role.PARAMEDIC,
     Role.EMT,
 )
-
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 
 def _payload(schema):
@@ -152,6 +134,7 @@ def _current_user():
         )
 
     return user
+
 
 def _current_clinic_id() -> int:
     """
@@ -246,11 +229,6 @@ def _trip_data(trip):
     }
 
 
-# ============================================================
-# CREATE TRIP
-# ============================================================
-
-
 @trip_bp.post("")
 @role_required(*TRIP_MANAGEMENT_ROLES)
 def create_ambulance_trip():
@@ -266,10 +244,9 @@ def create_ambulance_trip():
 
         data = payload.model_dump()
 
-        # Never trust clinic_id from the client.
         data.pop(
             "clinic_id",
-            None,
+            None
         )
 
         trip = request_trip(
@@ -291,11 +268,6 @@ def create_ambulance_trip():
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# LIST TRIPS
-# ============================================================
 
 
 @trip_bp.get("")
@@ -345,11 +317,6 @@ def get_ambulance_trips():
         ), exc.status_code
 
 
-# ============================================================
-# GET TRIP
-# ============================================================
-
-
 @trip_bp.get("/<int:trip_id>")
 @role_required(*TRIP_VIEW_ROLES)
 def get_ambulance_trip(
@@ -374,11 +341,6 @@ def get_ambulance_trip(
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# DISPATCH TRIP
-# ============================================================
 
 
 @trip_bp.post("/<int:trip_id>/dispatch")
@@ -415,11 +377,6 @@ def dispatch_ambulance_trip(
         ), exc.status_code
 
 
-# ============================================================
-# UPDATE TRIP STATUS
-# ============================================================
-
-
 @trip_bp.patch("/<int:trip_id>/status")
 @role_required(*TRIP_CREW_ROLES)
 def update_ambulance_trip_status(
@@ -452,11 +409,6 @@ def update_ambulance_trip_status(
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# LINK PATIENT
-# ============================================================
 
 
 @trip_bp.post("/<int:trip_id>/patient")
@@ -493,11 +445,6 @@ def link_ambulance_patient(
         ), exc.status_code
 
 
-# ============================================================
-# COMPLETE TRIP
-# ============================================================
-
-
 @trip_bp.post("/<int:trip_id>/complete")
 @role_required(*TRIP_CREW_ROLES)
 def complete_ambulance_trip(
@@ -522,11 +469,6 @@ def complete_ambulance_trip(
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# LINK INVOICE
-# ============================================================
 
 
 @trip_bp.post("/<int:trip_id>/invoice")
@@ -561,11 +503,6 @@ def link_ambulance_invoice(
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# CANCEL TRIP
-# ============================================================
 
 
 @trip_bp.post("/<int:trip_id>/cancel")

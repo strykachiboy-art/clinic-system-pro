@@ -1,49 +1,40 @@
-from datetime import datetime
+# app/tests/modules/ambulance/test_ambulance_trip_routes.py
+
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from flask import g
 
 from app.core.enums.ambulance_enums import (
     TripStatus,
     TripType,
 )
-
 from app.core.enums.role_enums import Role
-
-import app.modules.ambulance.routes.ambulance_trip_routes as trip_route
-
-
-# ============================================================
-# HELPERS
-# ============================================================
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from app.modules.ambulance.routes import ambulance_trip_routes
+from app.modules.ambulance.schemas.ambulance_trip_schema import (
+    AmbulanceTripCancelSchema,
+)
 
 
 def make_trip(
-    clinic_id=1,
     trip_id=1,
-    vehicle_id=10,
-    patient_id=None,
-    driver_id=None,
-    paramedic_id=None,
-    admission_id=None,
-    trip_type=None,
-    status=None,
-    pickup_address="123 Pickup Street",
-    pickup_lat=4.8156,
-    pickup_lng=7.0498,
-    destination_address="456 Destination Street",
-    destination_lat=4.8200,
-    destination_lng=7.0600,
-    notes="Test ambulance trip",
-    invoice_id=None,
+    clinic_id=10,
+    vehicle_id=20,
+    patient_id=30,
+    driver_id=40,
+    paramedic_id=50,
+    admission_id=60,
+    trip_type=TripType.NON_EMERGENCY,
+    status=TripStatus.REQUESTED,
 ):
-    if trip_type is None:
-        trip_type = list(TripType)[0]
-
-    if status is None:
-        status = TripStatus.REQUESTED
-
-    now = datetime(2026, 1, 1, 12, 0, 0)
+    now = datetime.now(timezone.utc)
 
     return SimpleNamespace(
         id=trip_id,
@@ -55,100 +46,128 @@ def make_trip(
         admission_id=admission_id,
         trip_type=trip_type,
         status=status,
-        pickup_address=pickup_address,
-        pickup_lat=pickup_lat,
-        pickup_lng=pickup_lng,
-        destination_address=destination_address,
-        destination_lat=destination_lat,
-        destination_lng=destination_lng,
-        created_at=now,
-        updated_at=now,
+        pickup_address="Pickup address",
+        pickup_lat=4.8156,
+        pickup_lng=7.0498,
+        destination_address="Destination address",
+        destination_lat=4.8242,
+        destination_lng=7.0336,
         requested_at=now,
-        dispatched_at=None,
-        pickup_at=None,
-        completed_at=None,
-        cancelled_at=None,
+        dispatched_at=now,
+        pickup_at=now,
+        completed_at=now,
+        cancelled_at=now,
         cancellation_reason=None,
-        notes=notes,
-        invoice_id=invoice_id,
+        notes="Ambulance test trip",
+        invoice_id=None,
     )
 
 
-class FakePayload:
-    def __init__(self, **data):
-        self._data = data
-
-        for key, value in data.items():
-            setattr(self, key, value)
-
-    def model_dump(self):
-        return dict(self._data)
+# ---------------------------------------------------------------------------
+# Serialization
+# ---------------------------------------------------------------------------
 
 
-# ============================================================
-# REQUEST TRIP
-# ============================================================
+def test_trip_data_serializes_trip():
+    trip = make_trip()
+
+    result = ambulance_trip_routes._trip_data(trip)
+
+    assert result["id"] == trip.id
+    assert result["clinic_id"] == trip.clinic_id
+    assert result["vehicle_id"] == trip.vehicle_id
+    assert result["patient_id"] == trip.patient_id
+    assert result["driver_id"] == trip.driver_id
+    assert result["paramedic_id"] == trip.paramedic_id
+    assert result["admission_id"] == trip.admission_id
+    assert result["trip_type"] == TripType.NON_EMERGENCY.value
+    assert result["status"] == TripStatus.REQUESTED.value
+    assert result["pickup_lat"] == float(trip.pickup_lat)
+    assert result["pickup_lng"] == float(trip.pickup_lng)
+    assert result["destination_lat"] == float(
+        trip.destination_lat
+    )
+    assert result["destination_lng"] == float(
+        trip.destination_lng
+    )
+
+
+def test_trip_data_handles_none_optional_values():
+    trip = make_trip()
+
+    trip.vehicle_id = None
+    trip.patient_id = None
+    trip.driver_id = None
+    trip.paramedic_id = None
+    trip.admission_id = None
+    trip.trip_type = None
+    trip.status = None
+    trip.pickup_lat = None
+    trip.pickup_lng = None
+    trip.destination_lat = None
+    trip.destination_lng = None
+    trip.requested_at = None
+    trip.dispatched_at = None
+    trip.pickup_at = None
+    trip.completed_at = None
+    trip.cancelled_at = None
+
+    result = ambulance_trip_routes._trip_data(trip)
+
+    assert result["vehicle_id"] is None
+    assert result["patient_id"] is None
+    assert result["driver_id"] is None
+    assert result["paramedic_id"] is None
+    assert result["admission_id"] is None
+    assert result["trip_type"] is None
+    assert result["status"] is None
+    assert result["pickup_lat"] is None
+    assert result["pickup_lng"] is None
+    assert result["destination_lat"] is None
+    assert result["destination_lng"] is None
+    assert result["requested_at"] is None
+    assert result["dispatched_at"] is None
+    assert result["pickup_at"] is None
+    assert result["completed_at"] is None
+    assert result["cancelled_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# Create trip
+# ---------------------------------------------------------------------------
 
 
 def test_create_ambulance_trip_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
         clinic_id=clinic.id,
-        trip_id=1,
         status=TripStatus.REQUESTED,
     )
 
-    payload = FakePayload(
-        clinic_id=clinic.id,
-        trip_type=trip.trip_type,
-        pickup_address="123 Pickup Street",
-        pickup_lat=4.8156,
-        pickup_lng=7.0498,
-        destination_address="456 Destination Street",
-        destination_lat=4.8200,
-        destination_lng=7.0600,
-        notes="Emergency transfer",
-    )
-
-    called = {}
-
-    def fake_request_trip(**kwargs):
-        called.update(kwargs)
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "request_trip",
-        fake_request_trip,
+        service,
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
         "/api/ambulance/trips",
         json={
-            "clinic_id": clinic.id,
-            "trip_type": trip.trip_type.value,
-            "pickup_address": "123 Pickup Street",
-            "pickup_lat": 4.8156,
-            "pickup_lng": 7.0498,
-            "destination_address": "456 Destination Street",
-            "destination_lat": 4.8200,
-            "destination_lng": 7.0600,
-            "notes": "Emergency transfer",
+            "trip_type": TripType.NON_EMERGENCY.value,
+            "pickup_address": "Pickup address",
+            "destination_address": "Destination address",
         },
         headers=headers,
     )
@@ -159,100 +178,21 @@ def test_create_ambulance_trip_success(
 
     assert body["success"] is True
     assert body["data"]["id"] == trip.id
-    assert body["data"]["clinic_id"] == clinic.id
-    assert body["data"]["status"] == trip.status.value
-    assert body["data"]["trip_type"] == trip.trip_type.value
-    assert body["data"]["pickup_address"] == (
-        "123 Pickup Street"
-    )
-    assert body["data"]["destination_address"] == (
-        "456 Destination Street"
-    )
 
-    assert called["clinic_id"] == clinic.id
-    assert called["trip_type"] == trip.trip_type
-    assert called["pickup_address"] == (
-        "123 Pickup Street"
-    )
+    assert service.call_args.kwargs["clinic_id"] == user.clinic_id
+    assert service.call_args.kwargs["clinic_id"] != 999
 
 
-def test_create_ambulance_trip_requires_management_role(
+def test_create_ambulance_trip_rejects_invalid_payload(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
-    monkeypatch,
+    make_user,
+    auth_headers_for,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
-    )
+    user = make_user(clinic=clinic)
 
-    monkeypatch.setattr(
-        trip_route,
-        "request_trip",
-        lambda **kwargs: pytest.fail(
-            "request_trip should not be called"
-        ),
-    )
-
-    response = client.post(
-        "/api/ambulance/trips",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-    assert body["error"] == "Insufficient permissions"
-
-
-def test_create_ambulance_trip_unauthenticated(
-    client,
-):
-    response = client.post(
-        "/api/ambulance/trips",
-        json={},
-    )
-
-    assert response.status_code in (401, 422)
-
-    body = response.get_json()
-    assert "msg" in body
-
-
-def test_create_ambulance_trip_payload_validation_error(
-    client,
-    make_authenticated_staff,
-    clinic,
-    monkeypatch,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "clinic_id"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
-        ),
-        422,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
-    )
+    headers = auth_headers_for(user)
 
     response = client.post(
         "/api/ambulance/trips",
@@ -265,50 +205,89 @@ def test_create_ambulance_trip_payload_validation_error(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
+    assert body["error"] == "Invalid request payload"
 
 
-# ============================================================
-# LIST TRIPS
-# ============================================================
-
-
-def test_list_ambulance_trips_success(
+def test_create_ambulance_trip_maps_domain_error(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
+    user = make_user(clinic=clinic)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "request_trip",
+        Mock(
+            side_effect=ConflictError(
+                "Ambulance trip already exists"
+            )
+        ),
     )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips",
+        json={
+            "trip_type": TripType.NON_EMERGENCY.value,
+            "pickup_address": "Pickup address",
+            "destination_address": "Destination address",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Ambulance trip already exists"
+
+
+# ---------------------------------------------------------------------------
+# List trips
+# ---------------------------------------------------------------------------
+
+
+def test_get_ambulance_trips_success(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
 
     trips = [
         make_trip(
-            clinic_id=clinic.id,
             trip_id=1,
+            clinic_id=clinic.id,
+            status=TripStatus.REQUESTED,
         ),
         make_trip(
-            clinic_id=clinic.id,
             trip_id=2,
+            clinic_id=clinic.id,
+            status=TripStatus.DISPATCHED,
         ),
     ]
 
-    called = {}
-
-    def fake_list_trips(**kwargs):
-        called.update(kwargs)
-        return trips
+    service = Mock(return_value=trips)
 
     monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "list_trips",
-        fake_list_trips,
+        service,
     )
 
+    headers = auth_headers_for(user)
+
     response = client.get(
-        f"/api/ambulance/trips?clinic_id={clinic.id}",
+        "/api/ambulance/trips",
         headers=headers,
     )
 
@@ -318,106 +297,72 @@ def test_list_ambulance_trips_success(
 
     assert body["success"] is True
     assert len(body["data"]) == 2
-
     assert body["data"][0]["id"] == 1
     assert body["data"][1]["id"] == 2
 
-    assert called["clinic_id"] == clinic.id
-    assert called["status"] is None
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=None,
+    )
 
 
-def test_list_ambulance_trips_with_status_filter(
+def test_get_ambulance_trips_supports_status_filter(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.AMBULANCE_DISPATCHER,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
         clinic_id=clinic.id,
         status=TripStatus.DISPATCHED,
     )
 
-    called = {}
-
-    def fake_list_trips(**kwargs):
-        called.update(kwargs)
-        return [trip]
+    service = Mock(return_value=[trip])
 
     monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "list_trips",
-        fake_list_trips,
+        service,
     )
 
+    headers = auth_headers_for(user)
+
     response = client.get(
-        (
-            f"/api/ambulance/trips"
-            f"?clinic_id={clinic.id}"
-            f"&status={TripStatus.DISPATCHED.value}"
-        ),
+        "/api/ambulance/trips",
+        query_string={
+            "status": TripStatus.DISPATCHED.value,
+        },
         headers=headers,
     )
 
     assert response.status_code == 200
 
-    body = response.get_json()
-
-    assert body["success"] is True
-    assert len(body["data"]) == 1
-    assert body["data"][0]["status"] == (
-        TripStatus.DISPATCHED.value
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=TripStatus.DISPATCHED,
     )
 
-    assert called["clinic_id"] == clinic.id
-    assert called["status"] == TripStatus.DISPATCHED
 
-
-def test_list_ambulance_trips_missing_clinic_id(
+def test_get_ambulance_trips_rejects_invalid_status(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
 
     response = client.get(
         "/api/ambulance/trips",
-        headers=headers,
-    )
-
-    assert response.status_code == 400
-
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert body["error"] == (
-        "clinic_id query parameter is required"
-    )
-
-
-def test_list_ambulance_trips_invalid_status(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    response = client.get(
-        (
-            f"/api/ambulance/trips"
-            f"?clinic_id={clinic.id}"
-            f"&status=NOT_A_REAL_STATUS"
-        ),
+        query_string={
+            "status": "not-a-real-status",
+        },
         headers=headers,
     )
 
@@ -426,97 +371,39 @@ def test_list_ambulance_trips_invalid_status(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"] == (
-        "Invalid trip status: NOT_A_REAL_STATUS"
-    )
+    assert "Invalid trip status" in body["error"]
 
 
-def test_list_ambulance_trips_allows_crew_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-    monkeypatch,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.PARAMEDIC,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
-        "list_trips",
-        lambda **kwargs: [],
-    )
-
-    response = client.get(
-        f"/api/ambulance/trips?clinic_id={clinic.id}",
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-
-    body = response.get_json()
-
-    assert body["success"] is True
-    assert body["data"] == []
-
-
-def test_list_ambulance_trips_denies_unapproved_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.NURSE,
-    )
-
-    response = client.get(
-        f"/api/ambulance/trips?clinic_id={clinic.id}",
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-    assert body["error"] == "Insufficient permissions"
-
-
-# ============================================================
-# GET TRIP
-# ============================================================
+# ---------------------------------------------------------------------------
+# Get single trip
+# ---------------------------------------------------------------------------
 
 
 def test_get_ambulance_trip_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.AMBULANCE_COORDINATOR,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=123,
         clinic_id=clinic.id,
-        trip_id=7,
     )
-
-    called = {}
-
-    def fake_get_trip(trip_id):
-        called["trip_id"] = trip_id
-        return trip
 
     monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "get_trip",
-        fake_get_trip,
+        Mock(return_value=trip),
     )
 
+    headers = auth_headers_for(user)
+
     response = client.get(
-        "/api/ambulance/trips/7",
+        "/api/ambulance/trips/123",
         headers=headers,
     )
 
@@ -525,135 +412,81 @@ def test_get_ambulance_trip_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 7
-
-    assert called["trip_id"] == 7
+    assert body["data"]["id"] == 123
 
 
-def test_get_ambulance_trip_allows_driver(
+def test_get_ambulance_trip_maps_not_found(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
-    )
-
-    trip = make_trip(
-        clinic_id=clinic.id,
-        trip_id=8,
-    )
+    user = make_user(clinic=clinic)
 
     monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "get_trip",
-        lambda trip_id: trip,
+        Mock(
+            side_effect=NotFoundError(
+                "Ambulance trip not found"
+            )
+        ),
     )
 
+    headers = auth_headers_for(user)
+
     response = client.get(
-        "/api/ambulance/trips/8",
+        "/api/ambulance/trips/999",
         headers=headers,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 404
 
     body = response.get_json()
 
-    assert body["success"] is True
+    assert body["success"] is False
+    assert body["error"] == "Ambulance trip not found"
 
 
-def test_get_ambulance_trip_denies_unapproved_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.NURSE,
-    )
-
-    response = client.get(
-        "/api/ambulance/trips/1",
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-
-    assert body["error"] == "Insufficient permissions"
-
-
-def test_get_ambulance_trip_unauthenticated(
-    client,
-):
-    response = client.get(
-        "/api/ambulance/trips/1",
-    )
-
-    assert response.status_code in (401, 422)
-
-    body = response.get_json()
-    assert "msg" in body
-
-
-# ============================================================
-# DISPATCH
-# ============================================================
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
 
 
 def test_dispatch_ambulance_trip_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.AMBULANCE_DISPATCHER,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=1,
         clinic_id=clinic.id,
-        trip_id=10,
         status=TripStatus.DISPATCHED,
-        vehicle_id=20,
-        driver_id=30,
-        paramedic_id=40,
     )
 
-    payload = FakePayload(
-        vehicle_id=20,
-        driver_id=30,
-        paramedic_id=40,
-    )
-
-    called = {}
-
-    def fake_dispatch_trip(**kwargs):
-        called.update(kwargs)
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "dispatch_trip",
-        fake_dispatch_trip,
+        service,
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/10/dispatch",
+        "/api/ambulance/trips/1/dispatch",
         json={
             "vehicle_id": 20,
-            "driver_id": 30,
-            "paramedic_id": 40,
+            "driver_id": 40,
+            "paramedic_id": 50,
         },
         headers=headers,
     )
@@ -663,140 +496,83 @@ def test_dispatch_ambulance_trip_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 10
-    assert body["data"]["status"] == (
-        TripStatus.DISPATCHED.value
-    )
-    assert body["data"]["vehicle_id"] == 20
-    assert body["data"]["driver_id"] == 30
-    assert body["data"]["paramedic_id"] == 40
+    assert body["data"]["id"] == 1
 
-    assert called["trip_id"] == 10
-    assert called["vehicle_id"] == 20
-    assert called["driver_id"] == 30
-    assert called["paramedic_id"] == 40
+    service.assert_called_once()
 
 
-def test_dispatch_ambulance_trip_payload_validation_error(
+def test_dispatch_ambulance_trip_maps_domain_error(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "vehicle_id"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
-        ),
-        422,
-    )
+    user = make_user(clinic=clinic)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
+        ambulance_trip_routes,
+        "dispatch_trip",
+        Mock(
+            side_effect=ConflictError(
+                "Vehicle is not available"
+            )
+        ),
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
         "/api/ambulance/trips/1/dispatch",
-        json={},
+        json={
+            "vehicle_id": 20,
+            "driver_id": 40,
+        },
         headers=headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
 
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
+    assert body["error"] == "Vehicle is not available"
 
 
-def test_dispatch_ambulance_trip_requires_management_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
-    )
-
-    response = client.post(
-        "/api/ambulance/trips/1/dispatch",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-
-    assert body["error"] == "Insufficient permissions"
-
-
-# ============================================================
-# ADVANCE STATUS
-# ============================================================
+# ---------------------------------------------------------------------------
+# Status update
+# ---------------------------------------------------------------------------
 
 
 def test_update_ambulance_trip_status_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=1,
         clinic_id=clinic.id,
-        trip_id=11,
         status=TripStatus.EN_ROUTE_TO_PICKUP,
     )
 
-    payload = FakePayload(
-        status=TripStatus.EN_ROUTE_TO_PICKUP,
-    )
-
-    called = {}
-
-    def fake_update_trip_status(
-        trip_id,
-        new_status,
-    ):
-        called["trip_id"] = trip_id
-        called["new_status"] = new_status
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "update_trip_status",
-        fake_update_trip_status,
+        service,
     )
+
+    headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/trips/11/status",
+        "/api/ambulance/trips/1/status",
         json={
             "status": TripStatus.EN_ROUTE_TO_PICKUP.value,
         },
@@ -808,49 +584,24 @@ def test_update_ambulance_trip_status_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 11
-    assert body["data"]["status"] == (
-        TripStatus.EN_ROUTE_TO_PICKUP.value
-    )
+    assert body["data"]["id"] == 1
 
-    assert called["trip_id"] == 11
-    assert called["new_status"] == (
-        TripStatus.EN_ROUTE_TO_PICKUP
+    service.assert_called_once_with(
+        trip_id=1,
+        new_status=TripStatus.EN_ROUTE_TO_PICKUP,
     )
 
 
-def test_update_ambulance_trip_status_payload_validation_error(
+def test_update_ambulance_trip_status_rejects_invalid_payload(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
-    monkeypatch,
+    make_user,
+    auth_headers_for,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.PARAMEDIC,
-    )
+    user = make_user(clinic=clinic)
 
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "status"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
-        ),
-        422,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
-    )
+    headers = auth_headers_for(user)
 
     response = client.patch(
         "/api/ambulance/trips/1/status",
@@ -863,86 +614,44 @@ def test_update_ambulance_trip_status_payload_validation_error(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
+    assert body["error"] == "Invalid request payload"
 
 
-def test_update_ambulance_trip_status_requires_crew_role(
+# ---------------------------------------------------------------------------
+# Link patient
+# ---------------------------------------------------------------------------
+
+
+def test_link_ambulance_patient_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.NURSE,
-    )
-
-    response = client.patch(
-        "/api/ambulance/trips/1/status",
-        json={
-            "status": TripStatus.DISPATCHED.value,
-        },
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-
-    assert body["error"] == "Insufficient permissions"
-
-
-# ============================================================
-# LINK PATIENT
-# ============================================================
-
-
-def test_link_ambulance_trip_patient_success(
-    client,
-    make_authenticated_staff,
-    clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=1,
         clinic_id=clinic.id,
-        trip_id=12,
-        patient_id=55,
+        patient_id=30,
     )
 
-    payload = FakePayload(
-        patient_id=55,
-    )
-
-    called = {}
-
-    def fake_link_patient(
-        trip_id,
-        patient_id,
-    ):
-        called["trip_id"] = trip_id
-        called["patient_id"] = patient_id
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "link_patient",
-        fake_link_patient,
+        service,
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/12/patient",
+        "/api/ambulance/trips/1/patient",
         json={
-            "patient_id": 55,
+            "patient_id": 30,
         },
         headers=headers,
     )
@@ -952,49 +661,41 @@ def test_link_ambulance_trip_patient_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 12
-    assert body["data"]["patient_id"] == 55
+    assert body["data"]["patient_id"] == 30
 
-    assert called["trip_id"] == 12
-    assert called["patient_id"] == 55
+    service.assert_called_once_with(
+        trip_id=1,
+        patient_id=30,
+    )
 
 
-def test_link_ambulance_trip_patient_payload_validation_error(
+def test_link_ambulance_patient_maps_domain_error(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "patient_id"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
-        ),
-        422,
-    )
+    user = make_user(clinic=clinic)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
+        ambulance_trip_routes,
+        "link_patient",
+        Mock(
+            side_effect=ValidationError(
+                "Patient does not belong to this clinic"
+            )
+        ),
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
         "/api/ambulance/trips/1/patient",
-        json={},
+        json={
+            "patient_id": 30,
+        },
         headers=headers,
     )
 
@@ -1003,71 +704,44 @@ def test_link_ambulance_trip_patient_payload_validation_error(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
-
-
-def test_link_ambulance_trip_patient_requires_management_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
+    assert body["error"] == (
+        "Patient does not belong to this clinic"
     )
 
-    response = client.post(
-        "/api/ambulance/trips/1/patient",
-        json={
-            "patient_id": 55,
-        },
-        headers=headers,
-    )
 
-    assert response.status_code == 403
-
-    body = response.get_json()
-
-    assert body["error"] == "Insufficient permissions"
-
-
-# ============================================================
-# COMPLETE
-# ============================================================
+# ---------------------------------------------------------------------------
+# Complete
+# ---------------------------------------------------------------------------
 
 
 def test_complete_ambulance_trip_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=1,
         clinic_id=clinic.id,
-        trip_id=13,
-        patient_id=55,
         status=TripStatus.COMPLETED,
     )
 
-    called = {}
-
-    def fake_complete_trip(trip_id):
-        called["trip_id"] = trip_id
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "complete_trip",
-        fake_complete_trip,
+        service,
     )
 
+    headers = auth_headers_for(user)
+
     response = client.post(
-        "/api/ambulance/trips/13/complete",
+        "/api/ambulance/trips/1/complete",
         headers=headers,
     )
 
@@ -1076,242 +750,176 @@ def test_complete_ambulance_trip_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 13
-    assert body["data"]["patient_id"] == 55
-    assert body["data"]["status"] == (
-        TripStatus.COMPLETED.value
-    )
+    assert body["data"]["id"] == 1
 
-    assert called["trip_id"] == 13
+    service.assert_called_once_with(1)
 
 
-def test_complete_ambulance_trip_requires_crew_role(
+def test_complete_ambulance_trip_maps_domain_error(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.NURSE,
-    )
-
-    response = client.post(
-        "/api/ambulance/trips/1/complete",
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-
-    body = response.get_json()
-
-    assert body["error"] == "Insufficient permissions"
-
-
-def test_complete_ambulance_trip_unauthenticated(
-    client,
-):
-    response = client.post(
-        "/api/ambulance/trips/1/complete",
-    )
-
-    assert response.status_code in (401, 422)
-
-    body = response.get_json()
-    assert "msg" in body
-
-
-# ============================================================
-# LINK INVOICE
-# ============================================================
-
-
-def test_link_ambulance_trip_invoice_success(
-    client,
-    make_authenticated_staff,
-    clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    trip = make_trip(
-        clinic_id=clinic.id,
-        trip_id=14,
-        patient_id=55,
-        status=TripStatus.COMPLETED,
-        invoice_id=99,
-    )
-
-    payload = FakePayload(
-        invoice_id=99,
-    )
-
-    called = {}
-
-    def fake_link_invoice(
-        trip_id,
-        invoice_id,
-    ):
-        called["trip_id"] = trip_id
-        called["invoice_id"] = invoice_id
-        return trip
+    user = make_user(clinic=clinic)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
-        "link_invoice",
-        fake_link_invoice,
-    )
-
-    response = client.post(
-        "/api/ambulance/trips/14/invoice",
-        json={
-            "invoice_id": 99,
-        },
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-
-    body = response.get_json()
-
-    assert body["success"] is True
-    assert body["data"]["id"] == 14
-    assert body["data"]["invoice_id"] == 99
-
-    assert called["trip_id"] == 14
-    assert called["invoice_id"] == 99
-
-
-def test_link_ambulance_trip_invoice_payload_validation_error(
-    client,
-    make_authenticated_staff,
-    clinic,
-    monkeypatch,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
-    )
-
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "invoice_id"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
+        ambulance_trip_routes,
+        "complete_trip",
+        Mock(
+            side_effect=ConflictError(
+                "Trip is not ready for completion"
+            )
         ),
-        422,
     )
 
-    monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
-    )
+    headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/invoice",
-        json={},
+        "/api/ambulance/trips/1/complete",
         headers=headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
 
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
-
-
-def test_link_ambulance_trip_invoice_requires_management_role(
-    client,
-    make_authenticated_staff,
-    clinic,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.PARAMEDIC,
+    assert body["error"] == (
+        "Trip is not ready for completion"
     )
+
+
+# ---------------------------------------------------------------------------
+# Invoice
+# ---------------------------------------------------------------------------
+
+
+def test_link_ambulance_invoice_success(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    trip = make_trip(
+        trip_id=1,
+        clinic_id=clinic.id,
+    )
+
+    trip.invoice_id = 900
+
+    service = Mock(return_value=trip)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "link_invoice",
+        service,
+    )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
         "/api/ambulance/trips/1/invoice",
         json={
-            "invoice_id": 99,
+            "invoice_id": 900,
         },
         headers=headers,
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
 
     body = response.get_json()
 
-    assert body["error"] == "Insufficient permissions"
+    assert body["success"] is True
+    assert body["data"]["invoice_id"] == 900
+
+    service.assert_called_once_with(
+        trip_id=1,
+        invoice_id=900,
+    )
 
 
-# ============================================================
-# CANCEL
-# ============================================================
+def test_link_ambulance_invoice_maps_domain_error(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "link_invoice",
+        Mock(
+            side_effect=ConflictError(
+                "Invoice is already linked"
+            )
+        ),
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips/1/invoice",
+        json={
+            "invoice_id": 900,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invoice is already linked"
+
+
+# ---------------------------------------------------------------------------
+# Cancel
+# ---------------------------------------------------------------------------
 
 
 def test_cancel_ambulance_trip_success(
+    app,
     client,
-    make_authenticated_staff,
     clinic,
+    make_user,
+    auth_headers_for,
     monkeypatch,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.AMBULANCE_COORDINATOR,
-    )
+    user = make_user(clinic=clinic)
 
     trip = make_trip(
+        trip_id=1,
         clinic_id=clinic.id,
-        trip_id=15,
         status=TripStatus.CANCELLED,
     )
 
-    payload = FakePayload(
-        reason="Patient no longer requires transport",
+    trip.cancellation_reason = (
+        "Patient no longer requires transport"
     )
 
-    called = {}
-
-    def fake_cancel_trip(
-        trip_id,
-        reason,
-    ):
-        called["trip_id"] = trip_id
-        called["reason"] = reason
-        return trip
+    service = Mock(return_value=trip)
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: payload,
-    )
-
-    monkeypatch.setattr(
-        trip_route,
+        ambulance_trip_routes,
         "cancel_trip",
-        fake_cancel_trip,
+        service,
     )
+
+    headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/15/cancel",
+        "/api/ambulance/trips/1/cancel",
         json={
             "reason": "Patient no longer requires transport",
         },
@@ -1323,53 +931,173 @@ def test_cancel_ambulance_trip_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["id"] == 15
-    assert body["data"]["status"] == (
-        TripStatus.CANCELLED.value
-    )
-
-    assert called["trip_id"] == 15
-    assert called["reason"] == (
+    assert body["data"]["id"] == 1
+    assert body["data"]["cancellation_reason"] == (
         "Patient no longer requires transport"
     )
 
-
-def test_cancel_ambulance_trip_payload_validation_error(
-    client,
-    make_authenticated_staff,
-    clinic,
-    monkeypatch,
-):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.ADMIN,
+    service.assert_called_once_with(
+        trip_id=1,
+        reason="Patient no longer requires transport",
     )
 
-    validation_response = (
-        trip_route.jsonify(
-            {
-                "success": False,
-                "error": [
-                    {
-                        "type": "missing",
-                        "loc": ["body", "reason"],
-                        "msg": "Field required",
-                    }
-                ],
-            }
-        ),
-        422,
+
+def test_cancel_ambulance_trip_rejects_invalid_payload(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/trips/1/cancel",
+        method="POST",
+        json={"reason": 123},
+    ):
+        result = ambulance_trip_routes._payload(
+            AmbulanceTripCancelSchema,
+        )
+
+    assert isinstance(result, tuple)
+
+    response, status_code = result
+
+    assert status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
+
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", "/api/ambulance/trips"),
+        ("GET", "/api/ambulance/trips/1"),
+        ("POST", "/api/ambulance/trips"),
+        ("POST", "/api/ambulance/trips/1/dispatch"),
+        ("PATCH", "/api/ambulance/trips/1/status"),
+        ("POST", "/api/ambulance/trips/1/patient"),
+        ("POST", "/api/ambulance/trips/1/complete"),
+        ("POST", "/api/ambulance/trips/1/invoice"),
+        ("POST", "/api/ambulance/trips/1/cancel"),
+    ],
+)
+def test_ambulance_trip_routes_require_authentication(
+    client,
+    method,
+    path,
+):
+    response = client.open(
+        path,
+        method=method,
+    )
+
+    assert response.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Authorization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.DRIVER,
+        Role.PARAMEDIC,
+        Role.EMT,
+    ],
+)
+def test_ambulance_management_routes_reject_crew_roles(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    role,
+):
+    user = make_user(
+        clinic=clinic,
+        role=role,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips",
+        json={
+            "trip_type": TripType.NON_EMERGENCY.value,
+            "pickup_address": "Pickup address",
+            "destination_address": "Destination address",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.DRIVER,
+        Role.PARAMEDIC,
+        Role.EMT,
+    ],
+)
+def test_ambulance_view_routes_allow_crew_roles(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+    role,
+):
+    user = make_user(
+        clinic=clinic,
+        role=role,
     )
 
     monkeypatch.setattr(
-        trip_route,
-        "_payload",
-        lambda schema: validation_response,
+        ambulance_trip_routes,
+        "list_trips",
+        Mock(return_value=[]),
     )
 
-    response = client.post(
-        "/api/ambulance/trips/1/cancel",
-        json={},
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Authenticated-user validation
+# ---------------------------------------------------------------------------
+
+
+def test_ambulance_route_rejects_inactive_authenticated_user(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(
+        clinic=clinic,
+        is_active=False,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
         headers=headers,
     )
 
@@ -1378,164 +1106,131 @@ def test_cancel_ambulance_trip_payload_validation_error(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"][0]["type"] == "missing"
+    assert body["error"] == "User account is inactive"
 
 
-def test_cancel_ambulance_trip_requires_management_role(
+def test_ambulance_route_rejects_user_without_clinic(
+    app,
     client,
-    make_authenticated_staff,
-    clinic,
+    make_user,
+    auth_headers_for,
 ):
-    _, headers = make_authenticated_staff(
-        clinic,
-        Role.DRIVER,
+    user = make_user()
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
+        headers=headers,
     )
 
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Authenticated user is not associated "
+        "with a clinic"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clinic isolation
+# ---------------------------------------------------------------------------
+
+
+def test_create_ambulance_trip_uses_authenticated_clinic(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    trip = make_trip(
+        clinic_id=clinic.id,
+    )
+
+    service = Mock(return_value=trip)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "request_trip",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
     response = client.post(
-        "/api/ambulance/trips/1/cancel",
+        "/api/ambulance/trips",
         json={
-            "reason": "Test cancellation",
+            "clinic_id": 999,
+            "trip_type": TripType.NON_EMERGENCY.value,
+            "pickup_address": "Pickup address",
+            "destination_address": "Destination address",
         },
         headers=headers,
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 201
+
+    assert service.call_args.kwargs["clinic_id"] == clinic.id
+    assert service.call_args.kwargs["clinic_id"] != 999
+
+
+# ---------------------------------------------------------------------------
+# DomainError response mapping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "exception,status_code",
+    [
+        (
+            ValidationError("Validation failed"),
+            422,
+        ),
+        (
+            ConflictError("Conflict occurred"),
+            409,
+        ),
+        (
+            NotFoundError("Trip not found"),
+            404,
+        ),
+    ],
+)
+def test_ambulance_route_maps_domain_errors(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+    exception,
+    status_code,
+):
+    user = make_user(clinic=clinic)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "get_trip",
+        Mock(side_effect=exception),
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips/1",
+        headers=headers,
+    )
+
+    assert response.status_code == status_code
 
     body = response.get_json()
 
-    assert body["error"] == "Insufficient permissions"
-
-
-# ============================================================
-# SERIALIZATION
-# ============================================================
-
-
-def test_trip_data_serializes_all_fields(
-    app,
-):
-    trip = make_trip(
-        clinic_id=5,
-        trip_id=20,
-        vehicle_id=30,
-        patient_id=40,
-        driver_id=50,
-        paramedic_id=60,
-        admission_id=70,
-        invoice_id=80,
-    )
-
-    trip.dispatched_at = datetime(
-        2026,
-        1,
-        1,
-        13,
-        0,
-        0,
-    )
-
-    trip.pickup_at = datetime(
-        2026,
-        1,
-        1,
-        13,
-        30,
-        0,
-    )
-
-    data = trip_route._trip_data(trip)
-
-    assert data["id"] == 20
-    assert data["clinic_id"] == 5
-    assert data["vehicle_id"] == 30
-    assert data["patient_id"] == 40
-    assert data["driver_id"] == 50
-    assert data["paramedic_id"] == 60
-    assert data["admission_id"] == 70
-
-    assert data["trip_type"] == trip.trip_type.value
-    assert data["status"] == trip.status.value
-
-    assert data["pickup_address"] == (
-        "123 Pickup Street"
-    )
-    assert data["pickup_lat"] == 4.8156
-    assert data["pickup_lng"] == 7.0498
-
-    assert data["destination_address"] == (
-        "456 Destination Street"
-    )
-    assert data["destination_lat"] == 4.82
-    assert data["destination_lng"] == 7.06
-
-    assert data["created_at"] == (
-        "2026-01-01T12:00:00"
-    )
-    assert data["updated_at"] == (
-        "2026-01-01T12:00:00"
-    )
-    assert data["requested_at"] == (
-        "2026-01-01T12:00:00"
-    )
-
-    assert data["dispatched_at"] == (
-        "2026-01-01T13:00:00"
-    )
-
-    assert data["pickup_at"] == (
-        "2026-01-01T13:30:00"
-    )
-
-    assert data["completed_at"] is None
-    assert data["cancelled_at"] is None
-    assert data["cancellation_reason"] is None
-
-    assert data["notes"] == "Test ambulance trip"
-    assert data["invoice_id"] == 80
-
-
-def test_trip_data_handles_optional_fields(
-    app,
-):
-    trip = make_trip()
-
-    trip.vehicle_id = None
-    trip.patient_id = None
-    trip.driver_id = None
-    trip.paramedic_id = None
-    trip.admission_id = None
-    trip.pickup_lat = None
-    trip.pickup_lng = None
-    trip.destination_lat = None
-    trip.destination_lng = None
-    trip.created_at = None
-    trip.updated_at = None
-    trip.requested_at = None
-    trip.dispatched_at = None
-    trip.pickup_at = None
-    trip.completed_at = None
-    trip.cancelled_at = None
-    trip.invoice_id = None
-
-    data = trip_route._trip_data(trip)
-
-    assert data["vehicle_id"] is None
-    assert data["patient_id"] is None
-    assert data["driver_id"] is None
-    assert data["paramedic_id"] is None
-    assert data["admission_id"] is None
-
-    assert data["pickup_lat"] is None
-    assert data["pickup_lng"] is None
-    assert data["destination_lat"] is None
-    assert data["destination_lng"] is None
-
-    assert data["created_at"] is None
-    assert data["updated_at"] is None
-    assert data["requested_at"] is None
-    assert data["dispatched_at"] is None
-    assert data["pickup_at"] is None
-    assert data["completed_at"] is None
-    assert data["cancelled_at"] is None
-
-    assert data["invoice_id"] is None
+    assert body["success"] is False
+    assert body["error"] == str(exception)

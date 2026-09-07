@@ -54,11 +54,6 @@ from app.modules.ambulance.models.ambulance_model import (
 )
 
 
-# ============================================================
-# AUTHENTICATION / CLINIC CONTEXT
-# ============================================================
-
-
 def _current_user() -> User:
     """
     Return the authenticated User from the decorator-provided
@@ -161,14 +156,7 @@ def _audit_user_id() -> int | None:
     return user_id
 
 
-# ============================================================
-# VEHICLE
-# ============================================================
-
-
-def get_vehicle(
-    vehicle_id: int,
-) -> AmbulanceVehicle:
+def get_vehicle(vehicle_id: int) -> AmbulanceVehicle:
     """
     Retrieve an ambulance vehicle.
 
@@ -242,7 +230,6 @@ def create_vehicle(
     The clinic must also belong to the authenticated user when
     called through an API request.
     """
-
     _assert_authenticated_clinic(
         clinic_id,
     )
@@ -330,7 +317,6 @@ def set_vehicle_status(
     ON_TRIP is controlled by trip dispatch/completion/
     cancellation and cannot be manually assigned here.
     """
-
     vehicle = get_vehicle(
         vehicle_id,
     )
@@ -379,14 +365,7 @@ def set_vehicle_status(
     return vehicle
 
 
-# ============================================================
-# TRIP RETRIEVAL
-# ============================================================
-
-
-def get_trip(
-    trip_id: int,
-) -> AmbulanceTrip:
+def get_trip(trip_id: int) -> AmbulanceTrip:
     """
     Retrieve an ambulance trip.
 
@@ -423,7 +402,6 @@ def list_trips(
     Historical retrieval remains available regardless of
     clinic status.
     """
-
     _assert_authenticated_clinic(
         clinic_id,
     )
@@ -440,11 +418,6 @@ def list_trips(
     return query.order_by(
         AmbulanceTrip.requested_at.desc(),
     ).all()
-
-
-# ============================================================
-# INTERNAL HELPERS
-# ============================================================
 
 
 def _assert_status(
@@ -550,7 +523,6 @@ def _get_ambulance_crew_member(
     - linked user is active
     - linked user has an appropriate ambulance role
     """
-
     staff = db.session.get(
         Staff,
         staff_id,
@@ -626,11 +598,6 @@ def _lock_vehicle(
     return vehicle
 
 
-# ============================================================
-# REQUEST TRIP
-# ============================================================
-
-
 @transactional
 def request_trip(
     clinic_id: int,
@@ -654,7 +621,6 @@ def request_trip(
     DISCHARGE_TRANSPORT and INTER_FACILITY_TRANSFER require
     an admission and patient.
     """
-
     _assert_authenticated_clinic(
         clinic_id,
     )
@@ -666,19 +632,11 @@ def request_trip(
     patient = None
     admission = None
 
-    # --------------------------------------------------------
-    # Patient
-    # --------------------------------------------------------
-
     if patient_id is not None:
         patient = _get_patient(
             patient_id=patient_id,
             clinic_id=clinic_id,
         )
-
-    # --------------------------------------------------------
-    # Admission
-    # --------------------------------------------------------
 
     if admission_id is not None:
         admission = _get_admission(
@@ -707,10 +665,6 @@ def request_trip(
                     "for an inactive patient"
                 )
 
-    # --------------------------------------------------------
-    # Trip-type requirements
-    # --------------------------------------------------------
-
     if trip_type in {
         TripType.DISCHARGE_TRANSPORT,
         TripType.INTER_FACILITY_TRANSFER,
@@ -724,10 +678,6 @@ def request_trip(
             raise ValidationError(
                 f"{trip_type.value} requires a patient"
             )
-
-    # --------------------------------------------------------
-    # Create
-    # --------------------------------------------------------
 
     trip = AmbulanceTrip(
         clinic_id=clinic_id,
@@ -779,11 +729,6 @@ def request_trip(
     return trip
 
 
-# ============================================================
-# DISPATCH TRIP
-# ============================================================
-
-
 @transactional
 def dispatch_trip(
     trip_id: int,
@@ -798,7 +743,6 @@ def dispatch_trip(
 
     The vehicle is locked to prevent concurrent dispatches.
     """
-
     trip = get_trip(
         trip_id,
     )
@@ -811,10 +755,6 @@ def dispatch_trip(
         trip,
         TripStatus.REQUESTED,
     )
-
-    # --------------------------------------------------------
-    # Lock vehicle
-    # --------------------------------------------------------
 
     vehicle = _lock_vehicle(
         vehicle_id,
@@ -832,10 +772,6 @@ def dispatch_trip(
             f"'{vehicle.status.value}' and is not available"
         )
 
-    # --------------------------------------------------------
-    # Driver
-    # --------------------------------------------------------
-
     driver = _get_ambulance_crew_member(
         staff_id=driver_id,
         clinic_id=trip.clinic_id,
@@ -844,10 +780,6 @@ def dispatch_trip(
         ),
         position="driver",
     )
-
-    # --------------------------------------------------------
-    # Paramedic / EMT
-    # --------------------------------------------------------
 
     paramedic = None
 
@@ -862,10 +794,6 @@ def dispatch_trip(
             position="paramedic",
         )
 
-    # --------------------------------------------------------
-    # Prevent same crew member
-    # --------------------------------------------------------
-
     if (
         paramedic is not None
         and paramedic.id == driver.id
@@ -874,10 +802,6 @@ def dispatch_trip(
             "Driver and paramedic must be "
             "different staff members"
         )
-
-    # --------------------------------------------------------
-    # Assign relationships
-    # --------------------------------------------------------
 
     try:
         trip.vehicle = vehicle
@@ -888,10 +812,6 @@ def dispatch_trip(
         raise ValidationError(
             str(exc)
         ) from exc
-
-    # --------------------------------------------------------
-    # Update lifecycle
-    # --------------------------------------------------------
 
     old_status = trip.status.value
 
@@ -927,11 +847,6 @@ def dispatch_trip(
     return trip
 
 
-# ============================================================
-# UPDATE TRIP STATUS
-# ============================================================
-
-
 @transactional
 def update_trip_status(
     trip_id: int,
@@ -952,7 +867,6 @@ def update_trip_status(
     PATIENT_ON_BOARD
         -> EN_ROUTE_TO_DESTINATION
     """
-
     trip = get_trip(
         trip_id,
     )
@@ -1028,11 +942,6 @@ def update_trip_status(
     return trip
 
 
-# ============================================================
-# LINK PATIENT
-# ============================================================
-
-
 @transactional
 def link_patient(
     trip_id: int,
@@ -1044,7 +953,6 @@ def link_patient(
     This is allowed while the trip is operational but not
     after completion/cancellation.
     """
-
     trip = get_trip(
         trip_id,
     )
@@ -1107,11 +1015,6 @@ def link_patient(
     return trip
 
 
-# ============================================================
-# COMPLETE TRIP
-# ============================================================
-
-
 @transactional
 def complete_trip(
     trip_id: int,
@@ -1125,7 +1028,6 @@ def complete_trip(
 
     Billing is intentionally NOT created here.
     """
-
     trip = get_trip(
         trip_id,
     )
@@ -1166,7 +1068,7 @@ def complete_trip(
         if vehicle.status != VehicleStatus.ON_TRIP:
             raise ConflictError(
                 f"Vehicle {vehicle.id} is not "
-                "currently marked ON_TRIP"
+                f"currently marked ON_TRIP"
             )
 
     old_status = trip.status.value
@@ -1202,11 +1104,6 @@ def complete_trip(
     return trip
 
 
-# ============================================================
-# LINK INVOICE
-# ============================================================
-
-
 @transactional
 def link_invoice(
     trip_id: int,
@@ -1218,7 +1115,6 @@ def link_invoice(
     Invoice creation remains the responsibility of the
     billing service.
     """
-
     trip = get_trip(
         trip_id,
     )
@@ -1293,11 +1189,6 @@ def link_invoice(
     return trip
 
 
-# ============================================================
-# CANCEL TRIP
-# ============================================================
-
-
 @transactional
 def cancel_trip(
     trip_id: int,
@@ -1311,7 +1202,6 @@ def cancel_trip(
     If a vehicle has already been dispatched and is ON_TRIP,
     it is released back to AVAILABLE.
     """
-
     trip = get_trip(
         trip_id,
     )

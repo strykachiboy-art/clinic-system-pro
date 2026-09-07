@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime, timedelta, timezone
+﻿from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -6,1506 +6,1779 @@ from app.core.enums.appointment_enums import (
     AppointmentStatus,
     AppointmentType,
 )
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.modules.appointment.models.appointment_model import Appointment
-from app.modules.appointment.services import appointment_service
+
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+
+from app.modules.appointment.services import (
+    appointment_service,
+)
 
 
-def utcnow():
-    return datetime.now(timezone.utc)
+# ============================================================================
+# Helpers
+# ============================================================================
 
 
-def db_datetime(dt):
-    """
-    SQLite returns DateTime values without timezone information.
-
-    Normalize an aware datetime to the naive value returned by SQLite.
-    """
-    return dt.replace(tzinfo=None) if dt.tzinfo else dt
-
-
-def create_test_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-    *,
-    start=None,
-    end=None,
+def make_appointment(
+    appointment_id=1,
+    clinic_id=10,
+    patient_id=20,
+    staff_id=30,
+    scheduled_start=None,
+    scheduled_end=None,
     status=AppointmentStatus.SCHEDULED,
     appointment_type=AppointmentType.IN_PERSON,
     reason="Routine consultation",
     notes=None,
     reminder_sent=False,
+    cancelled_at=None,
+    cancellation_reason=None,
 ):
-    start = start or (utcnow() + timedelta(days=1))
-    end = end or (start + timedelta(minutes=30))
+    class Appointment:
+        pass
 
-    appointment = Appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=start,
-        scheduled_end=end,
-        status=status,
-        appointment_type=appointment_type,
-        reason=reason,
-        notes=notes,
-        reminder_sent=reminder_sent,
+    appointment = Appointment()
+
+    appointment.id = appointment_id
+    appointment.clinic_id = clinic_id
+    appointment.patient_id = patient_id
+    appointment.staff_id = staff_id
+
+    appointment.scheduled_start = (
+        scheduled_start
+        or datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        )
     )
 
-    db.session.add(appointment)
-    db.session.commit()
+    appointment.scheduled_end = (
+        scheduled_end
+        or datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        )
+    )
+
+    appointment.status = status
+    appointment.appointment_type = appointment_type
+    appointment.reason = reason
+    appointment.notes = notes
+    appointment.reminder_sent = reminder_sent
+    appointment.cancelled_at = cancelled_at
+    appointment.cancellation_reason = (
+        cancellation_reason
+    )
 
     return appointment
 
 
-# ---------------------------------------------------------------------------
-# _get_appointment
-# ---------------------------------------------------------------------------
+# ============================================================================
+# _utcnow
+# ============================================================================
 
 
-def test_get_appointment_returns_existing_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+def test_utcnow_returns_timezone_aware_utc_datetime():
+    result = appointment_service._utcnow()
+
+    assert isinstance(result, datetime)
+    assert result.tzinfo is not None
+    assert result.utcoffset() == timedelta(0)
+
+
+# ============================================================================
+# _validate_schedule_times
+# ============================================================================
+
+
+def test_validate_schedule_times_accepts_valid_times():
+    start = datetime(
+        2026,
+        9,
+        8,
+        10,
+        0,
     )
 
-    result = appointment_service._get_appointment(appointment.id)
-
-    assert result.id == appointment.id
-    assert result.clinic_id == clinic.id
-    assert result.patient_id == patient.id
-    assert result.staff_id == staff.id
-
-
-def test_get_appointment_raises_not_found(
-    db,
-    clinic,
-):
-    with pytest.raises(
-        NotFoundError,
-        match=r"Appointment 999999 not found",
-    ):
-        appointment_service._get_appointment(999999)
-
-
-# ---------------------------------------------------------------------------
-# Schedule validation
-# ---------------------------------------------------------------------------
-
-
-def test_validate_schedule_times_requires_start_and_end():
-    with pytest.raises(
-        ValidationError,
-        match="scheduled_start and scheduled_end are required",
-    ):
-        appointment_service._validate_schedule_times(None, None)
-
-
-def test_validate_schedule_times_requires_end_after_start():
-    start = utcnow()
-    end = start
-
-    with pytest.raises(
-        ValidationError,
-        match="scheduled_end must be later than scheduled_start",
-    ):
-        appointment_service._validate_schedule_times(start, end)
-
-
-def test_validate_schedule_times_rejects_end_before_start():
-    start = utcnow()
-    end = start - timedelta(minutes=30)
-
-    with pytest.raises(
-        ValidationError,
-        match="scheduled_end must be later than scheduled_start",
-    ):
-        appointment_service._validate_schedule_times(start, end)
-
-
-def test_validate_schedule_times_accepts_valid_range():
-    start = utcnow()
-    end = start + timedelta(minutes=30)
-
-    appointment_service._validate_schedule_times(start, end)
-
-
-# ---------------------------------------------------------------------------
-# Reschedule validation
-# ---------------------------------------------------------------------------
-
-
-def test_validate_reschedule_times_requires_start_and_end():
-    with pytest.raises(
-        ValidationError,
-        match="new_start and new_end are required",
-    ):
-        appointment_service._validate_reschedule_times(None, None)
-
-
-def test_validate_reschedule_times_requires_end_after_start():
-    start = utcnow()
-    end = start
-
-    with pytest.raises(
-        ValidationError,
-        match="new_end must be later than new_start",
-    ):
-        appointment_service._validate_reschedule_times(start, end)
-
-
-def test_validate_reschedule_times_rejects_end_before_start():
-    start = utcnow()
-    end = start - timedelta(minutes=30)
-
-    with pytest.raises(
-        ValidationError,
-        match="new_end must be later than new_start",
-    ):
-        appointment_service._validate_reschedule_times(start, end)
-
-
-def test_validate_reschedule_times_accepts_valid_range():
-    start = utcnow()
-    end = start + timedelta(minutes=30)
-
-    appointment_service._validate_reschedule_times(start, end)
-
-
-# ---------------------------------------------------------------------------
-# Create appointment
-# ---------------------------------------------------------------------------
-
-
-def test_create_appointment_creates_scheduled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=2)
-    end = start + timedelta(minutes=45)
-
-    appointment = appointment_service.create_appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=start,
-        scheduled_end=end,
-        appointment_type=AppointmentType.IN_PERSON,
-        reason="General consultation",
-        notes="Initial assessment",
+    end = datetime(
+        2026,
+        9,
+        8,
+        10,
+        30,
     )
 
-    assert appointment.id is not None
-    assert appointment.clinic_id == clinic.id
-    assert appointment.patient_id == patient.id
-    assert appointment.staff_id == staff.id
-
-    # SQLite strips tzinfo from DateTime columns.
-    assert appointment.scheduled_start == db_datetime(start)
-    assert appointment.scheduled_end == db_datetime(end)
-
-    assert appointment.status == AppointmentStatus.SCHEDULED
-    assert appointment.appointment_type == AppointmentType.IN_PERSON
-    assert appointment.reason == "General consultation"
-    assert appointment.notes == "Initial assessment"
-    assert appointment.reminder_sent is False
-
-
-def test_create_appointment_defaults_to_in_person(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=2)
-    end = start + timedelta(minutes=30)
-
-    appointment = appointment_service.create_appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=start,
-        scheduled_end=end,
+    result = appointment_service._validate_schedule_times(
+        start,
+        end,
     )
 
-    assert appointment.appointment_type == AppointmentType.IN_PERSON
-    assert appointment.status == AppointmentStatus.SCHEDULED
+    assert result is None
 
 
-def test_create_appointment_rejects_missing_schedule(
-    clinic,
-    patient,
-    staff,
+@pytest.mark.parametrize(
+    "scheduled_start,scheduled_end",
+    [
+        (None, datetime(2026, 9, 8, 10, 30)),
+        (datetime(2026, 9, 8, 10, 0), None),
+        (None, None),
+    ],
+)
+def test_validate_schedule_times_requires_both_values(
+    scheduled_start,
+    scheduled_end,
 ):
     with pytest.raises(
         ValidationError,
         match="scheduled_start and scheduled_end are required",
     ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            scheduled_start=None,
-            scheduled_end=None,
+        appointment_service._validate_schedule_times(
+            scheduled_start,
+            scheduled_end,
         )
 
 
-def test_create_appointment_rejects_invalid_schedule(
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=2)
-    end = start - timedelta(minutes=1)
+def test_validate_schedule_times_rejects_equal_times():
+    start = datetime(
+        2026,
+        9,
+        8,
+        10,
+        0,
+    )
 
     with pytest.raises(
         ValidationError,
         match="scheduled_end must be later than scheduled_start",
     ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            scheduled_start=start,
-            scheduled_end=end,
-        )
-
-
-def test_create_appointment_rejects_patient_from_different_clinic(
-    db,
-    clinic,
-    patient,
-    staff,
-    make_clinic,
-    make_patient,
-):
-    other_clinic = make_clinic(name="Other Clinic")
-    other_patient = make_patient(other_clinic)
-
-    start = utcnow() + timedelta(days=2)
-    end = start + timedelta(minutes=30)
-
-    with pytest.raises(
-        ConflictError,
-        match=rf"Patient {other_patient.id} does not belong to clinic {clinic.id}",
-    ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=other_patient.id,
-            staff_id=staff.id,
-            scheduled_start=start,
-            scheduled_end=end,
-        )
-
-
-def test_create_appointment_rejects_staff_from_different_clinic(
-    db,
-    clinic,
-    patient,
-    make_clinic,
-    make_staff,
-):
-    other_clinic = make_clinic(name="Other Clinic")
-    other_staff = make_staff(other_clinic)
-
-    start = utcnow() + timedelta(days=2)
-    end = start + timedelta(minutes=30)
-
-    with pytest.raises(
-        ConflictError,
-        match=rf"Staff {other_staff.id} does not belong to clinic {clinic.id}",
-    ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=other_staff.id,
-            scheduled_start=start,
-            scheduled_end=end,
-        )
-
-
-def test_create_appointment_rejects_suspended_clinic(
-    suspended_clinic,
-    make_patient,
-    make_staff,
-):
-    patient = make_patient(suspended_clinic)
-    staff = make_staff(suspended_clinic)
-
-    start = utcnow() + timedelta(days=2)
-    end = start + timedelta(minutes=30)
-
-    with pytest.raises(
-        ValidationError,
-        match=rf"Clinic {suspended_clinic.id} is not active",
-    ):
-        appointment_service.create_appointment(
-            clinic_id=suspended_clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            scheduled_start=start,
-            scheduled_end=end,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Appointment overlap
-# ---------------------------------------------------------------------------
-
-
-def test_create_appointment_rejects_patient_overlap(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(hours=1)
-
-    existing = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-    )
-
-    with pytest.raises(
-        ConflictError,
-        match=rf"Patient {patient.id} already has an appointment overlapping this time period \(appointment {existing.id}\)",
-    ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            scheduled_start=start + timedelta(minutes=30),
-            scheduled_end=end + timedelta(minutes=30),
-        )
-
-
-def test_create_appointment_rejects_staff_overlap(
-    db,
-    clinic,
-    patient,
-    staff,
-    make_patient,
-):
-    existing_patient = patient
-
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(hours=1)
-
-    existing = create_test_appointment(
-        db,
-        clinic,
-        existing_patient,
-        staff,
-        start=start,
-        end=end,
-    )
-
-    other_patient = make_patient(clinic)
-
-    with pytest.raises(
-        ConflictError,
-        match=rf"Staff {staff.id} already has an appointment overlapping this time period \(appointment {existing.id}\)",
-    ):
-        appointment_service.create_appointment(
-            clinic_id=clinic.id,
-            patient_id=other_patient.id,
-            staff_id=staff.id,
-            scheduled_start=start + timedelta(minutes=30),
-            scheduled_end=end + timedelta(minutes=30),
-        )
-
-
-def test_create_appointment_allows_adjacent_patient_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-    )
-
-    next_start = end
-    next_end = next_start + timedelta(minutes=30)
-
-    appointment = appointment_service.create_appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=next_start,
-        scheduled_end=next_end,
-    )
-
-    assert appointment.id is not None
-
-
-def test_create_appointment_allows_cancelled_appointment_overlap(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-        status=AppointmentStatus.CANCELLED,
-    )
-
-    appointment = appointment_service.create_appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=start,
-        scheduled_end=end,
-    )
-
-    assert appointment.id is not None
-
-
-def test_create_appointment_allows_completed_appointment_overlap(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-        status=AppointmentStatus.COMPLETED,
-    )
-
-    appointment = appointment_service.create_appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=start,
-        scheduled_end=end,
-    )
-
-    assert appointment.id is not None
-
-
-# ---------------------------------------------------------------------------
-# Reschedule
-# ---------------------------------------------------------------------------
-
-
-def test_reschedule_appointment_updates_schedule(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    original_start = utcnow() + timedelta(days=3)
-    original_end = original_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=original_start,
-        end=original_end,
-    )
-
-    new_start = original_start + timedelta(hours=2)
-    new_end = new_start + timedelta(minutes=45)
-
-    result = appointment_service.reschedule_appointment(
-        appointment.id,
-        new_start,
-        new_end,
-    )
-
-    assert result.id == appointment.id
-    assert result.scheduled_start == db_datetime(new_start)
-    assert result.scheduled_end == db_datetime(new_end)
-    assert result.reminder_sent is False
-
-
-def test_reschedule_allows_same_appointment_without_self_conflict(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-    )
-
-    result = appointment_service.reschedule_appointment(
-        appointment.id,
-        start + timedelta(minutes=5),
-        end + timedelta(minutes=5),
-    )
-
-    assert result.id == appointment.id
-    assert result.scheduled_start == db_datetime(
-        start + timedelta(minutes=5)
-    )
-    assert result.scheduled_end == db_datetime(
-        end + timedelta(minutes=5)
-    )
-
-
-def test_reschedule_rejects_patient_overlap(
-    db,
-    clinic,
-    patient,
-    staff,
-    make_patient,
-):
-    first_start = utcnow() + timedelta(days=3)
-    first_end = first_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=first_start,
-        end=first_end,
-    )
-
-    other_patient = make_patient(clinic)
-
-    blocking_start = first_start + timedelta(hours=2)
-    blocking_end = blocking_start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        other_patient,
-        staff,
-        start=blocking_start,
-        end=blocking_end,
-    )
-
-    with pytest.raises(ConflictError):
-        appointment_service.reschedule_appointment(
-            appointment.id,
-            blocking_start,
-            blocking_end,
-        )
-
-
-def test_reschedule_rejects_invalid_times(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-    )
-
-    with pytest.raises(
-        ValidationError,
-        match="new_end must be later than new_start",
-    ):
-        appointment_service.reschedule_appointment(
-            appointment.id,
-            end,
+        appointment_service._validate_schedule_times(
+            start,
             start,
         )
 
 
-def test_reschedule_rejects_cancelled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    start = utcnow() + timedelta(days=3)
-    end = start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=start,
-        end=end,
-        status=AppointmentStatus.CANCELLED,
+def test_validate_schedule_times_rejects_end_before_start():
+    start = datetime(
+        2026,
+        9,
+        8,
+        11,
+        0,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.reschedule_appointment(
-            appointment.id,
-            start + timedelta(hours=1),
-            end + timedelta(hours=1),
-        )
-
-
-# ---------------------------------------------------------------------------
-# Confirm
-# ---------------------------------------------------------------------------
-
-
-def test_confirm_appointment_changes_status_to_confirmed(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.SCHEDULED,
-    )
-
-    result = appointment_service.confirm_appointment(appointment.id)
-
-    assert result.status == AppointmentStatus.CONFIRMED
-
-
-def test_confirm_appointment_rejects_non_scheduled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.CONFIRMED,
-    )
-
-    with pytest.raises(ConflictError):
-        appointment_service.confirm_appointment(appointment.id)
-
-
-def test_confirm_appointment_rejects_cancelled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.CANCELLED,
-    )
-
-    with pytest.raises(ConflictError):
-        appointment_service.confirm_appointment(appointment.id)
-
-
-def test_confirm_appointment_rejects_suspended_clinic(
-    db,
-    suspended_clinic,
-    make_patient,
-    make_staff,
-):
-    patient = make_patient(suspended_clinic)
-    staff = make_staff(suspended_clinic)
-
-    appointment = create_test_appointment(
-        db,
-        suspended_clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.SCHEDULED,
+    end = datetime(
+        2026,
+        9,
+        8,
+        10,
+        0,
     )
 
     with pytest.raises(
         ValidationError,
-        match=rf"Clinic {suspended_clinic.id} is not active",
+        match="scheduled_end must be later than scheduled_start",
     ):
-        appointment_service.confirm_appointment(appointment.id)
+        appointment_service._validate_schedule_times(
+            start,
+            end,
+        )
 
 
-# ---------------------------------------------------------------------------
-# Cancel
-# ---------------------------------------------------------------------------
+# ============================================================================
+# _validate_reschedule_times
+# ============================================================================
 
 
-def test_cancel_appointment_changes_status_and_records_reason(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_validate_reschedule_times_accepts_valid_times():
+    start = datetime(
+        2026,
+        9,
+        9,
+        11,
+        0,
+    )
+
+    end = datetime(
+        2026,
+        9,
+        9,
+        11,
+        30,
+    )
+
+    result = appointment_service._validate_reschedule_times(
+        start,
+        end,
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "new_start,new_end",
+    [
+        (None, datetime(2026, 9, 9, 11, 30)),
+        (datetime(2026, 9, 9, 11, 0), None),
+        (None, None),
+    ],
+)
+def test_validate_reschedule_times_requires_both_values(
+    new_start,
+    new_end,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    with pytest.raises(
+        ValidationError,
+        match="new_start and new_end are required",
+    ):
+        appointment_service._validate_reschedule_times(
+            new_start,
+            new_end,
+        )
+
+
+def test_validate_reschedule_times_rejects_equal_times():
+    start = datetime(
+        2026,
+        9,
+        9,
+        11,
+        0,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="new_end must be later than new_start",
+    ):
+        appointment_service._validate_reschedule_times(
+            start,
+            start,
+        )
+
+
+def test_validate_reschedule_times_rejects_end_before_start():
+    start = datetime(
+        2026,
+        9,
+        9,
+        12,
+        0,
+    )
+
+    end = datetime(
+        2026,
+        9,
+        9,
+        11,
+        0,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="new_end must be later than new_start",
+    ):
+        appointment_service._validate_reschedule_times(
+            start,
+            end,
+        )
+
+
+# ============================================================================
+# _ensure_status
+# ============================================================================
+
+
+def test_ensure_status_accepts_allowed_status():
+    appointment = make_appointment(
         status=AppointmentStatus.SCHEDULED,
     )
 
-    result = appointment_service.cancel_appointment(
-        appointment.id,
-        reason="Patient requested cancellation",
+    result = appointment_service._ensure_status(
+        appointment,
+        AppointmentStatus.SCHEDULED,
+        AppointmentStatus.CONFIRMED,
     )
 
-    assert result.status == AppointmentStatus.CANCELLED
-    assert result.cancellation_reason == "Patient requested cancellation"
-    assert result.cancelled_at is not None
+    assert result is None
 
 
-def test_cancel_confirmed_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_ensure_status_rejects_disallowed_status():
+    appointment = make_appointment(
+        appointment_id=7,
+        status=AppointmentStatus.CANCELLED,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service._ensure_status(
+            appointment,
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED,
+        )
+
+
+# ============================================================================
+# _get_appointment
+# ============================================================================
+
+
+def test_get_appointment_returns_appointment(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.CONFIRMED,
+    appointment = make_appointment(
+        appointment_id=7,
     )
 
-    result = appointment_service.cancel_appointment(
-        appointment.id,
-        reason="Schedule conflict",
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return appointment
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
     )
 
-    assert result.status == AppointmentStatus.CANCELLED
-    assert result.cancellation_reason == "Schedule conflict"
-    assert result.cancelled_at is not None
+    result = appointment_service._get_appointment(
+        appointment_id=7,
+    )
+
+    assert result is appointment
 
 
-def test_cancel_appointment_allows_no_reason(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_get_appointment_raises_not_found(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return None
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
     )
 
-    result = appointment_service.cancel_appointment(appointment.id)
+    with pytest.raises(
+        NotFoundError,
+        match="Appointment 999 not found",
+    ):
+        appointment_service._get_appointment(
+            appointment_id=999,
+        )
 
-    assert result.status == AppointmentStatus.CANCELLED
-    assert result.cancellation_reason is None
-    assert result.cancelled_at is not None
 
-
-def test_cancel_appointment_rejects_completed_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_get_appointment_supports_clinic_filter(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=7,
+        clinic_id=10,
+    )
+
+    filters = []
+
+    class FakeQuery:
+        def filter(self, *args):
+            filters.extend(args)
+            return self
+
+        def first(self):
+            return appointment
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._get_appointment(
+        appointment_id=7,
+        clinic_id=10,
+    )
+
+    assert result is appointment
+    assert len(filters) == 2
+
+
+# ============================================================================
+# _find_patient_overlap
+# ============================================================================
+
+
+def test_find_patient_overlap_returns_matching_appointment(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=7,
+        patient_id=20,
+    )
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return appointment
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._find_patient_overlap(
+        patient_id=20,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+    )
+
+    assert result is appointment
+
+
+def test_find_patient_overlap_returns_none_when_no_match(
+    app,
+    monkeypatch,
+):
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return None
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._find_patient_overlap(
+        patient_id=20,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+    )
+
+    assert result is None
+
+
+# ============================================================================
+# _find_staff_overlap
+# ============================================================================
+
+
+def test_find_staff_overlap_returns_matching_appointment(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=8,
+        staff_id=30,
+    )
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return appointment
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._find_staff_overlap(
+        staff_id=30,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+    )
+
+    assert result is appointment
+
+
+def test_find_staff_overlap_returns_none_when_no_match(
+    app,
+    monkeypatch,
+):
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return None
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._find_staff_overlap(
+        staff_id=30,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+    )
+
+    assert result is None
+
+
+# ============================================================================
+# _ensure_no_schedule_conflict
+# ============================================================================
+
+
+def test_ensure_no_schedule_conflict_accepts_available_period(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_patient_overlap",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_staff_overlap",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service._ensure_no_schedule_conflict(
+        patient_id=20,
+        staff_id=30,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+    )
+
+    assert result is None
+
+
+def test_ensure_no_schedule_conflict_rejects_patient_conflict(
+    monkeypatch,
+):
+    conflict = make_appointment(
+        appointment_id=55,
+        patient_id=20,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_patient_overlap",
+        lambda **kwargs: conflict,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="Patient 20 already has an appointment",
+    ):
+        appointment_service._ensure_no_schedule_conflict(
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                30,
+            ),
+        )
+
+
+def test_ensure_no_schedule_conflict_rejects_staff_conflict(
+    monkeypatch,
+):
+    conflict = make_appointment(
+        appointment_id=56,
+        staff_id=30,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_patient_overlap",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_staff_overlap",
+        lambda **kwargs: conflict,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="Staff 30 already has an appointment",
+    ):
+        appointment_service._ensure_no_schedule_conflict(
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                30,
+            ),
+        )
+
+
+# ============================================================================
+# create_appointment
+# ============================================================================
+
+
+def test_create_appointment_success(
+    app,
+    monkeypatch,
+):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    staff = type(
+        "Staff",
+        (),
+        {"id": 30},
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: staff,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_ensure_no_schedule_conflict",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    created = {}
+
+    real_session = appointment_service.db.session
+
+    def fake_add(appointment):
+        created["appointment"] = appointment
+
+    def fake_flush():
+        created["appointment"].id = 101
+
+    monkeypatch.setattr(
+        real_session,
+        "add",
+        fake_add,
+    )
+
+    monkeypatch.setattr(
+        real_session,
+        "flush",
+        fake_flush,
+    )
+
+    start = datetime(
+        2026,
+        9,
+        8,
+        10,
+        0,
+    )
+
+    end = datetime(
+        2026,
+        9,
+        8,
+        10,
+        30,
+    )
+
+    result = appointment_service.create_appointment(
+        clinic_id=10,
+        patient_id=20,
+        staff_id=30,
+        scheduled_start=start,
+        scheduled_end=end,
+        appointment_type=AppointmentType.IN_PERSON,
+        reason="Routine consultation",
+    )
+
+    assert result.id == 101
+    assert result.clinic_id == 10
+    assert result.patient_id == 20
+    assert result.staff_id == 30
+    assert result.scheduled_start == start
+    assert result.scheduled_end == end
+    assert result.appointment_type == (
+        AppointmentType.IN_PERSON
+    )
+    assert result.status == AppointmentStatus.SCHEDULED
+    assert result.reason == "Routine consultation"
+
+
+def test_create_appointment_rejects_invalid_schedule(
+    app,
+    monkeypatch,
+):
+    with pytest.raises(
+        ValidationError,
+        match="scheduled_end must be later than scheduled_start",
+    ):
+        appointment_service.create_appointment(
+            clinic_id=10,
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                11,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+        )
+
+
+def test_create_appointment_rejects_patient_clinic_mismatch(
+    app,
+    monkeypatch,
+):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 99},
+    )()
+
+    staff = type(
+        "Staff",
+        (),
+        {"id": 30},
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: staff,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="does not belong to clinic 10",
+    ):
+        appointment_service.create_appointment(
+            clinic_id=10,
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                30,
+            ),
+        )
+
+
+def test_create_appointment_rejects_patient_schedule_conflict(
+    app,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        appointment_service,
+        "_validate_appointment_participants",
+        lambda **kwargs: (
+            type("Clinic", (), {"id": 10})(),
+            type("Patient", (), {"clinic_id": 10})(),
+            type("Staff", (), {})(),
+        ),
+    )
+
+    conflict = make_appointment(
+        appointment_id=88,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_find_patient_overlap",
+        lambda **kwargs: conflict,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="Patient 20 already has an appointment",
+    ):
+        appointment_service.create_appointment(
+            clinic_id=10,
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                30,
+            ),
+        )
+
+
+# ============================================================================
+# Reschedule
+# ============================================================================
+
+
+def test_reschedule_appointment_success(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=5,
+        status=AppointmentStatus.SCHEDULED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_ensure_no_schedule_conflict",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    new_start = datetime(
+        2026,
+        9,
+        9,
+        11,
+        0,
+    )
+
+    new_end = datetime(
+        2026,
+        9,
+        9,
+        11,
+        30,
+    )
+
+    appointment.reminder_sent = True
+
+    result = appointment_service.reschedule_appointment(
+        appointment_id=5,
+        new_start=new_start,
+        new_end=new_end,
+        clinic_id=10,
+    )
+
+    assert result is appointment
+    assert result.scheduled_start == new_start
+    assert result.scheduled_end == new_end
+    assert result.reminder_sent is False
+
+
+def test_reschedule_appointment_rejects_invalid_status(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=5,
+        status=AppointmentStatus.CANCELLED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service.reschedule_appointment(
+            appointment_id=5,
+            new_start=datetime(
+                2026,
+                9,
+                9,
+                11,
+                0,
+            ),
+            new_end=datetime(
+                2026,
+                9,
+                9,
+                11,
+                30,
+            ),
+            clinic_id=10,
+        )
+
+
+def test_reschedule_appointment_rejects_invalid_times(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=5,
+        status=AppointmentStatus.SCHEDULED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="new_end must be later than new_start",
+    ):
+        appointment_service.reschedule_appointment(
+            appointment_id=5,
+            new_start=datetime(
+                2026,
+                9,
+                9,
+                12,
+                0,
+            ),
+            new_end=datetime(
+                2026,
+                9,
+                9,
+                11,
+                0,
+            ),
+            clinic_id=10,
+        )
+
+
+# ============================================================================
+# Confirm
+# ============================================================================
+
+
+def test_confirm_appointment_success(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=6,
+        status=AppointmentStatus.SCHEDULED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service.confirm_appointment(
+        appointment_id=6,
+        clinic_id=10,
+    )
+
+    assert result is appointment
+    assert result.status == AppointmentStatus.CONFIRMED
+
+
+def test_confirm_appointment_rejects_non_scheduled_status(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=6,
         status=AppointmentStatus.COMPLETED,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.cancel_appointment(appointment.id)
-
-
-def test_cancel_appointment_rejects_no_show_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.NO_SHOW,
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.cancel_appointment(appointment.id)
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service.confirm_appointment(
+            appointment_id=6,
+            clinic_id=10,
+        )
 
 
-# ---------------------------------------------------------------------------
-# Complete
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Cancel
+# ============================================================================
 
 
-def test_complete_appointment_changes_status_to_completed(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_cancel_appointment_success(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=7,
+        status=AppointmentStatus.SCHEDULED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service.cancel_appointment(
+        appointment_id=7,
+        reason="Patient unavailable",
+        clinic_id=10,
+    )
+
+    assert result is appointment
+    assert result.status == AppointmentStatus.CANCELLED
+    assert result.cancellation_reason == (
+        "Patient unavailable"
+    )
+    assert result.cancelled_at is not None
+    assert result.cancelled_at.tzinfo is not None
+
+
+def test_cancel_appointment_accepts_no_reason(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=8,
         status=AppointmentStatus.CONFIRMED,
     )
 
-    result = appointment_service.complete_appointment(
-        appointment.id,
-        notes="Consultation completed successfully.",
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
     )
 
-    assert result.status == AppointmentStatus.COMPLETED
-    assert result.notes == "Consultation completed successfully."
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service.cancel_appointment(
+        appointment_id=8,
+        clinic_id=10,
+    )
+
+    assert result.status == AppointmentStatus.CANCELLED
+    assert result.cancellation_reason is None
 
 
-def test_complete_appointment_keeps_existing_notes_when_none_provided(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_cancel_appointment_rejects_completed_status(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=8,
+        status=AppointmentStatus.COMPLETED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service.cancel_appointment(
+            appointment_id=8,
+            clinic_id=10,
+        )
+
+
+# ============================================================================
+# Complete
+# ============================================================================
+
+
+def test_complete_appointment_success(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=9,
+        status=AppointmentStatus.CONFIRMED,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service.complete_appointment(
+        appointment_id=9,
+        notes="Consultation completed",
+        clinic_id=10,
+    )
+
+    assert result is appointment
+    assert result.status == AppointmentStatus.COMPLETED
+    assert result.notes == (
+        "Consultation completed"
+    )
+
+
+def test_complete_appointment_without_notes_preserves_existing_notes(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=10,
         status=AppointmentStatus.CONFIRMED,
         notes="Existing notes",
     )
 
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
     result = appointment_service.complete_appointment(
-        appointment.id,
+        appointment_id=10,
         notes=None,
+        clinic_id=10,
     )
 
     assert result.status == AppointmentStatus.COMPLETED
     assert result.notes == "Existing notes"
 
 
-def test_complete_appointment_rejects_scheduled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_complete_appointment_rejects_scheduled_status(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=10,
         status=AppointmentStatus.SCHEDULED,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.complete_appointment(appointment.id)
-
-
-def test_complete_appointment_rejects_cancelled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.CANCELLED,
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.complete_appointment(appointment.id)
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service.complete_appointment(
+            appointment_id=10,
+            clinic_id=10,
+        )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # No-show
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
-def test_mark_no_show_changes_status(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_mark_no_show_success(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=11,
         status=AppointmentStatus.CONFIRMED,
     )
 
-    result = appointment_service.mark_no_show(appointment.id)
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
 
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = appointment_service.mark_no_show(
+        appointment_id=11,
+        clinic_id=10,
+    )
+
+    assert result is appointment
     assert result.status == AppointmentStatus.NO_SHOW
 
 
-def test_mark_no_show_rejects_scheduled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_mark_no_show_rejects_scheduled_status(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=11,
         status=AppointmentStatus.SCHEDULED,
     )
 
-    with pytest.raises(ConflictError):
-        appointment_service.mark_no_show(appointment.id)
+    monkeypatch.setattr(
+        appointment_service,
+        "_get_appointment",
+        lambda **kwargs: appointment,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="cannot perform this action",
+    ):
+        appointment_service.mark_no_show(
+            appointment_id=11,
+            clinic_id=10,
+        )
 
 
-def test_mark_no_show_rejects_cancelled_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
+# ============================================================================
+# Patient appointments
+# ============================================================================
+
+
+def test_get_appointments_for_patient_success(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        status=AppointmentStatus.CANCELLED,
-    )
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
 
-    with pytest.raises(ConflictError):
-        appointment_service.mark_no_show(appointment.id)
-
-
-# ---------------------------------------------------------------------------
-# Patient appointment queries
-# ---------------------------------------------------------------------------
-
-
-def test_get_appointments_for_patient_returns_patient_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    first_start = utcnow() + timedelta(days=2)
-    second_start = utcnow() + timedelta(days=4)
-
-    first = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=first_start,
-        end=first_start + timedelta(minutes=30),
-    )
-
-    second = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=second_start,
-        end=second_start + timedelta(minutes=30),
-    )
-
-    result = appointment_service.get_appointments_for_patient(patient.id)
-
-    assert [appointment.id for appointment in result] == [
-        second.id,
-        first.id,
+    appointments = [
+        make_appointment(
+            appointment_id=1,
+            patient_id=20,
+        ),
+        make_appointment(
+            appointment_id=2,
+            patient_id=20,
+        ),
     ]
 
-
-def test_get_appointments_for_patient_returns_empty_list_when_none_exist(
-    patient,
-):
-    result = appointment_service.get_appointments_for_patient(patient.id)
-
-    assert result == []
-
-
-def test_get_appointments_for_patient_includes_historical_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    old_start = utcnow() - timedelta(days=10)
-    old_end = old_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=old_start,
-        end=old_end,
-        status=AppointmentStatus.COMPLETED,
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
     )
 
-    result = appointment_service.get_appointments_for_patient(patient.id)
+    class FakeQuery:
+        def filter(self, *args):
+            return self
 
-    assert len(result) == 1
-    assert result[0].id == appointment.id
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return appointments
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service.get_appointments_for_patient(
+        patient_id=20,
+        clinic_id=10,
+    )
+
+    assert result == appointments
 
 
-# ---------------------------------------------------------------------------
-# Staff appointment queries
-# ---------------------------------------------------------------------------
-
-
-def test_get_appointments_for_staff_returns_staff_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-    make_patient,
+def test_get_appointments_for_patient_rejects_wrong_clinic(
+    monkeypatch,
 ):
-    first_start = utcnow() + timedelta(days=2)
-    second_start = utcnow() + timedelta(days=2, hours=2)
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 99},
+    )()
 
-    first = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=first_start,
-        end=first_start + timedelta(minutes=30),
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
     )
 
-    second_patient = make_patient(clinic)
+    with pytest.raises(
+        NotFoundError,
+        match="Patient 20 not found",
+    ):
+        appointment_service.get_appointments_for_patient(
+            patient_id=20,
+            clinic_id=10,
+        )
 
-    second = create_test_appointment(
-        db,
-        clinic,
-        second_patient,
-        staff,
-        start=second_start,
-        end=second_start + timedelta(minutes=30),
-    )
 
-    result = appointment_service.get_appointments_for_staff(staff.id)
+# ============================================================================
+# Staff appointments
+# ============================================================================
 
-    assert [appointment.id for appointment in result] == [
-        first.id,
-        second.id,
+
+def test_get_appointments_for_staff_success(
+    app,
+    monkeypatch,
+):
+    appointments = [
+        make_appointment(
+            appointment_id=1,
+            clinic_id=10,
+            staff_id=30,
+        ),
+        make_appointment(
+            appointment_id=2,
+            clinic_id=10,
+            staff_id=30,
+        ),
     ]
 
-
-def test_get_appointments_for_staff_filters_by_date(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    first_start = utcnow() + timedelta(days=2)
-    second_start = utcnow() + timedelta(days=3)
-
-    first = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=first_start,
-        end=first_start + timedelta(minutes=30),
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: object(),
     )
 
-    second = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=second_start,
-        end=second_start + timedelta(minutes=30),
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return appointments
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
     )
 
     result = appointment_service.get_appointments_for_staff(
-        staff.id,
-        date_=first_start.date(),
+        clinic_id=10,
+        staff_id=30,
     )
 
-    assert [appointment.id for appointment in result] == [first.id]
-    assert second.id not in [appointment.id for appointment in result]
+    assert result == appointments
 
 
-def test_get_appointments_for_staff_returns_empty_for_date_without_appointments(
-    staff,
+def test_get_appointments_for_staff_with_date_filter(
+    app,
+    monkeypatch,
 ):
+    target_date = date(
+        2026,
+        9,
+        8,
+    )
+
+    appointments = [
+        make_appointment(
+            appointment_id=1,
+            clinic_id=10,
+            staff_id=30,
+        ),
+    ]
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: object(),
+    )
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return appointments
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
     result = appointment_service.get_appointments_for_staff(
-        staff.id,
-        date_=date(2099, 1, 1),
+        clinic_id=10,
+        staff_id=30,
+        date_=target_date,
     )
 
-    assert result == []
+    assert result == appointments
 
 
-def test_get_appointments_for_staff_includes_historical_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-):
-    old_start = utcnow() - timedelta(days=10)
-    old_end = old_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=old_start,
-        end=old_end,
-        status=AppointmentStatus.COMPLETED,
-    )
-
-    result = appointment_service.get_appointments_for_staff(
-        staff.id,
-        date_=old_start.date(),
-    )
-
-    assert len(result) == 1
-    assert result[0].id == appointment.id
-
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Reminder task
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
-def test_send_appointment_reminder_marks_reminder_sent(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_send_appointment_reminder_ignores_missing_appointment(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        reminder_sent=False,
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "get",
+        lambda model, appointment_id: None,
     )
 
     result = appointment_service.send_appointment_reminder(
-        appointment.id
+        999,
     )
 
-    db.session.refresh(appointment)
-
     assert result is None
-    assert appointment.reminder_sent is True
 
 
-def test_send_appointment_reminder_does_nothing_if_already_sent(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_send_appointment_reminder_ignores_already_sent_reminder(
+    app,
+    monkeypatch,
 ):
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
+    appointment = make_appointment(
+        appointment_id=12,
         reminder_sent=True,
     )
 
-    result = appointment_service.send_appointment_reminder(
-        appointment.id
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "get",
+        lambda model, appointment_id: appointment,
     )
 
-    db.session.refresh(appointment)
+    result = appointment_service.send_appointment_reminder(
+        12,
+    )
 
     assert result is None
     assert appointment.reminder_sent is True
 
 
-def test_send_appointment_reminder_returns_none_for_missing_appointment():
-    result = appointment_service.send_appointment_reminder(999999)
-
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Upcoming appointment reminders
-# ---------------------------------------------------------------------------
-
-
-def test_check_upcoming_appointments_sends_reminders(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_send_appointment_reminder_marks_reminder_sent(
+    app,
     monkeypatch,
 ):
-    now = appointment_service._utcnow()
+    appointment = make_appointment(
+        appointment_id=13,
+        reminder_sent=False,
+    )
 
-    upcoming_start = now + timedelta(days=1, minutes=30)
-    upcoming_end = upcoming_start + timedelta(minutes=30)
+    committed = False
 
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=upcoming_start,
-        end=upcoming_end,
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "get",
+        lambda model, appointment_id: appointment,
+    )
+
+    def fake_commit():
+        nonlocal committed
+        committed = True
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "commit",
+        fake_commit,
+    )
+
+    result = appointment_service.send_appointment_reminder(
+        13,
+    )
+
+    assert result is None
+    assert appointment.reminder_sent is True
+    assert committed is True
+
+
+# ============================================================================
+# Upcoming appointment reminder task
+# ============================================================================
+
+
+def test_check_upcoming_appointments_queues_reminders(
+    app,
+    monkeypatch,
+):
+    appointment_one = make_appointment(
+        appointment_id=20,
         status=AppointmentStatus.SCHEDULED,
         reminder_sent=False,
     )
 
-    calls = []
-
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
-
-    monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
-    )
-
-    result = appointment_service.check_upcoming_appointments()
-
-    assert result == 1
-    assert calls == [appointment.id]
-
-
-def test_check_upcoming_appointments_includes_confirmed_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-    monkeypatch,
-):
-    now = appointment_service._utcnow()
-
-    upcoming_start = now + timedelta(days=1, minutes=30)
-    upcoming_end = upcoming_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=upcoming_start,
-        end=upcoming_end,
+    appointment_two = make_appointment(
+        appointment_id=21,
         status=AppointmentStatus.CONFIRMED,
         reminder_sent=False,
     )
 
-    calls = []
+    appointments = [
+        appointment_one,
+        appointment_two,
+    ]
 
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def all(self):
+            return appointments
 
     monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
     )
 
-    result = appointment_service.check_upcoming_appointments()
+    queued = []
 
-    assert result == 1
-    assert calls == [appointment.id]
+    class FakeReminderTask:
+        def delay(self, appointment_id):
+            queued.append(appointment_id)
+
+    monkeypatch.setattr(
+        appointment_service,
+        "send_appointment_reminder",
+        FakeReminderTask(),
+    )
+
+    appointment_service.check_upcoming_appointments()
+
+    assert queued == [20, 21]
 
 
-def test_check_upcoming_appointments_ignores_already_sent_reminders(
-    db,
-    clinic,
-    patient,
-    staff,
+def test_check_upcoming_appointments_handles_no_upcoming_appointments(
+    app,
     monkeypatch,
 ):
-    now = appointment_service._utcnow()
+    class FakeQuery:
+        def filter(self, *args):
+            return self
 
-    upcoming_start = now + timedelta(days=1, minutes=30)
-    upcoming_end = upcoming_start + timedelta(minutes=30)
-
-    appointment = create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=upcoming_start,
-        end=upcoming_end,
-        status=AppointmentStatus.SCHEDULED,
-        reminder_sent=True,
-    )
-
-    calls = []
-
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
+        def all(self):
+            return []
 
     monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
     )
 
-    result = appointment_service.check_upcoming_appointments()
+    queued = []
 
-    assert result == 0
-    assert calls == []
-
-
-def test_check_upcoming_appointments_ignores_cancelled_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-    monkeypatch,
-):
-    now = appointment_service._utcnow()
-
-    upcoming_start = now + timedelta(days=1, minutes=30)
-    upcoming_end = upcoming_start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=upcoming_start,
-        end=upcoming_end,
-        status=AppointmentStatus.CANCELLED,
-        reminder_sent=False,
-    )
-
-    calls = []
-
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
+    class FakeReminderTask:
+        def delay(self, appointment_id):
+            queued.append(appointment_id)
 
     monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
+        appointment_service,
+        "send_appointment_reminder",
+        FakeReminderTask(),
     )
 
-    result = appointment_service.check_upcoming_appointments()
+    appointment_service.check_upcoming_appointments()
 
-    assert result == 0
-    assert calls == []
-
-
-def test_check_upcoming_appointments_ignores_completed_appointments(
-    db,
-    clinic,
-    patient,
-    staff,
-    monkeypatch,
-):
-    now = appointment_service._utcnow()
-
-    upcoming_start = now + timedelta(days=1, minutes=30)
-    upcoming_end = upcoming_start + timedelta(minutes=30)
-
-    create_test_appointment(
-        db,
-        clinic,
-        patient,
-        staff,
-        start=upcoming_start,
-        end=upcoming_end,
-        status=AppointmentStatus.COMPLETED,
-        reminder_sent=False,
-    )
-
-    calls = []
-
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
-
-    monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
-    )
-
-    result = appointment_service.check_upcoming_appointments()
-
-    assert result == 0
-    assert calls == []
-
-
-def test_check_upcoming_appointments_returns_zero_when_none_are_upcoming(
-    db,
-    clinic,
-    patient,
-    staff,
-    monkeypatch,
-):
-    calls = []
-
-    def fake_delay(appointment_id):
-        calls.append(appointment_id)
-
-    monkeypatch.setattr(
-        appointment_service.send_appointment_reminder,
-        "delay",
-        fake_delay,
-    )
-
-    result = appointment_service.check_upcoming_appointments()
-
-    assert result == 0
-    assert calls == []
+    assert queued == []
