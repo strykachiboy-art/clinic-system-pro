@@ -251,6 +251,16 @@ class Clinic(db.Model):
         "AmbulanceTrip",
         back_populates="clinic",
     )
+    
+    messages = db.relationship(
+        "Message",
+         back_populates="clinic",
+    )
+
+    notifications = db.relationship(
+        "Notification",
+         back_populates="clinic",
+    )
 
     def __repr__(self):
         return (

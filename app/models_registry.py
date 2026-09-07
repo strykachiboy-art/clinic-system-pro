@@ -53,3 +53,9 @@ from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle, Ambul
 
 # HIE (Health Information Exchange)
 from app.modules.hie.models.hie_model import HIEIntegration, HIESubmission
+
+# Messages
+from app.modules.messages.models.message_model import Message
+
+# Notifications
+from app.core.notifications.models.notification_models import Notification

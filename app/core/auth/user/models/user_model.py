@@ -87,6 +87,24 @@ class User(db.Model):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    
+    sent_messages = db.relationship(
+        "Message",
+         foreign_keys="Message.sender_id",
+         back_populates="sender",
+    )
+
+    received_messages = db.relationship(
+       "Message",
+        foreign_keys="Message.recipient_id",
+        back_populates="recipient",
+    )
+
+    notifications = db.relationship(
+       "Notification",
+        back_populates="user",
+        cascade="all, delete",
+   )
 
     def set_password(self, raw_password: str) -> None:
         if not raw_password:

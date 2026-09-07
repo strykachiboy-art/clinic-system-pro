@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.core.enums.message_enums import (
-    MessagePriority,
-    MessageStatus,
-    MessageType,
+from app.core.enums.notification_enums import (
+    NotificationChannel,
+    NotificationPriority,
+    NotificationStatus,
+    NotificationType,
 )
 from app.extensions import db
 
@@ -17,8 +18,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Message(db.Model):
-    __tablename__ = "messages"
+class Notification(db.Model):
+    __tablename__ = "notifications"
 
     id = db.Column(
         db.Integer,
@@ -37,17 +38,10 @@ class Message(db.Model):
     )
 
     # ==================================================================
-    # PARTICIPANTS
+    # RECIPIENT
     # ==================================================================
 
-    sender_id = db.Column(
-        db.Integer,
-        db.ForeignKey("users.id"),
-        nullable=False,
-        index=True,
-    )
-
-    recipient_id = db.Column(
+    user_id = db.Column(
         db.Integer,
         db.ForeignKey("users.id"),
         nullable=False,
@@ -55,15 +49,15 @@ class Message(db.Model):
     )
 
     # ==================================================================
-    # MESSAGE CONTENT
+    # NOTIFICATION CONTENT
     # ==================================================================
 
-    subject = db.Column(
+    title = db.Column(
         db.String(255),
         nullable=False,
     )
 
-    body = db.Column(
+    message = db.Column(
         db.Text,
         nullable=False,
     )
@@ -72,45 +66,57 @@ class Message(db.Model):
     # CLASSIFICATION
     # ==================================================================
 
-    message_type = db.Column(
-        db.Enum(MessageType),
+    notification_type = db.Column(
+        db.Enum(NotificationType),
         nullable=False,
-        default=MessageType.DIRECT,
-        index=True,
-    )
-
-    status = db.Column(
-        db.Enum(MessageStatus),
-        nullable=False,
-        default=MessageStatus.SENT,
         index=True,
     )
 
     priority = db.Column(
-        db.Enum(MessagePriority),
+        db.Enum(NotificationPriority),
         nullable=False,
-        default=MessagePriority.NORMAL,
+        default=NotificationPriority.NORMAL,
+        index=True,
+    )
+
+    channel = db.Column(
+        db.Enum(NotificationChannel),
+        nullable=False,
+        default=NotificationChannel.IN_APP,
+        index=True,
+    )
+
+    status = db.Column(
+        db.Enum(NotificationStatus),
+        nullable=False,
+        default=NotificationStatus.PENDING,
         index=True,
     )
 
     # ==================================================================
-    # THREADING
+    # OPTIONAL SOURCE REFERENCE
     # ==================================================================
 
-    parent_message_id = db.Column(
+    reference_type = db.Column(
+        db.String(50),
+        nullable=True,
+        index=True,
+    )
+
+    reference_id = db.Column(
         db.Integer,
-        db.ForeignKey("messages.id"),
         nullable=True,
         index=True,
     )
 
     # ==================================================================
-    # READ / DELIVERY STATE
+    # READ STATE
     # ==================================================================
 
-    sent_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=True,
+    is_read = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
         index=True,
     )
 
@@ -121,13 +127,36 @@ class Message(db.Model):
     )
 
     # ==================================================================
-    # SOFT DELETE
+    # DELIVERY STATE
     # ==================================================================
 
-    deleted_at = db.Column(
+    sent_at = db.Column(
         db.DateTime(timezone=True),
         nullable=True,
         index=True,
+    )
+
+    delivered_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    failed_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    error_message = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    retry_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
     )
 
     # ==================================================================
@@ -154,33 +183,12 @@ class Message(db.Model):
 
     clinic = db.relationship(
         "Clinic",
-        back_populates="messages",
+        back_populates="notifications",
     )
 
-    sender = db.relationship(
+    user = db.relationship(
         "User",
-        foreign_keys=[sender_id],
-        back_populates="sent_messages",
-    )
-
-    recipient = db.relationship(
-        "User",
-        foreign_keys=[recipient_id],
-        back_populates="received_messages",
-    )
-
-    parent_message = db.relationship(
-        "Message",
-        remote_side=[id],
-        foreign_keys=[parent_message_id],
-        back_populates="replies",
-    )
-
-    replies = db.relationship(
-        "Message",
-        foreign_keys=[parent_message_id],
-        back_populates="parent_message",
-        cascade="all, delete-orphan",
+        back_populates="notifications",
     )
 
     # ==================================================================
@@ -189,10 +197,10 @@ class Message(db.Model):
 
     def __repr__(self) -> str:
         return (
-            f"<Message "
+            f"<Notification "
             f"id={self.id} "
             f"clinic_id={self.clinic_id} "
-            f"sender_id={self.sender_id} "
-            f"recipient_id={self.recipient_id} "
+            f"user_id={self.user_id} "
+            f"type={self.notification_type.value} "
             f"status={self.status.value}>"
         )
