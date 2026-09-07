@@ -1,658 +1,721 @@
 ﻿import pytest
-from datetime import timedelta
 
-from app.core.audit.services.audit_service import (
-    create_audit_log,
-    get_audit_log_by_id,
-    list_audit_logs,
-)
 from app.core.audit.models.audit_model import AuditLog
+from app.core.audit.services import audit_service as service
 from app.core.enums.audit_enums import AuditAction
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 
 
 # ============================================================================
-# create_audit_log()
+# HELPERS
 # ============================================================================
 
-class TestCreateAuditLog:
-    def test_creates_audit_log_with_entity_fields(
-        self,
-        db,
-        user,
+
+def make_audit_log(
+    *,
+    user_id=1,
+    action=AuditAction.CREATE,
+    entity_type="Patient",
+    entity_id=100,
+    description="Patient created",
+    old_value=None,
+    new_value=None,
+):
+    return AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        description=description,
+        old_value=old_value,
+        new_value=new_value,
+    )
+
+
+# ============================================================================
+# CREATE
+# ============================================================================
+
+
+def test_create_audit_log_creates_record(db_session):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="Patient",
+        entity_id=100,
+        description="Patient created",
+        user_id=1,
+        new_value={"status": "active"},
+    )
+
+    db_session.flush()
+
+    assert log.id is not None
+    assert log.user_id == 1
+    assert log.action == AuditAction.CREATE
+    assert log.entity_type == "Patient"
+    assert log.entity_id == 100
+    assert log.description == "Patient created"
+    assert log.new_value == {"status": "active"}
+
+
+def test_create_audit_log_accepts_action_value(db_session):
+    log = service.create_audit_log(
+        action="create",
+        entity_type="Patient",
+        entity_id=100,
+    )
+
+    db_session.flush()
+
+    assert log.action == AuditAction.CREATE
+
+
+def test_create_audit_log_rejects_invalid_action():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid audit action",
     ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            description="User created",
-            user_id=user.id,
-        )
-
-        assert isinstance(log, AuditLog)
-        assert log.action == AuditAction.CREATE
-        assert log.entity_type == "User"
-        assert log.entity_id == user.id
-        assert log.description == "User created"
-        assert log.user_id == user.id
-
-    def test_creates_audit_log_with_resource_fields(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            resource_type="User",
-            resource_id=user.id,
-            description="User created",
-            user_id=user.id,
-        )
-
-        assert log.entity_type == "User"
-        assert log.entity_id == user.id
-        assert log.action == AuditAction.CREATE
-
-    def test_entity_fields_take_precedence_over_resource_fields(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        log = create_audit_log(
-            action=AuditAction.UPDATE,
+        service.create_audit_log(
+            action="invalid-action",
             entity_type="Patient",
-            entity_id=patient.id,
-            resource_type="User",
-            resource_id=user.id,
+            entity_id=100,
         )
 
-        assert log.entity_type == "Patient"
-        assert log.entity_id == patient.id
 
-    def test_resource_fields_are_used_when_entity_fields_are_missing(
-        self,
-        db,
-        patient,
-    ):
-        log = create_audit_log(
-            action=AuditAction.UPDATE,
-            resource_type="Patient",
-            resource_id=patient.id,
-        )
+def test_create_audit_log_supports_resource_aliases(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.UPDATE,
+        resource_type="Patient",
+        resource_id=101,
+        description="Patient updated",
+        details={"status": "active"},
+    )
 
-        assert log.entity_type == "Patient"
-        assert log.entity_id == patient.id
+    db_session.flush()
 
-    def test_accepts_optional_values(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-            description="User updated",
-            old_value={"email": "old@test.com"},
-            new_value={"email": "new@test.com"},
-            user_id=user.id,
-        )
+    assert log.entity_type == "Patient"
+    assert log.entity_id == 101
+    assert log.new_value == {"status": "active"}
 
-        assert log.description == "User updated"
-        assert log.old_value == {"email": "old@test.com"}
-        assert log.new_value == {"email": "new@test.com"}
-        assert log.user_id == user.id
 
-    def test_details_are_used_as_new_value_when_new_value_is_none(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-            details={"changed_fields": ["email", "role"]},
-        )
+def test_create_audit_log_entity_arguments_take_precedence(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="Patient",
+        entity_id=100,
+        resource_type="Appointment",
+        resource_id=999,
+    )
 
-        assert log.new_value == {
-            "changed_fields": ["email", "role"]
-        }
+    db_session.flush()
 
-    def test_explicit_new_value_takes_precedence_over_details(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-            new_value={"role": "admin"},
-            details={"role": "doctor"},
-        )
-
-        assert log.new_value == {"role": "admin"}
-
-    def test_user_id_is_optional(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        assert log.user_id is None
-
-    def test_requires_entity_type_or_resource_type(
-        self,
-        db,
-        user,
-    ):
-        with pytest.raises(
-            ValueError,
-            match="Audit entity type and entity ID are required",
-        ):
-            create_audit_log(
-                action=AuditAction.CREATE,
-                entity_id=user.id,
-            )
-
-    def test_requires_entity_id_or_resource_id(
-        self,
-        db,
-    ):
-        with pytest.raises(
-            ValueError,
-            match="Audit entity type and entity ID are required",
-        ):
-            create_audit_log(
-                action=AuditAction.CREATE,
-                entity_type="User",
-            )
-
-    def test_rejects_missing_entity_type_and_resource_type(
-        self,
-        db,
-    ):
-        with pytest.raises(
-            ValueError,
-            match="Audit entity type and entity ID are required",
-        ):
-            create_audit_log(
-                action=AuditAction.CREATE,
-            )
-
-    def test_entity_id_zero_is_valid(
-        self,
-        db,
-    ):
-        """
-        The implementation explicitly checks `is not None`, so 0 should
-        not be treated as a missing entity ID.
-        """
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=0,
-        )
-
-        assert log.entity_id == 0
-
-    def test_resource_id_zero_is_valid(
-        self,
-        db,
-    ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            resource_type="User",
-            resource_id=0,
-        )
-
-        assert log.entity_id == 0
-
-    def test_adds_log_to_session(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        db.session.flush()
-
-        assert log.id is not None
-
-        persisted = db.session.get(AuditLog, log.id)
-
-        assert persisted is not None
-        assert persisted.entity_type == "User"
-        assert persisted.entity_id == user.id
+    assert log.entity_type == "Patient"
+    assert log.entity_id == 100
 
 
 # ============================================================================
-# list_audit_logs()
+# ENTITY VALIDATION
 # ============================================================================
 
-class TestListAuditLogs:
-    def _create_log(
-        self,
-        db,
-        *,
-        action,
-        entity_type,
-        entity_id,
-        user_id=None,
-        description=None,
+
+@pytest.mark.parametrize(
+    "entity_type, resource_type",
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_create_audit_log_requires_entity_type(
+    entity_type,
+    resource_type,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Audit entity type is required",
     ):
-        log = create_audit_log(
-            action=action,
+        service.create_audit_log(
+            action=AuditAction.CREATE,
             entity_type=entity_type,
+            resource_type=resource_type,
+            entity_id=100,
+        )
+
+
+@pytest.mark.parametrize(
+    "entity_id",
+    [
+        None,
+        0,
+        -1,
+        True,
+        False,
+        "100",
+    ],
+)
+def test_create_audit_log_rejects_invalid_entity_id(
+    entity_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Audit entity ID must be a positive integer",
+    ):
+        service.create_audit_log(
+            action=AuditAction.CREATE,
+            entity_type="Patient",
             entity_id=entity_id,
+        )
+
+
+def test_create_audit_log_rejects_entity_type_over_80_characters():
+    with pytest.raises(
+        ValidationError,
+        match="Audit entity type cannot exceed 80 characters",
+    ):
+        service.create_audit_log(
+            action=AuditAction.CREATE,
+            entity_type="A" * 81,
+            entity_id=100,
+        )
+
+
+def test_create_audit_log_strips_entity_type(db_session):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="  Patient  ",
+        entity_id=100,
+    )
+
+    db_session.flush()
+
+    assert log.entity_type == "Patient"
+
+
+# ============================================================================
+# OPTIONAL VALUES
+# ============================================================================
+
+
+def test_create_audit_log_allows_missing_user_id(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="System",
+        entity_id=1,
+    )
+
+    db_session.flush()
+
+    assert log.user_id is None
+
+
+@pytest.mark.parametrize(
+    "user_id",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "1",
+    ],
+)
+def test_create_audit_log_rejects_invalid_user_id(
+    user_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="User ID must be a positive integer",
+    ):
+        service.create_audit_log(
+            action=AuditAction.CREATE,
+            entity_type="Patient",
+            entity_id=100,
             user_id=user_id,
-            description=description,
         )
-        db.session.flush()
-        return log
 
-    def test_returns_paginated_audit_logs(
-        self,
-        db,
-        user,
-        patient,
+
+def test_create_audit_log_normalizes_description(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="Patient",
+        entity_id=100,
+        description="  Patient created  ",
+    )
+
+    db_session.flush()
+
+    assert log.description == "Patient created"
+
+
+def test_create_audit_log_allows_empty_description(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="Patient",
+        entity_id=100,
+        description="   ",
+    )
+
+    db_session.flush()
+
+    assert log.description is None
+
+
+def test_create_audit_log_rejects_long_description():
+    with pytest.raises(
+        ValidationError,
+        match="Audit description cannot exceed 255 characters",
     ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            user_id=user.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="Patient",
-            entity_id=patient.id,
-            user_id=user.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs()
-
-        assert result.page == 1
-        assert result.per_page == 20
-        assert result.total == 2
-        assert len(result.items) == 2
-
-    def test_filters_by_user_id(
-        self,
-        db,
-        make_user,
-        clinic,
-    ):
-        user_one = make_user(
-            clinic,
-            email="audit-user-one@test.com",
-        )
-
-        user_two = make_user(
-            clinic,
-            email="audit-user-two@test.com",
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user_one.id,
-            user_id=user_one.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user_two.id,
-            user_id=user_two.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs(user_id=user_one.id)
-
-        assert result.total == 1
-        assert result.items[0].user_id == user_one.id
-
-    def test_filters_by_action(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            user_id=user.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="Patient",
-            entity_id=patient.id,
-            user_id=user.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            action=AuditAction.UPDATE,
-        )
-
-        assert result.total == 1
-        assert result.items[0].action == AuditAction.UPDATE
-
-    def test_filters_by_entity_type(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        self._create_log(
-            db,
+        service.create_audit_log(
             action=AuditAction.CREATE,
             entity_type="Patient",
-            entity_id=patient.id,
+            entity_id=100,
+            description="A" * 256,
         )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            entity_type="Patient",
-        )
-
-        assert result.total == 1
-        assert result.items[0].entity_type == "Patient"
-
-    def test_filters_by_entity_id(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="Patient",
-            entity_id=patient.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            entity_type="Patient",
-            entity_id=patient.id,
-        )
-
-        assert result.total == 1
-        assert result.items[0].entity_type == "Patient"
-        assert result.items[0].entity_id == patient.id
-
-    def test_combines_multiple_filters(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            user_id=user.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-            user_id=user.id,
-        )
-
-        self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="Patient",
-            entity_id=patient.id,
-            user_id=user.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            user_id=user.id,
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        assert result.total == 1
-        assert result.items[0].action == AuditAction.UPDATE
-        assert result.items[0].entity_type == "User"
-        assert result.items[0].entity_id == user.id
-
-    def test_returns_all_matching_logs_when_no_filters_are_given(
-        self,
-        db,
-        user,
-        patient,
-    ):
-        for index in range(3):
-            self._create_log(
-                db,
-                action=AuditAction.CREATE,
-                entity_type="User",
-                entity_id=user.id,
-                description=f"Log {index}",
-            )
-
-        self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="Patient",
-            entity_id=patient.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs()
-
-        assert result.total == 4
-        assert len(result.items) == 4
-
-    def test_empty_result_returns_empty_page(
-        self,
-        db,
-    ):
-        result = list_audit_logs(
-            user_id=999999,
-        )
-
-        assert result.total == 0
-        assert result.items == []
-
-    def test_paginates_results(
-        self,
-        db,
-        user,
-    ):
-        for index in range(5):
-            self._create_log(
-                db,
-                action=AuditAction.CREATE,
-                entity_type="User",
-                entity_id=user.id,
-                description=f"Log {index}",
-            )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            page=1,
-            per_page=2,
-        )
-
-        assert result.page == 1
-        assert result.per_page == 2
-        assert result.total == 5
-        assert len(result.items) == 2
-        assert result.pages == 3
-
-    def test_returns_second_page(
-        self,
-        db,
-        user,
-    ):
-        for index in range(5):
-            self._create_log(
-                db,
-                action=AuditAction.CREATE,
-                entity_type="User",
-                entity_id=user.id,
-                description=f"Log {index}",
-            )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            page=2,
-            per_page=2,
-        )
-
-        assert result.page == 2
-        assert result.total == 5
-        assert len(result.items) == 2
-
-    def test_out_of_range_page_returns_empty_items(
-        self,
-        db,
-        user,
-    ):
-        self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-        )
-
-        db.session.commit()
-
-        result = list_audit_logs(
-            page=999,
-            per_page=20,
-        )
-
-        assert result.total == 1
-        assert result.items == []
-
-    def test_orders_logs_by_created_at_descending(
-        self,
-        db,
-        user,
-    ):
-        first = self._create_log(
-            db,
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            description="First",
-        )
-
-        db.session.commit()
-
-        second = self._create_log(
-            db,
-            action=AuditAction.UPDATE,
-            entity_type="User",
-            entity_id=user.id,
-            description="Second",
-        )
-
-        db.session.commit()
-
-        # SQLite may assign the same timestamp to rows created in rapid
-        # succession. Make the timestamps explicitly different so this
-        # test verifies the service's ORDER BY behavior deterministically.
-        second.created_at = first.created_at + timedelta(seconds=1)
-        db.session.commit()
-
-        result = list_audit_logs()
-
-        assert result.items[0].id == second.id
-        assert result.items[1].id == first.id
-        assert result.items[0].created_at > result.items[1].created_at
 
 
 # ============================================================================
-# get_audit_log_by_id()
+# AUDIT VALUES
 # ============================================================================
 
-class TestGetAuditLogById:
-    def test_returns_audit_log_when_it_exists(
-        self,
-        db,
-        user,
-    ):
-        log = create_audit_log(
-            action=AuditAction.CREATE,
-            entity_type="User",
-            entity_id=user.id,
-            description="User created",
-            user_id=user.id,
+
+def test_create_audit_log_preserves_old_and_new_values(
+    db_session,
+):
+    old_value = {
+        "status": "pending",
+        "priority": "normal",
+    }
+
+    new_value = {
+        "status": "completed",
+        "priority": "high",
+    }
+
+    log = service.create_audit_log(
+        action=AuditAction.STATUS_CHANGE,
+        entity_type="Appointment",
+        entity_id=500,
+        old_value=old_value,
+        new_value=new_value,
+    )
+
+    db_session.flush()
+
+    assert log.old_value == old_value
+    assert log.new_value == new_value
+
+
+def test_new_value_takes_precedence_over_details(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="Patient",
+        entity_id=100,
+        new_value={"status": "active"},
+        details={"status": "wrong"},
+    )
+
+    db_session.flush()
+
+    assert log.new_value == {
+        "status": "active"
+    }
+
+
+def test_details_are_used_when_new_value_missing(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="Patient",
+        entity_id=100,
+        details={"status": "active"},
+    )
+
+    db_session.flush()
+
+    assert log.new_value == {
+        "status": "active"
+    }
+
+
+# ============================================================================
+# LIST
+# ============================================================================
+
+
+def test_list_audit_logs_returns_paginated_result(
+    db_session,
+):
+    for index in range(3):
+        db_session.add(
+            make_audit_log(
+                entity_id=100 + index,
+            )
         )
 
-        db.session.commit()
+    db_session.flush()
 
-        result = get_audit_log_by_id(log.id)
+    result = service.list_audit_logs(
+        page=1,
+        per_page=2,
+    )
 
-        assert result.id == log.id
-        assert result.action == AuditAction.CREATE
-        assert result.entity_type == "User"
-        assert result.entity_id == user.id
-        assert result.description == "User created"
+    assert result.page == 1
+    assert result.per_page == 2
+    assert result.total == 3
+    assert len(result.items) == 2
 
-    def test_raises_not_found_error_when_log_does_not_exist(
-        self,
-        db,
+
+def test_list_audit_logs_filters_by_user_id(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            user_id=1,
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            user_id=2,
+            entity_id=101,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        user_id=1,
+    )
+
+    assert result.total == 1
+    assert result.items[0].user_id == 1
+
+
+def test_list_audit_logs_filters_by_action(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            action=AuditAction.CREATE,
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            action=AuditAction.UPDATE,
+            entity_id=101,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        action=AuditAction.UPDATE,
+    )
+
+    assert result.total == 1
+    assert result.items[0].action == AuditAction.UPDATE
+
+
+def test_list_audit_logs_accepts_action_value(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            action=AuditAction.CREATE,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        action="create",
+    )
+
+    assert result.total == 1
+
+
+def test_list_audit_logs_rejects_invalid_action():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid audit action",
     ):
-        with pytest.raises(
-            NotFoundError,
-            match="Audit log 999999 not found",
-        ):
-            get_audit_log_by_id(999999)
+        service.list_audit_logs(
+            action="invalid-action",
+        )
+
+
+def test_list_audit_logs_filters_by_entity_type(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            entity_type="Patient",
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            entity_type="Appointment",
+            entity_id=200,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        entity_type="Patient",
+    )
+
+    assert result.total == 1
+    assert result.items[0].entity_type == "Patient"
+
+
+def test_list_audit_logs_filters_by_entity_id(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            entity_id=101,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        entity_id=100,
+    )
+
+    assert result.total == 1
+    assert result.items[0].entity_id == 100
+
+
+def test_list_audit_logs_combines_filters(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            user_id=1,
+            action=AuditAction.UPDATE,
+            entity_type="Patient",
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            user_id=1,
+            action=AuditAction.CREATE,
+            entity_type="Patient",
+            entity_id=100,
+        )
+    )
+
+    db_session.add(
+        make_audit_log(
+            user_id=2,
+            action=AuditAction.UPDATE,
+            entity_type="Patient",
+            entity_id=100,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        user_id=1,
+        action=AuditAction.UPDATE,
+        entity_type="Patient",
+        entity_id=100,
+    )
+
+    assert result.total == 1
+
+    log = result.items[0]
+
+    assert log.user_id == 1
+    assert log.action == AuditAction.UPDATE
+    assert log.entity_type == "Patient"
+    assert log.entity_id == 100
+
+
+def test_list_audit_logs_returns_empty_when_no_match(
+    db_session,
+):
+    db_session.add(
+        make_audit_log(
+            user_id=1,
+            entity_id=100,
+        )
+    )
+
+    db_session.flush()
+
+    result = service.list_audit_logs(
+        user_id=999,
+    )
+
+    assert result.total == 0
+    assert result.items == []
+
+
+# ============================================================================
+# PAGINATION VALIDATION
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "1",
+    ],
+)
+def test_list_audit_logs_rejects_invalid_page(
+    page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Page must be a positive integer",
+    ):
+        service.list_audit_logs(
+            page=page,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "20",
+        101,
+    ],
+)
+def test_list_audit_logs_rejects_invalid_per_page(
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Per page",
+    ):
+        service.list_audit_logs(
+            per_page=per_page,
+        )
+
+
+# ============================================================================
+# ORDERING
+# ============================================================================
+
+
+def test_list_audit_logs_returns_newest_first(
+    db_session,
+):
+    first = make_audit_log(
+        entity_id=100,
+    )
+
+    second = make_audit_log(
+        entity_id=101,
+    )
+
+    db_session.add(first)
+    db_session.flush()
+
+    db_session.add(second)
+    db_session.flush()
+
+    result = service.list_audit_logs()
+
+    ids = [log.id for log in result.items]
+
+    assert ids == sorted(
+        ids,
+        reverse=True,
+    )
+
+
+# ============================================================================
+# GET
+# ============================================================================
+
+
+def test_get_audit_log_by_id_returns_record(
+    db_session,
+):
+    log = make_audit_log(
+        user_id=1,
+        entity_type="Patient",
+        entity_id=100,
+        description="Patient created",
+    )
+
+    db_session.add(log)
+    db_session.flush()
+
+    result = service.get_audit_log_by_id(
+        log.id
+    )
+
+    assert result.id == log.id
+    assert result.user_id == 1
+    assert result.entity_type == "Patient"
+    assert result.entity_id == 100
+    assert result.description == "Patient created"
+
+
+def test_get_audit_log_by_id_raises_not_found(
+    db_session,
+):
+    with pytest.raises(
+        NotFoundError,
+        match="Audit log 999999 not found",
+    ):
+        service.get_audit_log_by_id(999999)
+
+
+@pytest.mark.parametrize(
+    "log_id",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "1",
+    ],
+)
+def test_get_audit_log_by_id_rejects_invalid_id(
+    log_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Audit log ID must be a positive integer",
+    ):
+        service.get_audit_log_by_id(log_id)

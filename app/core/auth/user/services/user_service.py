@@ -13,9 +13,20 @@ from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
 from app.core.auth.user.models.user_model import User
 
+def _validate_positive_id(value, field_name: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value <= 0
+    ):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
 
 def get_user(user_id: int) -> User:
-    user = User.query.get(user_id)
+    _validate_positive_id(user_id, "User ID")
+
+    user = db.session.get(User, user_id)
 
     if user is None:
         raise ValidationError(f"User {user_id} not found")

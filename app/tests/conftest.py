@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
+
 import pytest
 from flask_jwt_extended import create_access_token
 
@@ -6,63 +10,114 @@ from app.extensions import db as _db
 
 
 # ============================================================================
-# APP / DB / CLIENT
+# APP / DATABASE / CLIENT
 # ============================================================================
 
-@pytest.fixture()
+
+@pytest.fixture(scope="function")
 def app():
+    """
+    Create an isolated Flask application and database for every test.
+
+    The project's existing testing configuration is used rather than
+    rebuilding application configuration inside the test suite.
+    """
+
     flask_app = create_app("testing")
 
     with flask_app.app_context():
         _db.create_all()
 
-        yield flask_app
-
-        _db.session.remove()
-        _db.drop_all()
-
-
-@pytest.fixture(autouse=True)
-def app_context(app):
-    yield
+        try:
+            yield flask_app
+        finally:
+            _db.session.rollback()
+            _db.session.remove()
+            _db.drop_all()
 
 
-@pytest.fixture()
-def client(app):
-    return app.test_client()
-
-
-@pytest.fixture()
+@pytest.fixture(scope="function")
 def db(app):
+    """Return the application's SQLAlchemy extension."""
     return _db
 
 
+@pytest.fixture(scope="function")
+def db_session(app, db):
+    """
+    Return the active SQLAlchemy session.
+
+    Prefer this fixture in service tests:
+
+        db_session.add(...)
+        db_session.flush()
+
+    rather than importing the global db object directly.
+    """
+    return db.session
+
+
+@pytest.fixture(scope="function")
+def client(app):
+    """Flask test client."""
+    return app.test_client()
+
+
 # ============================================================================
-# AUTH HELPERS
+# AUTHENTICATION
 # ============================================================================
+
 
 @pytest.fixture()
 def auth_headers_for(app):
     """
-    Factory: auth_headers_for(user, role=None) -> {"Authorization": "Bearer ..."}
+    Factory:
 
-    Builds a JWT for `user` with a "role" claim (defaults to
-    user.role) — this is the claim role_required() checks. Pass an
-    explicit `role=` to deliberately mismatch it against the user's
-    real Staff/User role, e.g. to test that role_required rejects a
-    token whose claim doesn't match what the route allows.
+        auth_headers_for(user)
+        auth_headers_for(user, role=Role.ADMIN)
+
+    Returns:
+
+        {
+            "Authorization": "Bearer <jwt>"
+        }
+
+    The JWT contains the role claim expected by role_required().
     """
 
     def _make(user, role=None):
-        claim_role = role.value if role is not None else user.role.value
+        claim_role = role if role is not None else user.role
+
+        if hasattr(claim_role, "value"):
+            claim_role = claim_role.value
 
         with app.test_request_context():
             token = create_access_token(
                 identity=str(user.id),
-                additional_claims={"role": claim_role},
+                additional_claims={
+                    "role": claim_role,
+                },
             )
 
-        return {"Authorization": f"Bearer {token}"}
+        return {
+            "Authorization": f"Bearer {token}",
+        }
+
+    return _make
+
+
+@pytest.fixture()
+def make_auth_headers(auth_headers_for):
+    """
+    Backward-compatible helper.
+
+    Usage:
+
+        headers = make_auth_headers(auth_headers_for, user)
+    """
+
+    def _make(user, role=None):
+        return auth_headers_for(user, role=role)
 
     return _make
 
@@ -71,110 +126,152 @@ def auth_headers_for(app):
 # CLINIC
 # ============================================================================
 
+
 @pytest.fixture()
 def make_clinic(db):
-    """Factory: make_clinic(**overrides) -> Clinic (defaults to ACTIVE)."""
+    """
+    Factory:
+
+        make_clinic(**overrides) -> Clinic
+
+    Creates and flushes a Clinic.
+    """
+
     from app.modules.clinic.models.clinic_model import Clinic
 
-    created = []
+    counter = {"n": 0}
 
     def _make(**overrides):
-        overrides.setdefault("name", "Test Clinic")
-        overrides.setdefault("ai_credits", 5)
-        c = Clinic(**overrides)
-        db.session.add(c)
-        db.session.commit()
-        created.append(c)
-        return c
+        counter["n"] += 1
+
+        overrides.setdefault(
+            "name",
+            f"Test Clinic {counter['n']}",
+        )
+        overrides.setdefault(
+            "ai_credits",
+            5,
+        )
+
+        clinic = Clinic(**overrides)
+
+        db.session.add(clinic)
+        db.session.flush()
+
+        return clinic
 
     return _make
 
 
 @pytest.fixture()
 def clinic(make_clinic):
-    """A single active clinic — the default most tests need."""
+    """Default active clinic."""
     return make_clinic()
 
 
 @pytest.fixture()
 def suspended_clinic(make_clinic):
-    """
-    A clinic with status=SUSPENDED. Use this to exercise the
-    ensure_clinic_active() guard that most write-path service
-    functions call before doing anything — this is the one clean way
-    to hit that branch without hand-rolling a Clinic in every test
-    that needs it.
-    """
+    """Clinic in SUSPENDED state."""
     from app.core.enums.clinic_enums import ClinicStatus
 
-    return make_clinic(name="Suspended Clinic", status=ClinicStatus.SUSPENDED)
+    return make_clinic(
+        name="Suspended Clinic",
+        status=ClinicStatus.SUSPENDED,
+    )
 
 
 # ============================================================================
 # USER
 # ============================================================================
 
+
 @pytest.fixture()
 def make_user(db):
-    """Factory: make_user(clinic, role=Role.ADMIN, **overrides) -> User."""
+    """
+    Factory:
+
+        make_user(
+            clinic,
+            role=Role.ADMIN,
+            is_active=True,
+            password="supersecret",
+            **overrides,
+        ) -> User
+    """
+
     from app.core.auth.user.models.user_model import User
     from app.core.enums.role_enums import Role
 
     counter = {"n": 0}
 
-    def _make(clinic, role=Role.ADMIN, is_active=True, password="supersecret", **overrides):
+    def _make(
+        clinic=None,
+        role=Role.ADMIN,
+        is_active=True,
+        password="supersecret",
+        **overrides,
+    ):
         counter["n"] += 1
-        overrides.setdefault("email", f"user{counter['n']}@test.com")
 
-        u = User(
-            clinic_id=clinic.id,
+        overrides.setdefault(
+            "email",
+            f"user{counter['n']}@test.com",
+        )
+
+        user = User(
+            clinic_id=clinic.id if clinic is not None else None,
             role=role,
             is_active=is_active,
             **overrides,
         )
-        u.set_password(password)
-        db.session.add(u)
-        db.session.commit()
-        return u
+
+        user.set_password(password)
+
+        db.session.add(user)
+        db.session.flush()
+
+        return user
 
     return _make
 
 
 @pytest.fixture()
 def user(make_user, clinic):
-    """A single ADMIN user tied to `clinic` — kept for existing tests."""
+    """Default active ADMIN user."""
     from app.core.enums.role_enums import Role
 
-    return make_user(clinic, role=Role.ADMIN, email="admin@test.com")
+    return make_user(
+        clinic,
+        role=Role.ADMIN,
+        email="admin@test.com",
+    )
 
 
 # ============================================================================
 # STAFF
 # ============================================================================
 
+
 @pytest.fixture()
 def make_staff(db, make_user):
     """
-    Factory: make_staff(clinic, role=Role.ADMIN, status=StaffStatus.ACTIVE,
-                         first_name=..., last_name=..., **overrides) -> Staff
+    Factory:
 
-    Creates a matching User + Staff pair in one call. This is
-    deliberately the one place that sets up both rows together,
-    because several services validate *both*:
+        make_staff(
+            clinic,
+            role=Role.ADMIN,
+            status=StaffStatus.ACTIVE,
+            **overrides,
+        ) -> Staff
 
-        staff.status == ACTIVE
-        staff.user.is_active == True
-        staff.user.role in <allowed roles for that operation>
-
-    (see e.g. _validate_staff_for_pharmacy in pharmacy_service.py —
-    the same shape repeats in inventory, lab, ward, reports, staff
-    services). Building a Staff without a properly-active linked User
-    is a common way to get a confusing 422 instead of testing what
-    you meant to test.
+    Creates both User and Staff.
     """
+
     from app.core.enums.role_enums import Role
     from app.core.enums.staff_enums import StaffStatus
     from app.modules.staff.models.staff_model import Staff
+
+    counter = {"n": 0}
 
     def _make(
         clinic,
@@ -183,9 +280,19 @@ def make_staff(db, make_user):
         first_name="Test",
         last_name="Staff",
         user_is_active=True,
+        user_overrides=None,
         **overrides,
     ):
-        linked_user = make_user(clinic, role=role, is_active=user_is_active)
+        counter["n"] += 1
+
+        user_overrides = dict(user_overrides or {})
+
+        linked_user = make_user(
+            clinic,
+            role=role,
+            is_active=user_is_active,
+            **user_overrides,
+        )
 
         staff = Staff(
             clinic_id=clinic.id,
@@ -195,8 +302,10 @@ def make_staff(db, make_user):
             status=status,
             **overrides,
         )
+
         db.session.add(staff)
-        db.session.commit()
+        db.session.flush()
+
         return staff
 
     return _make
@@ -204,23 +313,33 @@ def make_staff(db, make_user):
 
 @pytest.fixture()
 def staff(make_staff, clinic):
-    """A single ACTIVE, ADMIN-role staff member tied to `clinic`."""
+    """Default active ADMIN staff member."""
     return make_staff(clinic)
 
 
 @pytest.fixture()
-def make_authenticated_staff(make_staff, auth_headers_for):
+def make_authenticated_staff(
+    make_staff,
+    auth_headers_for,
+):
     """
-    Factory: make_authenticated_staff(clinic, role) -> (staff, headers)
+    Factory returning:
 
-    The shortcut most module tests actually want: one call gets you a
-    Staff row with the right role AND a bearer token whose "role"
-    claim matches it, ready to pass straight to client.post(...).
+        (staff, headers)
     """
 
     def _make(clinic, role, **overrides):
-        staff_obj = make_staff(clinic, role=role, **overrides)
-        headers = auth_headers_for(staff_obj.user, role=role)
+        staff_obj = make_staff(
+            clinic,
+            role=role,
+            **overrides,
+        )
+
+        headers = auth_headers_for(
+            staff_obj.user,
+            role=role,
+        )
+
         return staff_obj, headers
 
     return _make
@@ -230,154 +349,67 @@ def make_authenticated_staff(make_staff, auth_headers_for):
 # PATIENT
 # ============================================================================
 
+
 @pytest.fixture()
 def make_patient(db):
     """
-    Factory: make_patient(clinic, **overrides) -> Patient
+    Factory:
 
-    Sets patient_number directly rather than going through
-    create_patient() in patient_service.py (which auto-generates it
-    via generate_tracking_code) — fine for a raw fixture, but if a
-    test is specifically exercising patient creation/number
-    generation, call the service function instead of this fixture.
+        make_patient(clinic, **overrides) -> Patient
+
+    This creates the model directly.
+
+    Tests specifically covering patient-number generation should use
+    patient_service.create_patient() instead.
     """
+
     from app.modules.patient.models.patient_model import Patient
 
     counter = {"n": 0}
 
     def _make(clinic, **overrides):
         counter["n"] += 1
-        overrides.setdefault("first_name", "Jane")
-        overrides.setdefault("last_name", "Doe")
-        overrides.setdefault("patient_number", f"MRN-{counter['n']}")
 
-        p = Patient(clinic_id=clinic.id, **overrides)
-        db.session.add(p)
-        db.session.commit()
-        return p
+        overrides.setdefault(
+            "first_name",
+            "Jane",
+        )
+        overrides.setdefault(
+            "last_name",
+            "Doe",
+        )
+        overrides.setdefault(
+            "patient_number",
+            f"MRN-{counter['n']}",
+        )
+
+        patient = Patient(
+            clinic_id=clinic.id,
+            **overrides,
+        )
+
+        db.session.add(patient)
+        db.session.flush()
+
+        return patient
 
     return _make
 
 
 @pytest.fixture()
 def patient(make_patient, clinic):
+    """Default patient."""
     return make_patient(clinic)
 
 
 # ============================================================================
-# AI PROVIDER (for AI-module tests only)
+# APPOINTMENT
 # ============================================================================
 
-@pytest.fixture()
-def mock_ai_provider(monkeypatch):
-    """
-    Patches ai_service._call_openai so AI routes don't hit the real
-    OpenAI API in tests. Returns a small controller:
-
-        mock_ai_provider.set_response({"risk_score": "low"})
-        # ... hit the route ...
-        assert mock_ai_provider.last_call["feature"] == AIFeature.TRIAGE_ASSISTANT
-
-    Service-level tests that call assist_triage()/check_drug_interactions()
-    directly don't need this — pass `provider=` to those functions
-    instead, since that param exists precisely for this.
-    """
-    import app.modules.ai.services.ai_service as ai_service
-
-    state = {"response": {}, "last_call": None}
-
-    def _fake_call_openai(feature, payload):
-        state["last_call"] = {"feature": feature, "payload": payload}
-        return state["response"]
-
-    monkeypatch.setattr(ai_service, "_call_openai", _fake_call_openai)
-
-    class _Controller:
-        def set_response(self, value):
-            state["response"] = value
-
-        @property
-        def last_call(self):
-            return state["last_call"]
-
-    return _Controller()
-
-
-# ============================================================================
-# RESPONSE ASSERTION HELPERS
-# ============================================================================
-#
-# The app does not have one error response shape — it has three,
-# depending on where a request gets rejected. Verified against the
-# real routes (not assumed from error_handlers.py alone):
-#
-#   1. Business-logic errors (NotFoundError, ValidationError,
-#      ConflictError, InsufficientCreditsError — raised from service
-#      functions) -> {"success": False, "error": "...", "details": [...]?}
-#      via app/core/error_handlers.py. This is the shape you'll hit
-#      constantly in module tests (bad input, missing entity, etc).
-#
-#   2. role_required() rejecting a wrong/insufficient role
-#      -> {"error": "Insufficient permissions"}, no "success" key at
-#      all. Set directly in app/core/utils/decorators.py, bypassing
-#      error_handlers.py entirely.
-#
-#   3. Missing/invalid/expired JWT (flask-jwt-extended itself, before
-#      your view function even runs) -> {"msg": "..."}. Different key
-#      name, no "success", no "error". This is flask-jwt-extended's
-#      own default error handler, registered separately from the
-#      app's error_handlers.py.
-#
-# Using the wrong helper against the wrong failure mode is a
-# guaranteed silent-KeyError trap, so there are three helpers, not one.
-
-@pytest.fixture()
-def assert_domain_error():
-    """
-    assert_domain_error(response, status_code) -> parsed body
-
-    For errors raised from service-layer code (NotFoundError=404,
-    ValidationError=422, ConflictError=409, InsufficientCreditsError=402).
-    """
-
-    def _assert(response, status_code):
-        assert response.status_code == status_code, response.get_json()
-        body = response.get_json()
-        assert body["success"] is False
-        assert "error" in body
-        return body
-
-    return _assert
-
-
-@pytest.fixture()
-def assert_forbidden():
-    """assert_forbidden(response) -> parsed body, for role_required()'s 403."""
-
-    def _assert(response):
-        assert response.status_code == 403, response.get_json()
-        body = response.get_json()
-        assert body["error"] == "Insufficient permissions"
-        return body
-
-    return _assert
-
-
-@pytest.fixture()
-def assert_unauthorized():
-    """assert_unauthorized(response) -> parsed body, for missing/invalid JWTs."""
-
-    def _assert(response):
-        assert response.status_code in (401, 422), response.get_json()
-        body = response.get_json()
-        assert "msg" in body
-        return body
-
-    return _assert
 
 @pytest.fixture()
 def make_appointment(db):
-    from datetime import datetime, timedelta, timezone
+    """Factory for Appointment."""
 
     from app.core.enums.appointment_enums import (
         AppointmentStatus,
@@ -400,12 +432,16 @@ def make_appointment(db):
         counter["n"] += 1
 
         if scheduled_start is None:
-            scheduled_start = datetime.now(timezone.utc) + timedelta(
-                days=counter["n"]
+            scheduled_start = (
+                datetime.now(timezone.utc)
+                + timedelta(days=counter["n"])
             )
 
         if scheduled_end is None:
-            scheduled_end = scheduled_start + timedelta(hours=1)
+            scheduled_end = (
+                scheduled_start
+                + timedelta(hours=1)
+            )
 
         appointment = Appointment(
             clinic_id=clinic.id,
@@ -419,15 +455,22 @@ def make_appointment(db):
         )
 
         db.session.add(appointment)
-        db.session.commit()
+        db.session.flush()
 
         return appointment
 
     return _make
 
 
+# ============================================================================
+# CONSULTATION
+# ============================================================================
+
+
 @pytest.fixture()
 def make_consultation(db):
+    """Factory for Consultation."""
+
     from app.core.enums.consultation_enums import (
         ConsultationStatus,
         ConsultationType,
@@ -448,15 +491,23 @@ def make_consultation(db):
             clinic_id=clinic.id,
             patient_id=patient.id,
             staff_id=staff.id,
-            appointment_id=appointment.id if appointment else None,
+            appointment_id=(
+                appointment.id
+                if appointment is not None
+                else None
+            ),
             consultation_type=consultation_type,
             status=status,
-            template_id=template.id if template else None,
+            template_id=(
+                template.id
+                if template is not None
+                else None
+            ),
             **overrides,
         )
 
         db.session.add(consultation)
-        db.session.commit()
+        db.session.flush()
 
         return consultation
 
@@ -465,6 +516,8 @@ def make_consultation(db):
 
 @pytest.fixture()
 def make_template(db):
+    """Factory for ConsultationTemplate."""
+
     from app.modules.consultation.models.consultation_model import (
         ConsultationTemplate,
     )
@@ -482,7 +535,10 @@ def make_template(db):
         counter["n"] += 1
 
         if name is None:
-            name = f"Test Consultation Template {counter['n']}"
+            name = (
+                f"Test Consultation Template "
+                f"{counter['n']}"
+            )
 
         if structure is None:
             structure = {
@@ -495,7 +551,11 @@ def make_template(db):
             }
 
         template = ConsultationTemplate(
-            clinic_id=clinic.id if clinic else None,
+            clinic_id=(
+                clinic.id
+                if clinic is not None
+                else None
+            ),
             name=name,
             specialty=specialty,
             structure=structure,
@@ -504,7 +564,7 @@ def make_template(db):
         )
 
         db.session.add(template)
-        db.session.commit()
+        db.session.flush()
 
         return template
 
@@ -512,34 +572,42 @@ def make_template(db):
 
 
 # ============================================================================
-# PHARMACY / PRESCRIPTION
+# PHARMACY
 # ============================================================================
+
 
 @pytest.fixture()
 def make_drug(db):
-    """
-    Factory: make_drug(clinic=None, **overrides) -> Drug
+    """Factory for Drug."""
 
-    clinic=None -> global/shared catalog drug (Drug.clinic_id is
-    nullable, this is the intended "usable by any clinic" case, not
-    an oversight — see Drug's docstring in pharmacy_model.py).
-    clinic=<Clinic> -> clinic-specific catalog drug.
-    """
     from app.modules.pharmacy.models.pharmacy_model import Drug
 
     counter = {"n": 0}
 
     def _make(clinic=None, **overrides):
         counter["n"] += 1
-        overrides.setdefault("name", f"Test Drug {counter['n']}")
-        overrides.setdefault("is_active", True)
+
+        overrides.setdefault(
+            "name",
+            f"Test Drug {counter['n']}",
+        )
+        overrides.setdefault(
+            "is_active",
+            True,
+        )
 
         drug = Drug(
-            clinic_id=clinic.id if clinic else None,
+            clinic_id=(
+                clinic.id
+                if clinic is not None
+                else None
+            ),
             **overrides,
         )
+
         db.session.add(drug)
-        db.session.commit()
+        db.session.flush()
+
         return drug
 
     return _make
@@ -547,14 +615,7 @@ def make_drug(db):
 
 @pytest.fixture()
 def make_drug_batch(db):
-    """
-    Factory: make_drug_batch(clinic, drug, **overrides) -> DrugBatch
-
-    Defaults to 100 units expiring 90 days out — inside every
-    "expiring soon" window a test is likely to use, so pass an
-    explicit expiry_date when a test needs to distinguish that.
-    """
-    from datetime import date, timedelta
+    """Factory for DrugBatch."""
 
     from app.modules.pharmacy.models.pharmacy_model import DrugBatch
 
@@ -562,11 +623,22 @@ def make_drug_batch(db):
 
     def _make(clinic, drug, **overrides):
         counter["n"] += 1
-        overrides.setdefault("batch_number", f"BATCH-{counter['n']}")
-        overrides.setdefault("quantity_on_hand", 100)
-        overrides.setdefault("reorder_level", 20)
+
         overrides.setdefault(
-            "expiry_date", date.today() + timedelta(days=90)
+            "batch_number",
+            f"BATCH-{counter['n']}",
+        )
+        overrides.setdefault(
+            "quantity_on_hand",
+            100,
+        )
+        overrides.setdefault(
+            "reorder_level",
+            20,
+        )
+        overrides.setdefault(
+            "expiry_date",
+            date.today() + timedelta(days=90),
         )
 
         batch = DrugBatch(
@@ -574,26 +646,36 @@ def make_drug_batch(db):
             drug_id=drug.id,
             **overrides,
         )
+
         db.session.add(batch)
-        db.session.commit()
+        db.session.flush()
+
         return batch
 
     return _make
 
 
+# ============================================================================
+# PRESCRIPTION
+# ============================================================================
+
+
 @pytest.fixture()
 def make_prescription(db):
-    """
-    Factory: make_prescription(clinic, patient, staff, **overrides) -> Prescription
+    """Factory for Prescription."""
 
-    staff is the prescriber (prescribed_by_id) — pass a DOCTOR-role
-    staff for realism, though the model itself doesn't enforce a role
-    on who prescribes.
-    """
     from app.core.enums.prescription_enums import PrescriptionStatus
-    from app.modules.prescription.models.prescription_model import Prescription
+    from app.modules.prescription.models.prescription_model import (
+        Prescription,
+    )
 
-    def _make(clinic, patient, staff, status=PrescriptionStatus.ACTIVE, **overrides):
+    def _make(
+        clinic,
+        patient,
+        staff,
+        status=PrescriptionStatus.ACTIVE,
+        **overrides,
+    ):
         prescription = Prescription(
             clinic_id=clinic.id,
             patient_id=patient.id,
@@ -601,8 +683,10 @@ def make_prescription(db):
             status=status,
             **overrides,
         )
+
         db.session.add(prescription)
-        db.session.commit()
+        db.session.flush()
+
         return prescription
 
     return _make
@@ -610,18 +694,28 @@ def make_prescription(db):
 
 @pytest.fixture()
 def make_prescription_item(db):
-    """Factory: make_prescription_item(prescription, drug, quantity=30, **overrides) -> PrescriptionItem."""
-    from app.modules.prescription.models.prescription_model import PrescriptionItem
+    """Factory for PrescriptionItem."""
 
-    def _make(prescription, drug, quantity=30, **overrides):
+    from app.modules.prescription.models.prescription_model import (
+        PrescriptionItem,
+    )
+
+    def _make(
+        prescription,
+        drug,
+        quantity=30,
+        **overrides,
+    ):
         item = PrescriptionItem(
             prescription_id=prescription.id,
             drug_id=drug.id,
             quantity=quantity,
             **overrides,
         )
+
         db.session.add(item)
-        db.session.commit()
+        db.session.flush()
+
         return item
 
     return _make
@@ -631,20 +725,36 @@ def make_prescription_item(db):
 # WARD
 # ============================================================================
 
+
 @pytest.fixture()
 def make_ward(db):
-    """Factory: make_ward(clinic, capacity=5, **overrides) -> Ward."""
+    """Factory for Ward."""
+
     from app.modules.ward.models.ward_model import Ward
 
     counter = {"n": 0}
 
-    def _make(clinic, capacity=5, **overrides):
+    def _make(
+        clinic,
+        capacity=5,
+        **overrides,
+    ):
         counter["n"] += 1
-        overrides.setdefault("name", f"Test Ward {counter['n']}")
 
-        ward = Ward(clinic_id=clinic.id, capacity=capacity, **overrides)
+        overrides.setdefault(
+            "name",
+            f"Test Ward {counter['n']}",
+        )
+
+        ward = Ward(
+            clinic_id=clinic.id,
+            capacity=capacity,
+            **overrides,
+        )
+
         db.session.add(ward)
-        db.session.commit()
+        db.session.flush()
+
         return ward
 
     return _make
@@ -652,18 +762,28 @@ def make_ward(db):
 
 @pytest.fixture()
 def make_bed(db):
-    """Factory: make_bed(ward, **overrides) -> Bed (status defaults to AVAILABLE)."""
+    """Factory for Bed."""
+
     from app.modules.ward.models.ward_model import Bed
 
     counter = {"n": 0}
 
     def _make(ward, **overrides):
         counter["n"] += 1
-        overrides.setdefault("bed_number", f"B{counter['n']}")
 
-        bed = Bed(ward_id=ward.id, **overrides)
+        overrides.setdefault(
+            "bed_number",
+            f"B{counter['n']}",
+        )
+
+        bed = Bed(
+            ward_id=ward.id,
+            **overrides,
+        )
+
         db.session.add(bed)
-        db.session.commit()
+        db.session.flush()
+
         return bed
 
     return _make
@@ -673,25 +793,35 @@ def make_bed(db):
 # LAB
 # ============================================================================
 
+
 @pytest.fixture()
 def make_lab_test(db):
-    """
-    Factory: make_lab_test(clinic=None, **overrides) -> LabTest
+    """Factory for LabTest."""
 
-    clinic=None -> global catalog test (LabTest.clinic_id is nullable,
-    same "usable by any clinic" pattern as Drug).
-    """
     from app.modules.lab.models.lab_model import LabTest
 
     counter = {"n": 0}
 
     def _make(clinic=None, **overrides):
         counter["n"] += 1
-        overrides.setdefault("name", f"Test Lab Test {counter['n']}")
 
-        test = LabTest(clinic_id=clinic.id if clinic else None, **overrides)
+        overrides.setdefault(
+            "name",
+            f"Test Lab Test {counter['n']}",
+        )
+
+        test = LabTest(
+            clinic_id=(
+                clinic.id
+                if clinic is not None
+                else None
+            ),
+            **overrides,
+        )
+
         db.session.add(test)
-        db.session.commit()
+        db.session.flush()
+
         return test
 
     return _make
@@ -699,20 +829,30 @@ def make_lab_test(db):
 
 @pytest.fixture()
 def make_lab_order(db):
-    """
-    Factory: make_lab_order(clinic, patient, staff, tests, **overrides) -> LabOrder
+    """Factory for LabOrder plus LabOrderItems."""
 
-    `tests` is a list of LabTest objects — one LabOrderItem is created
-    per test, matching what create_lab_order() does in the service.
-    """
     from app.core.enums.lab_enums import LabOrderStatus
-    from app.modules.lab.models.lab_model import LabOrder, LabOrderItem
+    from app.modules.lab.models.lab_model import (
+        LabOrder,
+        LabOrderItem,
+    )
 
     counter = {"n": 0}
 
-    def _make(clinic, patient, staff, tests, status=LabOrderStatus.ORDERED, **overrides):
+    def _make(
+        clinic,
+        patient,
+        staff,
+        tests,
+        status=LabOrderStatus.ORDERED,
+        **overrides,
+    ):
         counter["n"] += 1
-        overrides.setdefault("qr_code", f"LAB-TEST-{counter['n']}")
+
+        overrides.setdefault(
+            "qr_code",
+            f"LAB-TEST-{counter['n']}",
+        )
 
         order = LabOrder(
             clinic_id=clinic.id,
@@ -721,13 +861,242 @@ def make_lab_order(db):
             status=status,
             **overrides,
         )
+
         db.session.add(order)
         db.session.flush()
 
         for test in tests:
-            db.session.add(LabOrderItem(order_id=order.id, test_id=test.id))
+            db.session.add(
+                LabOrderItem(
+                    order_id=order.id,
+                    test_id=test.id,
+                )
+            )
 
-        db.session.commit()
+        db.session.flush()
+
         return order
 
     return _make
+
+
+# ============================================================================
+# AUDIT
+# ============================================================================
+
+
+@pytest.fixture()
+def make_audit_log(db):
+    """
+    Factory for AuditLog.
+
+    Creates a raw AuditLog model. Pass a real user when the audit
+    record should be associated with a user.
+    """
+    
+    from app.core.audit.models.audit_model import AuditLog
+    from app.core.enums.audit_enums import AuditAction
+
+    counter = {"n": 0}
+
+    def _make(
+        user=None,
+        user_id=None,
+        action=AuditAction.CREATE,
+        entity_type="Patient",
+        entity_id=None,
+        description="Test audit log",
+        old_value=None,
+        new_value=None,
+        ip_address=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if entity_id is None:
+            entity_id = counter["n"]
+
+        if user is not None:
+            user_id = user.id
+
+        log = AuditLog(
+            user_id=user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            description=description,
+            old_value=old_value,
+            new_value=new_value,
+            ip_address=ip_address,
+            **overrides,
+        )
+
+        db.session.add(log)
+        db.session.flush()
+
+        return log
+
+    return _make
+
+
+# ============================================================================
+# AI
+# ============================================================================
+
+
+@pytest.fixture()
+def mock_ai_provider(monkeypatch):
+    """
+    Mock the AI provider boundary used by AI routes.
+
+    Usage:
+
+        mock_ai_provider.set_response(
+            {"risk_score": "low"}
+        )
+
+        response = client.post(...)
+
+        assert (
+            mock_ai_provider.last_call["feature"]
+            == AIFeature.TRIAGE_ASSISTANT
+        )
+    """
+
+    import app.modules.ai.services.ai_service as ai_service
+
+    state = {
+        "response": {},
+        "last_call": None,
+    }
+
+    def _fake_call_openai(feature, payload):
+        state["last_call"] = {
+            "feature": feature,
+            "payload": payload,
+        }
+
+        return state["response"]
+
+    monkeypatch.setattr(
+        ai_service,
+        "_call_openai",
+        _fake_call_openai,
+    )
+
+    class Controller:
+        def set_response(self, value):
+            state["response"] = value
+
+        @property
+        def last_call(self):
+            return state["last_call"]
+
+    return Controller()
+
+
+# ============================================================================
+# RESPONSE ASSERTION HELPERS
+# ============================================================================
+
+
+@pytest.fixture()
+def assert_domain_error():
+    """
+    Assert an application/domain error handled by error_handlers.py.
+
+    Returns the decoded response body.
+    """
+
+    def _assert(response, status_code):
+        body = response.get_json()
+
+        assert response.status_code == status_code, body
+        assert body["success"] is False
+        assert "error" in body
+
+        return body
+
+    return _assert
+
+
+@pytest.fixture()
+def assert_forbidden():
+    """
+    Assert role_required() rejection.
+    """
+
+    def _assert(response):
+        body = response.get_json()
+
+        assert response.status_code == 403, body
+        assert body["error"] == "Insufficient permissions"
+
+        return body
+
+    return _assert
+
+
+@pytest.fixture()
+def assert_unauthorized():
+    """
+    Assert Flask-JWT-Extended authentication failure.
+    """
+
+    def _assert(response):
+        body = response.get_json()
+
+        assert response.status_code in (401, 422), body
+        assert "msg" in body
+
+        return body
+
+    return _assert
+
+
+# ============================================================================
+# DATABASE HELPERS
+# ============================================================================
+
+
+@pytest.fixture()
+def get_by_id(db_session):
+    """
+    SQLAlchemy 2.x-style primary-key lookup helper.
+
+    Usage:
+
+        patient = get_by_id(Patient, patient_id)
+    """
+
+    def _get(model, object_id):
+        return db_session.get(
+            model,
+            object_id,
+        )
+
+    return _get
+
+
+@pytest.fixture()
+def commit_db(db_session):
+    """
+    Explicit transaction helper for tests that need committed state.
+    """
+
+    def _commit():
+        db_session.commit()
+
+    return _commit
+
+
+@pytest.fixture()
+def rollback_db(db_session):
+    """
+    Explicit rollback helper for transaction/error-path tests.
+    """
+
+    def _rollback():
+        db_session.rollback()
+
+    return _rollback

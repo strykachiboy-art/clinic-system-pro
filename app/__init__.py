@@ -26,7 +26,7 @@ def create_app(config_name=None):
 def register_blueprints(app):
     from app.core.web_routes import web_bp
     from app.core.audit.routes.audit_route import audit_bp
-    from app.core.auth.user.routes.user_route import auth_bp
+    from app.core.auth.user.routes.auth_routes import auth_bp
     from app.modules.ai.routes.ai_route import ai_bp
     from app.modules.ambulance.routes import vehicle_bp
     from app.modules.ambulance.routes import trip_bp

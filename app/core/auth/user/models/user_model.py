@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash,
+)
 
 from app.extensions import db
 from app.core.enums.role_enums import Role
@@ -66,15 +69,33 @@ class User(db.Model):
         nullable=True,
     )
 
+    # ================================================================
+    # AI RELATIONSHIPS
+    # ================================================================
+
     ai_logs = db.relationship(
         "AILog",
         back_populates="user",
     )
 
+    ai_reviews = db.relationship(
+        "AIReview",
+        back_populates="reviewer",
+        foreign_keys="AIReview.reviewer_id",
+    )
+
+    # ================================================================
+    # AUDIT
+    # ================================================================
+
     audit_logs = db.relationship(
         "AuditLog",
         back_populates="user",
     )
+
+    # ================================================================
+    # STAFF
+    # ================================================================
 
     staff = db.relationship(
         "Staff",
@@ -82,29 +103,45 @@ class User(db.Model):
         uselist=False,
     )
 
+    # ================================================================
+    # AUTH IDENTITIES
+    # ================================================================
+
     auth_identities = db.relationship(
         "UserAuthIdentity",
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    
+
+    # ================================================================
+    # MESSAGES
+    # ================================================================
+
     sent_messages = db.relationship(
         "Message",
-         foreign_keys="Message.sender_id",
-         back_populates="sender",
+        foreign_keys="Message.sender_id",
+        back_populates="sender",
     )
 
     received_messages = db.relationship(
-       "Message",
+        "Message",
         foreign_keys="Message.recipient_id",
         back_populates="recipient",
     )
 
+    # ================================================================
+    # NOTIFICATIONS
+    # ================================================================
+
     notifications = db.relationship(
-       "Notification",
+        "Notification",
         back_populates="user",
         cascade="all, delete",
-   )
+    )
+
+    # ================================================================
+    # PASSWORD / AUTH HELPERS
+    # ================================================================
 
     def set_password(self, raw_password: str) -> None:
         if not raw_password:

@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
 from flask_jwt_extended import get_jwt
+from redis.exceptions import ConnectionError, TimeoutError
 
-from app.core.exceptions import ValidationError
 from app import extensions
+from app.core.exceptions import ValidationError
 
 
 REVOKED_TOKEN_PREFIX = "auth:revoked:"
@@ -45,11 +46,16 @@ def revoke_token(jwt_payload: dict) -> None:
     if not jti:
         raise ValidationError("JWT ID is missing")
 
-    extensions.redis_client.setex(
-        _revoked_token_key(jti),
-        _token_remaining_seconds(jwt_payload),
-        "1",
-    )
+    try:
+        extensions.redis_client.setex(
+            _revoked_token_key(jti),
+            _token_remaining_seconds(jwt_payload),
+            "1",
+        )
+    except (ConnectionError, TimeoutError) as exc:
+        raise ValidationError(
+            "Unable to access token revocation storage"
+        ) from exc
 
 
 def revoke_current_token() -> None:
@@ -74,8 +80,11 @@ def is_token_revoked(jwt_payload: dict) -> bool:
     if not jti:
         return True
 
-    return bool(
-        extensions.redis_client.exists(
-            _revoked_token_key(jti)
+    try:
+        return bool(
+            extensions.redis_client.exists(
+                _revoked_token_key(jti)
+            )
         )
-    )
+    except (ConnectionError, TimeoutError):
+        return True

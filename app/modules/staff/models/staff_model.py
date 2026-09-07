@@ -116,6 +116,7 @@ class Staff(db.Model):
 
     lab_orders = db.relationship(
         "LabOrder",
+        foreign_keys="LabOrder.ordered_by_id",
         back_populates="ordered_by",
     )
 
