@@ -2026,12 +2026,11 @@ def test_unexpected_exception_does_not_expose_secret(
     body = response.get_json()
 
     assert body["success"] is False
-    assert (
-        body["error"]
-        == "An unexpected error occurred"
-    )
+    assert body["error"] == "Internal server error"
 
-    assert "SECRET INTERNAL DETAIL" not in response.text
+    assert "SECRET INTERNAL DETAIL" not in response.get_data(
+        as_text=True
+    )
 
 
 # ============================================================================
