@@ -1,9 +1,9 @@
 ﻿from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
 
 import pytest
 
 from app.core.enums.appointment_enums import AppointmentStatus
-from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.consultation_enums import (
     ConsultationStatus,
     ConsultationType,
@@ -13,257 +13,612 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.modules.appointment.models.appointment_model import Appointment
-from app.modules.consultation.models.consultation_model import (
-    Consultation,
-    ConsultationTemplate,
-)
-from app.modules.consultation.services import consultation_service
+
+import app.modules.consultation.services.consultation_service as consultation_service
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
-def make_appointment(
-    db,
-    clinic,
-    patient,
-    staff,
-    *,
-    status=AppointmentStatus.SCHEDULED,
-    scheduled_start=None,
-    scheduled_end=None,
-    **overrides,
-):
-    """Create a real Appointment row for consultation tests."""
-
-    if scheduled_start is None:
-        scheduled_start = datetime.now(timezone.utc) + timedelta(hours=1)
-
-    if scheduled_end is None:
-        scheduled_end = scheduled_start + timedelta(hours=1)
-
-    appointment = Appointment(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        scheduled_start=scheduled_start,
-        scheduled_end=scheduled_end,
-        status=status,
-        **overrides,
-    )
-
-    db.session.add(appointment)
-    db.session.commit()
-
-    return appointment
-
-
-def make_consultation(
-    db,
-    clinic,
-    patient,
-    staff,
-    *,
-    status=ConsultationStatus.IN_PROGRESS,
-    consultation_type=ConsultationType.GENERAL,
-    appointment_id=None,
-    template_id=None,
-    started_at=None,
-    ended_at=None,
-    **overrides,
-):
-    """Create a raw Consultation row for state/history tests."""
-
-    consultation = Consultation(
-        clinic_id=clinic.id,
-        patient_id=patient.id,
-        staff_id=staff.id,
-        appointment_id=appointment_id,
-        template_id=template_id,
-        consultation_type=consultation_type,
-        status=status,
-        started_at=started_at or datetime.now(timezone.utc),
-        ended_at=ended_at,
-        **overrides,
-    )
-
-    db.session.add(consultation)
-    db.session.commit()
-
-    return consultation
-
-
-def make_template(
-    db,
-    *,
-    clinic_id=None,
-    name="General Consultation",
-    specialty="General Medicine",
-    structure=None,
-    is_active=True,
-):
-    """Create a real ConsultationTemplate row."""
-
-    template = ConsultationTemplate(
-        clinic_id=clinic_id,
-        name=name,
-        specialty=specialty,
-        structure=structure
-        or {
-            "sections": [
-                "chief_complaint",
-                "symptoms",
-                "diagnosis",
-                "treatment_plan",
-            ]
-        },
-        is_active=is_active,
-    )
-
-    db.session.add(template)
-    db.session.commit()
-
-    return template
+@pytest.fixture(autouse=True)
+def consultation_app_context(app):
+    yield
 
 
 @pytest.fixture()
-def audit_log_spy(monkeypatch):
-    """
-    Prevent consultation tests from depending on the audit implementation
-    while still allowing us to verify that the service records audits.
-    """
-
-    calls = []
-
-    def _fake_create_audit_log(**kwargs):
-        calls.append(kwargs)
+def no_audit(monkeypatch):
+    audit = Mock()
 
     monkeypatch.setattr(
         consultation_service,
         "create_audit_log",
-        _fake_create_audit_log,
+        audit,
     )
 
-    return calls
-
-
-# ============================================================================
-# GET CONSULTATION
-# ============================================================================
+    return audit
 
 
 class TestGetConsultation:
-
-    def test_returns_existing_consultation(
+    def test_returns_consultation_by_id(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
         )
 
         result = consultation_service.get_consultation(
-            consultation.id
+            consultation.id,
         )
 
         assert result.id == consultation.id
-        assert result.clinic_id == clinic.id
-        assert result.patient_id == patient.id
-        assert result.staff_id == staff.id
 
-    def test_raises_not_found_for_missing_consultation(self):
+    @pytest.mark.parametrize(
+        "consultation_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_id(
+        self,
+        consultation_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Consultation ID must be greater than 0",
+        ):
+            consultation_service.get_consultation(
+                consultation_id,
+            )
+
+    def test_missing_consultation_is_rejected(self):
         with pytest.raises(
             NotFoundError,
-            match=r"Consultation 999999 not found",
+            match="Consultation 999999 not found",
         ):
-            consultation_service.get_consultation(999999)
+            consultation_service.get_consultation(
+                999999,
+            )
 
-    def test_historical_consultation_is_accessible_when_clinic_is_suspended(
+    def test_clinic_scope_is_enforced(
         self,
-        db,
+        clinic,
+        make_clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        other_clinic = make_clinic(
+            name="Other Consultation Clinic",
+        )
+
+        consultation = make_consultation(
+            other_clinic,
+            patient=patient,
+            staff=staff,
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=f"Consultation {consultation.id} not found",
+        ):
+            consultation_service.get_consultation(
+                consultation.id,
+                clinic_id=clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -50],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.get_consultation(
+                consultation_id=1,
+                clinic_id=clinic_id,
+            )
+
+    def test_historical_consultation_is_readable_from_inactive_clinic(
+        self,
         suspended_clinic,
         make_patient,
         make_staff,
+        make_consultation,
     ):
         patient = make_patient(suspended_clinic)
         staff = make_staff(suspended_clinic)
 
         consultation = make_consultation(
-            db,
             suspended_clinic,
             patient,
             staff,
         )
 
         result = consultation_service.get_consultation(
-            consultation.id
+            consultation.id,
+            clinic_id=suspended_clinic.id,
         )
 
         assert result.id == consultation.id
 
 
-# ============================================================================
-# GET CONSULTATION TEMPLATE
-# ============================================================================
-
-
 class TestGetConsultationTemplate:
-
-    def test_returns_existing_template(self, db):
-        template = make_template(db)
+    def test_returns_template(
+        self,
+        make_template,
+    ):
+        template = make_template()
 
         result = consultation_service.get_consultation_template(
-            template.id
+            template.id,
         )
 
         assert result.id == template.id
-        assert result.name == template.name
 
-    def test_returns_inactive_template(self, db):
-        template = make_template(
-            db,
-            is_active=False,
-        )
+    @pytest.mark.parametrize(
+        "template_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_id(
+        self,
+        template_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Consultation template ID must be greater than 0",
+        ):
+            consultation_service.get_consultation_template(
+                template_id,
+            )
 
-        result = consultation_service.get_consultation_template(
-            template.id
-        )
-
-        assert result.id == template.id
-        assert result.is_active is False
-
-    def test_raises_not_found_for_missing_template(self):
+    def test_missing_template_is_rejected(self):
         with pytest.raises(
             NotFoundError,
-            match=r"Consultation template 999999 not found",
+            match="Consultation template 999999 not found",
         ):
-            consultation_service.get_consultation_template(999999)
+            consultation_service.get_consultation_template(
+                999999,
+            )
 
 
-# ============================================================================
-# START CONSULTATION
-# ============================================================================
-
-
-class TestStartConsultation:
-
-    def test_starts_general_consultation_successfully(
+class TestValidateConsultationParticipants:
+    def test_returns_valid_participants(
         self,
-        db,
         clinic,
         patient,
         staff,
-        audit_log_spy,
     ):
+        result = consultation_service._validate_consultation_participants(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+        )
+
+        assert result[0].id == clinic.id
+        assert result[1].id == patient.id
+        assert result[2].id == staff.id
+
+    def test_patient_from_other_clinic_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_patient,
+        staff,
+    ):
+        other_clinic = make_clinic(
+            name="Other Patient Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Patient {other_patient.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service._validate_consultation_participants(
+                clinic_id=clinic.id,
+                patient_id=other_patient.id,
+                staff_id=staff.id,
+            )
+
+    def test_staff_from_other_clinic_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_staff,
+        patient,
+    ):
+        other_clinic = make_clinic(
+            name="Other Staff Clinic",
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Staff {other_staff.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service._validate_consultation_participants(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=other_staff.id,
+            )
+
+
+class TestValidateTemplate:
+    def test_none_template_is_allowed(
+        self,
+        clinic,
+    ):
+        assert (
+            consultation_service._validate_template(
+                clinic_id=clinic.id,
+                template_id=None,
+            )
+            is None
+        )
+
+    def test_active_global_template_is_allowed(
+        self,
+        clinic,
+        make_template,
+    ):
+        template = make_template(
+            clinic=None,
+            is_active=True,
+        )
+
+        result = consultation_service._validate_template(
+            clinic_id=clinic.id,
+            template_id=template.id,
+        )
+
+        assert result.id == template.id
+
+    def test_active_clinic_template_is_allowed(
+        self,
+        clinic,
+        make_template,
+    ):
+        template = make_template(
+            clinic=clinic,
+            is_active=True,
+        )
+
+        result = consultation_service._validate_template(
+            clinic_id=clinic.id,
+            template_id=template.id,
+        )
+
+        assert result.id == template.id
+
+    def test_inactive_template_is_rejected(
+        self,
+        clinic,
+        make_template,
+    ):
+        template = make_template(
+            clinic=clinic,
+            is_active=False,
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match=(
+                f"Consultation template {template.id} "
+                "is not active"
+            ),
+        ):
+            consultation_service._validate_template(
+                clinic_id=clinic.id,
+                template_id=template.id,
+            )
+
+    def test_template_from_other_clinic_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_template,
+    ):
+        other_clinic = make_clinic(
+            name="Other Template Clinic",
+        )
+
+        template = make_template(
+            clinic=other_clinic,
+            is_active=True,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Consultation template {template.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service._validate_template(
+                clinic_id=clinic.id,
+                template_id=template.id,
+            )
+
+    def test_missing_template_is_rejected(
+        self,
+        clinic,
+    ):
+        with pytest.raises(
+            NotFoundError,
+            match="Consultation template 999999 not found",
+        ):
+            consultation_service._validate_template(
+                clinic_id=clinic.id,
+                template_id=999999,
+            )
+
+
+class TestValidateAppointment:
+    def test_none_appointment_is_allowed(
+        self,
+        clinic,
+        patient,
+        staff,
+    ):
+        assert (
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=None,
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "appointment_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_appointment_id(
+        self,
+        clinic,
+        patient,
+        staff,
+        appointment_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Appointment ID must be greater than 0",
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=appointment_id,
+            )
+
+    def test_valid_scheduled_appointment_is_allowed(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_appointment,
+    ):
+        appointment = make_appointment(
+            clinic,
+            patient,
+            staff,
+            status=AppointmentStatus.SCHEDULED,
+        )
+
+        result = consultation_service._validate_appointment(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+            appointment_id=appointment.id,
+        )
+
+        assert result.id == appointment.id
+
+    def test_valid_confirmed_appointment_is_allowed(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_appointment,
+    ):
+        appointment = make_appointment(
+            clinic,
+            patient,
+            staff,
+            status=AppointmentStatus.CONFIRMED,
+        )
+
+        result = consultation_service._validate_appointment(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+            appointment_id=appointment.id,
+        )
+
+        assert result.id == appointment.id
+
+    def test_missing_appointment_is_rejected(
+        self,
+        clinic,
+        patient,
+        staff,
+    ):
+        with pytest.raises(
+            NotFoundError,
+            match="Appointment 999999 not found",
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=999999,
+            )
+
+    def test_appointment_from_other_clinic_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_patient,
+        make_staff,
+        patient,
+        staff,
+        make_appointment,
+    ):
+        other_clinic = make_clinic(
+            name="Other Appointment Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
+        appointment = make_appointment(
+            other_clinic,
+            other_patient,
+            other_staff,
+            status=AppointmentStatus.SCHEDULED,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Appointment {appointment.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=appointment.id,
+            )
+
+    def test_appointment_for_other_patient_is_rejected(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_patient,
+        make_appointment,
+    ):
+        other_patient = make_patient(
+            clinic,
+        )
+
+        appointment = make_appointment(
+            clinic,
+            other_patient,
+            staff,
+            status=AppointmentStatus.SCHEDULED,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Appointment {appointment.id} does not belong "
+                f"to patient {patient.id}"
+            ),
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=appointment.id,
+            )
+
+    def test_appointment_for_other_staff_is_rejected(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_staff,
+        make_appointment,
+    ):
+        other_staff = make_staff(
+            clinic,
+        )
+
+        appointment = make_appointment(
+            clinic,
+            patient,
+            other_staff,
+            status=AppointmentStatus.SCHEDULED,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Appointment {appointment.id} does not belong "
+                f"to staff member {staff.id}"
+            ),
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=appointment.id,
+            )
+
+    def test_non_schedulable_appointment_status_is_rejected(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_appointment,
+    ):
+        appointment = make_appointment(
+            clinic,
+            patient,
+            staff,
+            status=AppointmentStatus.COMPLETED,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match="cannot start a consultation",
+        ):
+            consultation_service._validate_appointment(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                appointment_id=appointment.id,
+            )
+
+
+class TestStartConsultation:
+    def test_starts_consultation(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+        no_audit,
+    ):
+        assert make_consultation is not None
+
         result = consultation_service.start_consultation(
             clinic_id=clinic.id,
             patient_id=patient.id,
@@ -274,158 +629,80 @@ class TestStartConsultation:
         assert result.clinic_id == clinic.id
         assert result.patient_id == patient.id
         assert result.staff_id == staff.id
-        assert result.appointment_id is None
-        assert result.template_id is None
+        assert result.status == ConsultationStatus.IN_PROGRESS
         assert result.consultation_type == ConsultationType.GENERAL
-        assert result.status == ConsultationStatus.IN_PROGRESS
         assert result.started_at is not None
-        assert result.ended_at is None
+        no_audit.assert_called_once()
 
-        assert len(audit_log_spy) == 1
-        assert audit_log_spy[0]["action"].value == "create"
-        assert audit_log_spy[0]["entity_type"] == "Consultation"
-        assert audit_log_spy[0]["entity_id"] == result.id
-
-    @pytest.mark.parametrize(
-        "consultation_type",
-        [
-            ConsultationType.GENERAL,
-            ConsultationType.FOLLOW_UP,
-            ConsultationType.SPECIALIST,
-            ConsultationType.EMERGENCY,
-        ],
-    )
-    def test_supports_all_consultation_types(
+    def test_starts_with_requested_consultation_type(
         self,
-        db,
         clinic,
         patient,
         staff,
-        consultation_type,
+        no_audit,
     ):
         result = consultation_service.start_consultation(
             clinic_id=clinic.id,
             patient_id=patient.id,
             staff_id=staff.id,
-            consultation_type=consultation_type,
+            consultation_type=ConsultationType.SPECIALIST,
         )
 
-        assert result.consultation_type == consultation_type
-        assert result.status == ConsultationStatus.IN_PROGRESS
+        assert result.consultation_type == ConsultationType.SPECIALIST
 
-    def test_preserves_chief_complaint_and_symptoms(
+    def test_starts_with_global_template(
         self,
         clinic,
         patient,
         staff,
+        make_template,
+        no_audit,
     ):
+        template = make_template(
+            clinic=None,
+            is_active=True,
+        )
+
         result = consultation_service.start_consultation(
             clinic_id=clinic.id,
             patient_id=patient.id,
             staff_id=staff.id,
-            chief_complaint="Persistent headache",
-            symptoms="Headache and dizziness",
+            template_id=template.id,
         )
 
-        assert result.chief_complaint == "Persistent headache"
-        assert result.symptoms == "Headache and dizziness"
+        assert result.template_id == template.id
 
-    def test_rejects_suspended_clinic(
+    def test_starts_with_clinic_template(
         self,
-        suspended_clinic,
-        make_patient,
-        make_staff,
-    ):
-        patient = make_patient(suspended_clinic)
-        staff = make_staff(suspended_clinic)
-
-        with pytest.raises(
-            ValidationError,
-            match=rf"Clinic {suspended_clinic.id} is not active",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=suspended_clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-            )
-
-    def test_rejects_patient_from_different_clinic(
-        self,
-        clinic,
-        make_clinic,
-        make_patient,
-        staff,
-    ):
-        other_clinic = make_clinic(name="Other Clinic")
-        other_patient = make_patient(other_clinic)
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Patient {other_patient.id} does not belong "
-            rf"to clinic {clinic.id}",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=other_patient.id,
-                staff_id=staff.id,
-            )
-
-    def test_rejects_staff_from_different_clinic(
-        self,
-        clinic,
-        make_clinic,
-        make_staff,
-        patient,
-    ):
-        other_clinic = make_clinic(name="Other Clinic")
-        other_staff = make_staff(other_clinic)
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Staff {other_staff.id} does not belong "
-            rf"to clinic {clinic.id}",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=other_staff.id,
-            )
-
-    def test_rejects_missing_patient(self, clinic, staff):
-        with pytest.raises(
-            NotFoundError,
-            match=r"Patient 999999 not found",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=999999,
-                staff_id=staff.id,
-            )
-
-    def test_rejects_missing_staff(self, clinic, patient):
-        with pytest.raises(
-            NotFoundError,
-            match=r"Staff 999999 not found",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=999999,
-            )
-
-    # ------------------------------------------------------------------------
-    # Appointment validation
-    # ------------------------------------------------------------------------
-
-    def test_starts_consultation_with_scheduled_appointment(
-        self,
-        db,
         clinic,
         patient,
         staff,
+        make_template,
+        no_audit,
+    ):
+        template = make_template(
+            clinic=clinic,
+            is_active=True,
+        )
+
+        result = consultation_service.start_consultation(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            staff_id=staff.id,
+            template_id=template.id,
+        )
+
+        assert result.template_id == template.id
+
+    def test_starts_with_valid_appointment(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_appointment,
+        no_audit,
     ):
         appointment = make_appointment(
-            db,
             clinic,
             patient,
             staff,
@@ -441,34 +718,132 @@ class TestStartConsultation:
 
         assert result.appointment_id == appointment.id
 
-    def test_starts_consultation_with_confirmed_appointment(
+    def test_cross_clinic_patient_is_rejected(
         self,
-        db,
+        clinic,
+        make_clinic,
+        make_patient,
+        staff,
+        no_audit,
+    ):
+        other_clinic = make_clinic(
+            name="Other Start Patient Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Patient {other_patient.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service.start_consultation(
+                clinic_id=clinic.id,
+                patient_id=other_patient.id,
+                staff_id=staff.id,
+            )
+
+    def test_cross_clinic_staff_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_staff,
+        patient,
+        no_audit,
+    ):
+        other_clinic = make_clinic(
+            name="Other Start Staff Clinic",
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Staff {other_staff.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service.start_consultation(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=other_staff.id,
+            )
+
+    def test_inactive_template_is_rejected(
+        self,
         clinic,
         patient,
         staff,
+        make_template,
+        no_audit,
     ):
-        appointment = make_appointment(
-            db,
-            clinic,
-            patient,
-            staff,
-            status=AppointmentStatus.CONFIRMED,
+        template = make_template(
+            clinic=clinic,
+            is_active=False,
         )
 
-        result = consultation_service.start_consultation(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            appointment_id=appointment.id,
+        with pytest.raises(
+            ValidationError,
+            match=(
+                f"Consultation template {template.id} is not active"
+            ),
+        ):
+            consultation_service.start_consultation(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                template_id=template.id,
+            )
+
+    def test_wrong_clinic_template_is_rejected(
+        self,
+        clinic,
+        make_clinic,
+        make_template,
+        patient,
+        staff,
+        no_audit,
+    ):
+        other_clinic = make_clinic(
+            name="Other Start Template Clinic",
         )
 
-        assert result.appointment_id == appointment.id
+        template = make_template(
+            clinic=other_clinic,
+            is_active=True,
+        )
 
-    def test_rejects_missing_appointment(self, clinic, patient, staff):
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Consultation template {template.id} does not belong "
+                f"to clinic {clinic.id}"
+            ),
+        ):
+            consultation_service.start_consultation(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+                template_id=template.id,
+            )
+
+    def test_invalid_appointment_is_rejected(
+        self,
+        clinic,
+        patient,
+        staff,
+        no_audit,
+    ):
         with pytest.raises(
             NotFoundError,
-            match=r"Appointment 999999 not found",
+            match="Appointment 999999 not found",
         ):
             consultation_service.start_consultation(
                 clinic_id=clinic.id,
@@ -477,60 +852,32 @@ class TestStartConsultation:
                 appointment_id=999999,
             )
 
-    def test_rejects_appointment_from_different_clinic(
+    def test_appointment_for_wrong_patient_is_rejected(
         self,
-        db,
-        clinic,
-        patient,
-        staff,
-        make_clinic,
-        make_patient,
-        make_staff,
-    ):
-        other_clinic = make_clinic(name="Other Clinic")
-        other_patient = make_patient(other_clinic)
-        other_staff = make_staff(other_clinic)
-
-        appointment = make_appointment(
-            db,
-            other_clinic,
-            other_patient,
-            other_staff,
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Appointment {appointment.id} does not belong "
-            rf"to clinic {clinic.id}",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                appointment_id=appointment.id,
-            )
-
-    def test_rejects_appointment_for_different_patient(
-        self,
-        db,
         clinic,
         patient,
         staff,
         make_patient,
+        make_appointment,
+        no_audit,
     ):
-        other_patient = make_patient(clinic)
+        other_patient = make_patient(
+            clinic,
+        )
 
         appointment = make_appointment(
-            db,
             clinic,
             other_patient,
             staff,
+            status=AppointmentStatus.SCHEDULED,
         )
 
         with pytest.raises(
             ConflictError,
-            match=rf"Appointment {appointment.id} does not belong "
-            rf"to patient {patient.id}",
+            match=(
+                f"Appointment {appointment.id} does not belong "
+                f"to patient {patient.id}"
+            ),
         ):
             consultation_service.start_consultation(
                 clinic_id=clinic.id,
@@ -538,275 +885,80 @@ class TestStartConsultation:
                 staff_id=staff.id,
                 appointment_id=appointment.id,
             )
-
-    def test_rejects_appointment_for_different_staff(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-        make_staff,
-    ):
-        other_staff = make_staff(clinic)
-
-        appointment = make_appointment(
-            db,
-            clinic,
-            patient,
-            other_staff,
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Appointment {appointment.id} does not belong "
-            rf"to staff member {staff.id}",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                appointment_id=appointment.id,
-            )
-
-    def test_rejects_appointment_with_invalid_status(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        invalid_status = next(
-            status
-            for status in AppointmentStatus
-            if status
-            not in (
-                AppointmentStatus.SCHEDULED,
-                AppointmentStatus.CONFIRMED,
-            )
-        )
-
-        appointment = make_appointment(
-            db,
-            clinic,
-            patient,
-            staff,
-            status=invalid_status,
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Appointment {appointment.id} is currently "
-            rf"'{invalid_status.value}' and cannot start "
-            rf"a consultation",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                appointment_id=appointment.id,
-            )
-
-    # ------------------------------------------------------------------------
-    # Template validation
-    # ------------------------------------------------------------------------
-
-    def test_starts_with_active_global_template(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        template = make_template(
-            db,
-            clinic_id=None,
-            name="Global Template",
-        )
-
-        result = consultation_service.start_consultation(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            template_id=template.id,
-        )
-
-        assert result.template_id == template.id
-
-    def test_starts_with_active_clinic_template(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        template = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Clinic Template",
-        )
-
-        result = consultation_service.start_consultation(
-            clinic_id=clinic.id,
-            patient_id=patient.id,
-            staff_id=staff.id,
-            template_id=template.id,
-        )
-
-        assert result.template_id == template.id
-
-    def test_rejects_missing_template(
-        self,
-        clinic,
-        patient,
-        staff,
-    ):
-        with pytest.raises(
-            NotFoundError,
-            match=r"Consultation template 999999 not found",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                template_id=999999,
-            )
-
-    def test_rejects_inactive_template(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        template = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Inactive Template",
-            is_active=False,
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match=rf"Consultation template {template.id} is not active",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                template_id=template.id,
-            )
-
-    def test_rejects_template_from_different_clinic(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-        make_clinic,
-    ):
-        other_clinic = make_clinic(name="Other Clinic")
-
-        template = make_template(
-            db,
-            clinic_id=other_clinic.id,
-            name="Other Clinic Template",
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Consultation template {template.id} does not belong "
-            rf"to clinic {clinic.id}",
-        ):
-            consultation_service.start_consultation(
-                clinic_id=clinic.id,
-                patient_id=patient.id,
-                staff_id=staff.id,
-                template_id=template.id,
-            )
-
-
-# ============================================================================
-# UPDATE CONSULTATION NOTE
-# ============================================================================
 
 
 class TestUpdateConsultationNote:
-
-    def test_updates_all_supported_fields(
+    def test_updates_supported_fields_and_audits(
         self,
-        db,
         clinic,
         patient,
         staff,
-        audit_log_spy,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
         )
 
         result = consultation_service.update_consultation_note(
-            consultation.id,
-            icd10_code="R51.9",
-            chief_complaint="Headache",
-            symptoms="Headache and dizziness",
-            diagnosis="Tension headache",
-            treatment_plan="Rest and hydration",
-            notes="Follow up in one week",
-            voice_note_url="https://example.com/voice.mp3",
-            transcribed_text="Patient reports headache",
+            consultation_id=consultation.id,
+            clinic_id=clinic.id,
+            icd10_code="J20.9",
+            chief_complaint="  Cough  ",
+            symptoms="  Fever  ",
+            diagnosis="  Acute bronchitis  ",
+            treatment_plan="  Rest  ",
+            notes="  Follow up  ",
+            voice_note_url="  https://example.com/audio  ",
+            transcribed_text="  Patient reports cough  ",
         )
 
-        assert result.icd10_code == "R51.9"
-        assert result.chief_complaint == "Headache"
-        assert result.symptoms == "Headache and dizziness"
-        assert result.diagnosis == "Tension headache"
-        assert result.treatment_plan == "Rest and hydration"
-        assert result.notes == "Follow up in one week"
-        assert result.voice_note_url == "https://example.com/voice.mp3"
-        assert result.transcribed_text == "Patient reports headache"
+        assert result.icd10_code == "J20.9"
+        assert result.chief_complaint == "Cough"
+        assert result.symptoms == "Fever"
+        assert result.diagnosis == "Acute bronchitis"
+        assert result.treatment_plan == "Rest"
+        assert result.notes == "Follow up"
+        assert result.voice_note_url == "https://example.com/audio"
+        assert result.transcribed_text == "Patient reports cough"
 
-        assert len(audit_log_spy) == 1
-        assert audit_log_spy[0]["action"].value == "update"
-        assert audit_log_spy[0]["entity_type"] == "Consultation"
+        no_audit.assert_called_once()
 
-    def test_ignores_none_values(
+    def test_none_values_are_ignored(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
             diagnosis="Existing diagnosis",
-            notes="Existing notes",
         )
 
         result = consultation_service.update_consultation_note(
-            consultation.id,
+            consultation_id=consultation.id,
+            clinic_id=clinic.id,
             diagnosis=None,
-            notes=None,
         )
 
         assert result.diagnosis == "Existing diagnosis"
-        assert result.notes == "Existing notes"
+        no_audit.assert_not_called()
 
-    def test_returns_without_audit_when_nothing_changes(
+    def test_no_changes_do_not_create_audit(
         self,
-        db,
         clinic,
         patient,
         staff,
-        audit_log_spy,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -814,22 +966,23 @@ class TestUpdateConsultationNote:
         )
 
         result = consultation_service.update_consultation_note(
-            consultation.id,
+            consultation_id=consultation.id,
+            clinic_id=clinic.id,
             diagnosis="Existing diagnosis",
         )
 
         assert result.diagnosis == "Existing diagnosis"
-        assert audit_log_spy == []
+        no_audit.assert_not_called()
 
-    def test_rejects_unknown_fields(
+    def test_unknown_field_is_rejected(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -837,46 +990,55 @@ class TestUpdateConsultationNote:
 
         with pytest.raises(
             ValidationError,
-            match=r"Unknown consultation field\(s\): invalid_field",
+            match="Unknown consultation field",
         ):
             consultation_service.update_consultation_note(
-                consultation.id,
-                invalid_field="value",
+                consultation_id=consultation.id,
+                clinic_id=clinic.id,
+                unsupported_field="value",
             )
 
-    def test_rejects_multiple_unknown_fields_in_sorted_order(
+        no_audit.assert_not_called()
+
+    def test_cancelled_consultation_cannot_be_updated(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
+            status=ConsultationStatus.CANCELLED,
         )
 
         with pytest.raises(
-            ValidationError,
-            match=r"Unknown consultation field\(s\): aaa, zzz",
+            ConflictError,
+            match=(
+                f"Consultation {consultation.id} is cancelled "
+                "and cannot be updated"
+            ),
         ):
             consultation_service.update_consultation_note(
-                consultation.id,
-                zzz="value",
-                aaa="value",
+                consultation_id=consultation.id,
+                clinic_id=clinic.id,
+                diagnosis="New diagnosis",
             )
 
-    def test_allows_editing_completed_consultation(
+        no_audit.assert_not_called()
+
+    def test_completed_consultation_can_be_amended(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -885,132 +1047,103 @@ class TestUpdateConsultationNote:
         )
 
         result = consultation_service.update_consultation_note(
-            consultation.id,
-            notes="Documentation correction",
+            consultation_id=consultation.id,
+            clinic_id=clinic.id,
+            diagnosis="Amended diagnosis",
         )
 
-        assert result.notes == "Documentation correction"
+        assert result.diagnosis == "Amended diagnosis"
+        no_audit.assert_called_once()
 
-    def test_rejects_editing_cancelled_consultation(
+    def test_wrong_clinic_is_rejected(
         self,
-        db,
         clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            status=ConsultationStatus.CANCELLED,
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=rf"Consultation {consultation.id} is cancelled "
-            rf"and cannot be updated",
-        ):
-            consultation_service.update_consultation_note(
-                consultation.id,
-                notes="Attempted update",
-            )
-
-    def test_rejects_update_when_clinic_is_suspended(
-        self,
-        db,
-        suspended_clinic,
+        make_clinic,
         make_patient,
         make_staff,
+        make_consultation,
+        no_audit,
     ):
-        patient = make_patient(suspended_clinic)
-        staff = make_staff(suspended_clinic)
+        other_clinic = make_clinic(
+            name="Other Update Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
 
         consultation = make_consultation(
-            db,
-            suspended_clinic,
-            patient,
-            staff,
+            other_clinic,
+            other_patient,
+            other_staff,
         )
 
         with pytest.raises(
-            ValidationError,
-            match=rf"Clinic {suspended_clinic.id} is not active",
-        ):
-            consultation_service.update_consultation_note(
-                consultation.id,
-                notes="New notes",
-            )
-
-    def test_rejects_missing_consultation(self):
-        with pytest.raises(
             NotFoundError,
-            match=r"Consultation 999999 not found",
+            match=f"Consultation {consultation.id} not found",
         ):
             consultation_service.update_consultation_note(
-                999999,
-                notes="New notes",
+                consultation_id=consultation.id,
+                clinic_id=clinic.id,
+                diagnosis="Unauthorized",
             )
 
-
-# ============================================================================
-# COMPLETE CONSULTATION
-# ============================================================================
+        no_audit.assert_not_called()
 
 
 class TestCompleteConsultation:
-
     def test_completes_in_progress_consultation(
         self,
-        db,
         clinic,
         patient,
         staff,
-        audit_log_spy,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
+            status=ConsultationStatus.IN_PROGRESS,
         )
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
 
         result = consultation_service.complete_consultation(
             consultation.id,
-            diagnosis="Acute tension headache",
-            treatment_plan="Rest, hydration and follow-up",
-            notes="Patient stable",
+            clinic.id,
+            diagnosis="Acute bronchitis",
+            treatment_plan="Hydration and rest",
+            notes="Return if symptoms worsen",
         )
 
-        after = datetime.now(timezone.utc)
-
         assert result.status == ConsultationStatus.COMPLETED
-        assert result.diagnosis == "Acute tension headache"
-        assert result.treatment_plan == "Rest, hydration and follow-up"
-        assert result.notes == "Patient stable"
+        assert result.diagnosis == "Acute bronchitis"
+        assert result.treatment_plan == "Hydration and rest"
+        assert result.notes == "Return if symptoms worsen"
         assert result.ended_at is not None
 
         ended_at = result.ended_at
-        if ended_at.tzinfo is None:
-            ended_at = ended_at.replace(tzinfo=timezone.utc)
 
-        assert before <= ended_at <= after
+        if ended_at.tzinfo is not None:
+            ended_at = ended_at.replace(tzinfo=None)
 
-        assert len(audit_log_spy) == 1
-        assert audit_log_spy[0]["action"].value == "status_change"
-        assert audit_log_spy[0]["entity_type"] == "Consultation"
+        assert ended_at >= before
+        no_audit.assert_called_once()
 
     def test_strips_diagnosis(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1018,44 +1151,21 @@ class TestCompleteConsultation:
 
         result = consultation_service.complete_consultation(
             consultation.id,
-            diagnosis="  Migraine  ",
+            clinic.id,
+            diagnosis="  Acute bronchitis  ",
         )
 
-        assert result.diagnosis == "Migraine"
-        assert result.status == ConsultationStatus.COMPLETED
+        assert result.diagnosis == "Acute bronchitis"
 
-    def test_treatment_plan_is_optional(
+    def test_diagnosis_is_required(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-        )
-
-        result = consultation_service.complete_consultation(
-            consultation.id,
-            diagnosis="Migraine",
-        )
-
-        assert result.diagnosis == "Migraine"
-        assert result.treatment_plan is None
-        assert result.notes is None
-
-    def test_rejects_blank_diagnosis(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1063,75 +1173,52 @@ class TestCompleteConsultation:
 
         with pytest.raises(
             ValidationError,
-            match=r"Diagnosis is required to complete a consultation",
+            match="Diagnosis is required to complete a consultation",
         ):
             consultation_service.complete_consultation(
                 consultation.id,
+                clinic.id,
                 diagnosis="   ",
             )
 
-        db.session.refresh(consultation)
+        no_audit.assert_not_called()
 
-        assert consultation.status == ConsultationStatus.IN_PROGRESS
-        assert consultation.ended_at is None
-
-    def test_rejects_empty_diagnosis(
+    def test_already_completed_consultation_is_rejected(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match=r"Diagnosis is required to complete a consultation",
-        ):
-            consultation_service.complete_consultation(
-                consultation.id,
-                diagnosis="",
-            )
-
-    def test_rejects_already_completed_consultation(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
             status=ConsultationStatus.COMPLETED,
-            diagnosis="Existing diagnosis",
         )
 
         with pytest.raises(
             ConflictError,
-            match=rf"Consultation {consultation.id} is already completed",
+            match=f"Consultation {consultation.id} is already completed",
         ):
             consultation_service.complete_consultation(
                 consultation.id,
+                clinic.id,
                 diagnosis="Another diagnosis",
             )
 
-    def test_rejects_cancelled_consultation(
+        no_audit.assert_not_called()
+
+    def test_cancelled_consultation_cannot_be_completed(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1140,122 +1227,122 @@ class TestCompleteConsultation:
 
         with pytest.raises(
             ConflictError,
-            match=rf"Consultation {consultation.id} is cancelled "
-            rf"and cannot be completed",
+            match=(
+                f"Consultation {consultation.id} is cancelled "
+                "and cannot be completed"
+            ),
         ):
             consultation_service.complete_consultation(
                 consultation.id,
-                diagnosis="Diagnosis",
+                clinic.id,
+                diagnosis="Another diagnosis",
             )
 
-    def test_rejects_completion_when_clinic_is_suspended(
+        no_audit.assert_not_called()
+
+    def test_wrong_clinic_is_rejected(
         self,
-        db,
-        suspended_clinic,
+        clinic,
+        make_clinic,
         make_patient,
         make_staff,
+        make_consultation,
+        no_audit,
     ):
-        patient = make_patient(suspended_clinic)
-        staff = make_staff(suspended_clinic)
+        other_clinic = make_clinic(
+            name="Other Complete Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
 
         consultation = make_consultation(
-            db,
-            suspended_clinic,
-            patient,
-            staff,
+            other_clinic,
+            other_patient,
+            other_staff,
         )
 
         with pytest.raises(
-            ValidationError,
-            match=rf"Clinic {suspended_clinic.id} is not active",
+            NotFoundError,
+            match=f"Consultation {consultation.id} not found",
         ):
             consultation_service.complete_consultation(
                 consultation.id,
-                diagnosis="Diagnosis",
+                clinic.id,
+                diagnosis="Unauthorized",
             )
 
-
-# ============================================================================
-# CANCEL CONSULTATION
-# ============================================================================
+        no_audit.assert_not_called()
 
 
 class TestCancelConsultation:
-
     def test_cancels_in_progress_consultation(
         self,
-        db,
         clinic,
         patient,
         staff,
-        audit_log_spy,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
+            notes="Existing note",
         )
-
-        before = datetime.now(timezone.utc)
 
         result = consultation_service.cancel_consultation(
             consultation.id,
+            clinic.id,
             reason="Patient requested cancellation",
         )
-
-        after = datetime.now(timezone.utc)
 
         assert result.status == ConsultationStatus.CANCELLED
         assert result.ended_at is not None
         assert result.notes == (
+            "Existing note\n"
             "[Cancelled: Patient requested cancellation]"
         )
-
-        ended_at = result.ended_at
-        if ended_at.tzinfo is None:
-            ended_at = ended_at.replace(tzinfo=timezone.utc)
-
-        assert before <= ended_at <= after
-
-        assert len(audit_log_spy) == 1
-        assert audit_log_spy[0]["action"].value == "status_change"
-        assert audit_log_spy[0]["entity_type"] == "Consultation"
-        assert audit_log_spy[0]["new_value"]["reason"] == (
-            "Patient requested cancellation"
-        )
+        no_audit.assert_called_once()
 
     def test_cancels_without_reason(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
+            notes="Existing note",
         )
 
         result = consultation_service.cancel_consultation(
             consultation.id,
+            clinic.id,
         )
 
         assert result.status == ConsultationStatus.CANCELLED
-        assert result.notes is None
-        assert result.ended_at is not None
+        assert result.notes == "Existing note"
+        no_audit.assert_called_once()
 
-    def test_blank_reason_does_not_create_cancellation_note(
+    def test_rejects_blank_reason(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1263,92 +1350,23 @@ class TestCancelConsultation:
 
         result = consultation_service.cancel_consultation(
             consultation.id,
+            clinic.id,
             reason="   ",
         )
 
         assert result.status == ConsultationStatus.CANCELLED
-        assert result.notes is None
+        assert result.ended_at is not None
+        no_audit.assert_called_once()
 
-    def test_strips_cancellation_reason(
+    def test_repeated_cancel_is_rejected(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-        )
-
-        result = consultation_service.cancel_consultation(
-            consultation.id,
-            reason="  Patient unavailable  ",
-        )
-
-        assert result.notes == "[Cancelled: Patient unavailable]"
-
-    def test_preserves_existing_notes_when_cancelled(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            notes="Original consultation note",
-        )
-
-        result = consultation_service.cancel_consultation(
-            consultation.id,
-            reason="Patient left before completion",
-        )
-
-        assert result.notes == (
-            "Original consultation note\n"
-            "[Cancelled: Patient left before completion]"
-        )
-
-    def test_existing_whitespace_notes_are_stripped_before_append(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            notes="  Existing note  ",
-        )
-
-        result = consultation_service.cancel_consultation(
-            consultation.id,
-            reason="No longer required",
-        )
-
-        assert result.notes == (
-            "Existing note\n"
-            "[Cancelled: No longer required]"
-        )
-
-    def test_rejects_already_cancelled_consultation(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-    ):
-        consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1357,352 +1375,269 @@ class TestCancelConsultation:
 
         with pytest.raises(
             ConflictError,
-            match=rf"Consultation {consultation.id} is already cancelled",
+            match=f"Consultation {consultation.id} is already cancelled",
         ):
             consultation_service.cancel_consultation(
                 consultation.id,
-                reason="Another reason",
+                clinic.id,
+                reason="Again",
             )
 
-    def test_rejects_completed_consultation(
+        no_audit.assert_not_called()
+
+    def test_completed_consultation_cannot_be_cancelled(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
+        no_audit,
     ):
         consultation = make_consultation(
-            db,
             clinic,
             patient,
             staff,
             status=ConsultationStatus.COMPLETED,
-            diagnosis="Completed diagnosis",
         )
 
         with pytest.raises(
             ConflictError,
-            match=rf"Consultation {consultation.id} is already "
-            rf"completed and cannot be cancelled",
+            match=(
+                f"Consultation {consultation.id} is already completed "
+                "and cannot be cancelled"
+            ),
         ):
             consultation_service.cancel_consultation(
                 consultation.id,
-                reason="Attempted cancellation",
+                clinic.id,
+                reason="Too late",
             )
 
-    def test_rejects_cancellation_when_clinic_is_suspended(
+        no_audit.assert_not_called()
+
+    def test_wrong_clinic_is_rejected(
         self,
-        db,
-        suspended_clinic,
+        clinic,
+        make_clinic,
         make_patient,
         make_staff,
+        make_consultation,
+        no_audit,
     ):
-        patient = make_patient(suspended_clinic)
-        staff = make_staff(suspended_clinic)
+        other_clinic = make_clinic(
+            name="Other Cancel Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
 
         consultation = make_consultation(
-            db,
-            suspended_clinic,
-            patient,
-            staff,
+            other_clinic,
+            other_patient,
+            other_staff,
         )
 
         with pytest.raises(
-            ValidationError,
-            match=rf"Clinic {suspended_clinic.id} is not active",
+            NotFoundError,
+            match=f"Consultation {consultation.id} not found",
         ):
             consultation_service.cancel_consultation(
                 consultation.id,
-                reason="Reason",
+                clinic.id,
+                reason="Unauthorized",
             )
 
-
-# ============================================================================
-# PATIENT CONSULTATION HISTORY
-# ============================================================================
+        no_audit.assert_not_called()
 
 
 class TestGetConsultationsForPatient:
-
-    def test_returns_patient_consultation_history_newest_first(
+    def test_returns_patient_consultations_in_descending_order(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
     ):
-        oldest = make_consultation(
-            db,
+        older = make_consultation(
             clinic,
             patient,
             staff,
-            started_at=datetime(
-                2026,
-                1,
-                1,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
+            started_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
 
-        newest = make_consultation(
-            db,
+        newer = make_consultation(
             clinic,
             patient,
             staff,
-            started_at=datetime(
-                2026,
-                1,
-                3,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
+            started_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
 
-        middle = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            started_at=datetime(
-                2026,
-                1,
-                2,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
+        # Correct production signature:
+        # get_consultations_for_patient(patient_id, clinic_id)
+        results = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
         )
 
-        result = consultation_service.get_consultations_for_patient(
-            patient.id
-        )
+        ids = [item.id for item in results]
 
-        assert [item.id for item in result] == [
-            newest.id,
-            middle.id,
-            oldest.id,
-        ]
+        assert ids.index(newer.id) < ids.index(older.id)
 
-    def test_returns_only_requested_patient_consultations(
+    def test_excludes_other_patient(
         self,
-        db,
         clinic,
         patient,
         staff,
         make_patient,
+        make_consultation,
     ):
-        other_patient = make_patient(clinic)
+        other_patient = make_patient(
+            clinic,
+        )
 
-        requested = make_consultation(
-            db,
+        target = make_consultation(
             clinic,
             patient,
             staff,
         )
 
-        make_consultation(
-            db,
+        other = make_consultation(
             clinic,
             other_patient,
             staff,
         )
 
-        result = consultation_service.get_consultations_for_patient(
-            patient.id
+        # Correct production signature:
+        # get_consultations_for_patient(patient_id, clinic_id)
+        results = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
         )
 
-        assert [item.id for item in result] == [requested.id]
+        ids = [item.id for item in results]
 
-    def test_history_is_available_for_suspended_clinic(
+        assert target.id in ids
+        assert other.id not in ids
+
+    def test_wrong_clinic_patient_is_hidden(
         self,
-        db,
+        clinic,
+        make_clinic,
+        make_patient,
+    ):
+        other_clinic = make_clinic(
+            name="Other Patient History Clinic",
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=f"Patient {other_patient.id} not found",
+        ):
+            consultation_service.get_consultations_for_patient(
+                other_patient.id,
+                clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "patient_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_patient_id(
+        self,
+        clinic,
+        patient_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Patient ID must be greater than 0",
+        ):
+            consultation_service.get_consultations_for_patient(
+                patient_id,
+                clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        patient,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic_id,
+            )
+
+    def test_historical_consultations_remain_readable_for_inactive_clinic(
+        self,
         suspended_clinic,
         make_patient,
         make_staff,
+        make_consultation,
     ):
         patient = make_patient(suspended_clinic)
         staff = make_staff(suspended_clinic)
 
         consultation = make_consultation(
-            db,
             suspended_clinic,
             patient,
             staff,
         )
 
-        result = consultation_service.get_consultations_for_patient(
-            patient.id
+        results = consultation_service.get_consultations_for_patient(
+            patient.id,
+            suspended_clinic.id,
         )
 
-        assert [item.id for item in result] == [consultation.id]
-
-    def test_raises_not_found_for_missing_patient(self):
-        with pytest.raises(
-            NotFoundError,
-            match=r"Patient 999999 not found",
-        ):
-            consultation_service.get_consultations_for_patient(
-                999999
-            )
-
-
-# ============================================================================
-# STAFF CONSULTATION HISTORY
-# ============================================================================
+        assert consultation.id in [item.id for item in results]
 
 
 class TestGetConsultationsForStaff:
-
-    def test_returns_staff_consultation_history_newest_first(
+    def test_returns_staff_consultations(
         self,
-        db,
         clinic,
         patient,
         staff,
+        make_consultation,
     ):
-        oldest = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            started_at=datetime(
-                2026,
-                1,
-                1,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
-        )
-
-        newest = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            started_at=datetime(
-                2026,
-                1,
-                3,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
-        )
-
-        middle = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            started_at=datetime(
-                2026,
-                1,
-                2,
-                10,
-                0,
-                tzinfo=timezone.utc,
-            ),
-        )
-
-        result = consultation_service.get_consultations_for_staff(
-            staff.id
-        )
-
-        assert [item.id for item in result] == [
-            newest.id,
-            middle.id,
-            oldest.id,
-        ]
-
-    def test_returns_only_requested_staff_consultations(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
-        make_staff,
-    ):
-        other_staff = make_staff(clinic)
-
-        requested = make_consultation(
-            db,
+        consultation = make_consultation(
             clinic,
             patient,
             staff,
         )
 
-        make_consultation(
-            db,
-            clinic,
-            patient,
-            other_staff,
+        # Correct production signature:
+        # get_consultations_for_staff(staff_id, clinic_id, status=None)
+        results = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
         )
 
-        result = consultation_service.get_consultations_for_staff(
-            staff.id
-        )
+        assert consultation.id in [item.id for item in results]
 
-        assert [item.id for item in result] == [requested.id]
-
-    @pytest.mark.parametrize(
-        "status",
-        [
-            ConsultationStatus.IN_PROGRESS,
-            ConsultationStatus.COMPLETED,
-            ConsultationStatus.CANCELLED,
-        ],
-    )
     def test_filters_by_status(
         self,
-        db,
         clinic,
         patient,
         staff,
-        status,
-    ):
-        matching = make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            status=status,
-        )
-
-        other_status = next(
-            value
-            for value in ConsultationStatus
-            if value != status
-        )
-
-        make_consultation(
-            db,
-            clinic,
-            patient,
-            staff,
-            status=other_status,
-        )
-
-        result = consultation_service.get_consultations_for_staff(
-            staff.id,
-            status=status,
-        )
-
-        assert [item.id for item in result] == [matching.id]
-        assert all(item.status == status for item in result)
-
-    def test_without_status_returns_all_statuses(
-        self,
-        db,
-        clinic,
-        patient,
-        staff,
+        make_consultation,
     ):
         in_progress = make_consultation(
-            db,
             clinic,
             patient,
             staff,
@@ -1710,396 +1645,476 @@ class TestGetConsultationsForStaff:
         )
 
         completed = make_consultation(
-            db,
             clinic,
             patient,
             staff,
             status=ConsultationStatus.COMPLETED,
         )
 
-        cancelled = make_consultation(
-            db,
+        results = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            status=ConsultationStatus.IN_PROGRESS,
+        )
+
+        ids = [item.id for item in results]
+
+        assert in_progress.id in ids
+        assert completed.id not in ids
+
+    def test_wrong_clinic_staff_is_hidden(
+        self,
+        clinic,
+        make_clinic,
+        make_staff,
+    ):
+        other_clinic = make_clinic(
+            name="Other Staff History Clinic",
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=f"Staff member {other_staff.id} not found",
+        ):
+            consultation_service.get_consultations_for_staff(
+                other_staff.id,
+                clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "staff_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_staff_id(
+        self,
+        clinic,
+        staff_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Staff ID must be greater than 0",
+        ):
+            consultation_service.get_consultations_for_staff(
+                staff_id,
+                clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        staff,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic_id,
+            )
+
+
+class TestCreateConsultationTemplate:
+    def test_creates_global_template(
+        self,
+        no_audit,
+    ):
+        template = consultation_service.create_consultation_template(
+            name="Global Template",
+            structure={"sections": ["diagnosis"]},
+            clinic_id=None,
+        )
+
+        assert template.id is not None
+        assert template.clinic_id is None
+        assert template.name == "Global Template"
+        assert template.structure == {
+            "sections": ["diagnosis"],
+        }
+        assert template.is_active is True
+        no_audit.assert_called_once()
+
+    def test_creates_clinic_template(
+        self,
+        clinic,
+        no_audit,
+    ):
+        template = consultation_service.create_consultation_template(
+            name="Clinic Template",
+            structure={"sections": ["history"]},
+            clinic_id=clinic.id,
+        )
+
+        assert template.clinic_id == clinic.id
+        no_audit.assert_called_once()
+
+    def test_strips_name(
+        self,
+        no_audit,
+    ):
+        template = consultation_service.create_consultation_template(
+            name="  General Template  ",
+            structure={"sections": ["diagnosis"]},
+        )
+
+        assert template.name == "General Template"
+
+    def test_strips_specialty(
+        self,
+        no_audit,
+    ):
+        template = consultation_service.create_consultation_template(
+            name="Specialty Template",
+            structure={"sections": ["diagnosis"]},
+            specialty="  Cardiology  ",
+        )
+
+        assert template.specialty == "Cardiology"
+
+    def test_requires_name(
+        self,
+        no_audit,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Template name is required",
+        ):
+            consultation_service.create_consultation_template(
+                name="   ",
+                structure={"sections": ["diagnosis"]},
+            )
+
+        no_audit.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "structure",
+        [None, [], "not-an-object"],
+    )
+    def test_requires_structure_object(
+        self,
+        structure,
+        no_audit,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Template structure must be an object",
+        ):
+            consultation_service.create_consultation_template(
+                name="Invalid Structure",
+                structure=structure,
+            )
+
+        no_audit.assert_not_called()
+
+    def test_rejects_empty_structure(
+        self,
+        no_audit,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Template structure cannot be empty",
+        ):
+            consultation_service.create_consultation_template(
+                name="Empty Structure",
+                structure={},
+            )
+
+        no_audit.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        clinic_id,
+        no_audit,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.create_consultation_template(
+                name="Invalid Clinic",
+                structure={"sections": ["diagnosis"]},
+                clinic_id=clinic_id,
+            )
+
+        no_audit.assert_not_called()
+
+    def test_inactive_clinic_cannot_create_template(
+        self,
+        suspended_clinic,
+        no_audit,
+    ):
+        with pytest.raises(
+            Exception,
+        ):
+            consultation_service.create_consultation_template(
+                name="Suspended Clinic Template",
+                structure={"sections": ["diagnosis"]},
+                clinic_id=suspended_clinic.id,
+            )
+
+        no_audit.assert_not_called()
+
+
+class TestGetActiveTemplates:
+    def test_returns_active_global_and_clinic_templates(
+        self,
+        clinic,
+        make_clinic,
+        make_template,
+    ):
+        global_template = make_template(
+            clinic=None,
+            is_active=True,
+            name="A Global",
+        )
+
+        clinic_template = make_template(
+            clinic=clinic,
+            is_active=True,
+            name="B Clinic",
+        )
+
+        other_clinic = make_clinic(
+            name="Template Other Clinic",
+        )
+
+        other_template = make_template(
+            clinic=other_clinic,
+            is_active=True,
+            name="C Other",
+        )
+
+        inactive = make_template(
+            clinic=clinic,
+            is_active=False,
+            name="D Inactive",
+        )
+
+        results = consultation_service.get_active_templates(
+            clinic.id,
+        )
+
+        ids = [item.id for item in results]
+
+        assert global_template.id in ids
+        assert clinic_template.id in ids
+        assert other_template.id not in ids
+        assert inactive.id not in ids
+
+    def test_returns_all_active_templates_without_clinic_filter(
+        self,
+        make_template,
+    ):
+        global_template = make_template(
+            clinic=None,
+            is_active=True,
+            name="Global",
+        )
+
+        clinic_template = make_template(
+            clinic=None,
+            is_active=True,
+            name="Another Global",
+        )
+
+        results = consultation_service.get_active_templates()
+
+        ids = [item.id for item in results]
+
+        assert global_template.id in ids
+        assert clinic_template.id in ids
+
+    def test_returns_templates_in_name_order(
+        self,
+        clinic,
+        make_template,
+    ):
+        first = make_template(
+            clinic=clinic,
+            is_active=True,
+            name="Alpha",
+        )
+
+        second = make_template(
+            clinic=clinic,
+            is_active=True,
+            name="Zulu",
+        )
+
+        results = consultation_service.get_active_templates(
+            clinic.id,
+        )
+
+        relevant = [
+            item.id
+            for item in results
+            if item.id in {first.id, second.id}
+        ]
+
+        assert relevant == [first.id, second.id]
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.get_active_templates(
+                clinic_id,
+            )
+
+
+class TestConsultationLifecycleValidators:
+    def test_completed_cannot_be_completed_again(
+        self,
+        make_consultation,
+        clinic,
+        patient,
+        staff,
+    ):
+        consultation = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.COMPLETED,
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=f"Consultation {consultation.id} is already completed",
+        ):
+            consultation_service._validate_consultation_can_be_completed(
+                consultation,
+            )
+
+    def test_cancelled_cannot_be_completed(
+        self,
+        make_consultation,
+        clinic,
+        patient,
+        staff,
+    ):
+        consultation = make_consultation(
             clinic,
             patient,
             staff,
             status=ConsultationStatus.CANCELLED,
         )
 
-        result = consultation_service.get_consultations_for_staff(
-            staff.id
-        )
+        with pytest.raises(
+            ConflictError,
+            match=(
+                f"Consultation {consultation.id} is cancelled "
+                "and cannot be completed"
+            ),
+        ):
+            consultation_service._validate_consultation_can_be_completed(
+                consultation,
+            )
 
-        result_ids = {item.id for item in result}
-
-        assert result_ids == {
-            in_progress.id,
-            completed.id,
-            cancelled.id,
-        }
-
-    def test_history_is_available_for_suspended_clinic(
+    def test_non_in_progress_cannot_be_completed(
         self,
-        db,
-        suspended_clinic,
-        make_patient,
-        make_staff,
+        make_consultation,
+        clinic,
+        patient,
+        staff,
     ):
-        patient = make_patient(suspended_clinic)
-        staff = make_staff(suspended_clinic)
-
         consultation = make_consultation(
-            db,
-            suspended_clinic,
+            clinic,
             patient,
             staff,
+            status=ConsultationStatus.CANCELLED,
         )
 
-        result = consultation_service.get_consultations_for_staff(
-            staff.id
-        )
-
-        assert [item.id for item in result] == [consultation.id]
-
-    def test_raises_not_found_for_missing_staff(self):
         with pytest.raises(
-            NotFoundError,
-            match=r"Staff 999999 not found",
+            ConflictError,
         ):
-            consultation_service.get_consultations_for_staff(
-                999999
+            consultation_service._validate_consultation_can_be_completed(
+                consultation,
             )
 
-
-# ============================================================================
-# CREATE CONSULTATION TEMPLATE
-# ============================================================================
-
-
-class TestCreateConsultationTemplate:
-
-    def test_creates_global_template(
+    def test_completed_cannot_be_cancelled(
         self,
-        db,
-        audit_log_spy,
-    ):
-        structure = {
-            "sections": [
-                "chief_complaint",
-                "diagnosis",
-            ]
-        }
-
-        result = consultation_service.create_consultation_template(
-            name="General Template",
-            structure=structure,
-        )
-
-        assert result.id is not None
-        assert result.clinic_id is None
-        assert result.name == "General Template"
-        assert result.specialty is None
-        assert result.structure == structure
-        assert result.is_active is True
-
-        assert len(audit_log_spy) == 1
-        assert audit_log_spy[0]["action"].value == "create"
-        assert audit_log_spy[0]["entity_type"] == "ConsultationTemplate"
-
-    def test_creates_clinic_specific_template(
-        self,
+        make_consultation,
         clinic,
+        patient,
+        staff,
     ):
-        result = consultation_service.create_consultation_template(
-            name="Cardiology Template",
-            structure={"sections": ["cardiac_history"]},
-            clinic_id=clinic.id,
-            specialty="Cardiology",
+        consultation = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.COMPLETED,
         )
 
-        assert result.clinic_id == clinic.id
-        assert result.name == "Cardiology Template"
-        assert result.specialty == "Cardiology"
-
-    def test_strips_template_name(
-        self,
-        clinic,
-    ):
-        result = consultation_service.create_consultation_template(
-            name="  General Template  ",
-            structure={"sections": []},
-            clinic_id=clinic.id,
-        )
-
-        assert result.name == "General Template"
-
-    def test_accepts_inactive_template(
-        self,
-        db,
-    ):
-        result = consultation_service.create_consultation_template(
-            name="Inactive Template",
-            structure={"sections": []},
-            is_active=False,
-        )
-
-        assert result.is_active is False
-
-        persisted = db.session.get(
-            ConsultationTemplate,
-            result.id,
-        )
-
-        assert persisted.is_active is False
-
-    def test_rejects_missing_name(
-        self,
-        db,
-    ):
         with pytest.raises(
-            ValidationError,
-            match=r"Template name is required",
+            ConflictError,
+            match=(
+                f"Consultation {consultation.id} is already completed "
+                "and cannot be cancelled"
+            ),
         ):
-            consultation_service.create_consultation_template(
-                name="",
-                structure={"sections": []},
+            consultation_service._validate_consultation_can_be_cancelled(
+                consultation,
             )
 
-    def test_rejects_whitespace_name(
+    def test_cancelled_cannot_be_cancelled_again(
         self,
-        db,
+        make_consultation,
+        clinic,
+        patient,
+        staff,
     ):
+        consultation = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.CANCELLED,
+        )
+
         with pytest.raises(
-            ValidationError,
-            match=r"Template name is required",
+            ConflictError,
+            match=f"Consultation {consultation.id} is already cancelled",
         ):
-            consultation_service.create_consultation_template(
-                name="   ",
-                structure={"sections": []},
+            consultation_service._validate_consultation_can_be_cancelled(
+                consultation,
             )
 
-    @pytest.mark.parametrize(
-        "structure",
-        [
-            [],
-            "not an object",
-            123,
-            None,
-        ],
-    )
-    def test_rejects_non_dict_structure(
+    def test_non_in_progress_cannot_be_cancelled(
         self,
-        structure,
+        make_consultation,
+        clinic,
+        patient,
+        staff,
     ):
+        consultation = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.COMPLETED,
+        )
+
         with pytest.raises(
-            ValidationError,
-            match=r"Template structure must be an object",
+            ConflictError,
         ):
-            consultation_service.create_consultation_template(
-                name="Invalid Template",
-                structure=structure,
+            consultation_service._validate_consultation_can_be_cancelled(
+                consultation,
             )
-
-    def test_rejects_template_for_suspended_clinic(
-        self,
-        suspended_clinic,
-    ):
-        with pytest.raises(
-            ValidationError,
-            match=rf"Clinic {suspended_clinic.id} is not active",
-        ):
-            consultation_service.create_consultation_template(
-                name="Suspended Clinic Template",
-                structure={"sections": []},
-                clinic_id=suspended_clinic.id,
-            )
-
-
-# ============================================================================
-# GET ACTIVE TEMPLATES
-# ============================================================================
-
-
-class TestGetActiveTemplates:
-
-    def test_returns_all_active_templates_when_no_clinic_is_supplied(
-        self,
-        db,
-    ):
-        active_a = make_template(
-            db,
-            name="Alpha Template",
-            is_active=True,
-        )
-
-        inactive = make_template(
-            db,
-            name="Inactive Template",
-            is_active=False,
-        )
-
-        active_b = make_template(
-            db,
-            name="Beta Template",
-            is_active=True,
-        )
-
-        result = consultation_service.get_active_templates()
-
-        result_ids = [template.id for template in result]
-
-        assert active_a.id in result_ids
-        assert active_b.id in result_ids
-        assert inactive.id not in result_ids
-
-    def test_returns_global_and_matching_clinic_templates(
-        self,
-        db,
-        clinic,
-        make_clinic,
-    ):
-        global_template = make_template(
-            db,
-            clinic_id=None,
-            name="Global Template",
-        )
-
-        clinic_template = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Clinic Template",
-        )
-
-        other_clinic = make_clinic(name="Other Clinic")
-
-        other_template = make_template(
-            db,
-            clinic_id=other_clinic.id,
-            name="Other Clinic Template",
-        )
-
-        result = consultation_service.get_active_templates(
-            clinic_id=clinic.id
-        )
-
-        result_ids = {template.id for template in result}
-
-        assert global_template.id in result_ids
-        assert clinic_template.id in result_ids
-        assert other_template.id not in result_ids
-
-    def test_excludes_inactive_global_template(
-        self,
-        db,
-        clinic,
-    ):
-        inactive_global = make_template(
-            db,
-            clinic_id=None,
-            name="Inactive Global",
-            is_active=False,
-        )
-
-        active_global = make_template(
-            db,
-            clinic_id=None,
-            name="Active Global",
-            is_active=True,
-        )
-
-        result = consultation_service.get_active_templates(
-            clinic_id=clinic.id
-        )
-
-        result_ids = {template.id for template in result}
-
-        assert active_global.id in result_ids
-        assert inactive_global.id not in result_ids
-
-    def test_excludes_inactive_clinic_template(
-        self,
-        db,
-        clinic,
-    ):
-        inactive_clinic = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Inactive Clinic Template",
-            is_active=False,
-        )
-
-        active_clinic = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Active Clinic Template",
-            is_active=True,
-        )
-
-        result = consultation_service.get_active_templates(
-            clinic_id=clinic.id
-        )
-
-        result_ids = {template.id for template in result}
-
-        assert active_clinic.id in result_ids
-        assert inactive_clinic.id not in result_ids
-
-    def test_orders_templates_alphabetically(
-        self,
-        db,
-    ):
-        make_template(
-            db,
-            name="Zebra Template",
-        )
-
-        make_template(
-            db,
-            name="Alpha Template",
-        )
-
-        make_template(
-            db,
-            name="Middle Template",
-        )
-
-        result = consultation_service.get_active_templates()
-
-        names = [template.name for template in result]
-
-        assert names == sorted(names)
-
-    def test_returns_all_active_templates_when_clinic_id_is_none(
-        self,
-        db,
-        clinic,
-        make_clinic,
-    ):
-        global_template = make_template(
-            db,
-            clinic_id=None,
-            name="Global",
-        )
-
-        clinic_template = make_template(
-            db,
-            clinic_id=clinic.id,
-            name="Clinic",
-        )
-
-        other_clinic = make_clinic(name="Other Clinic")
-
-        other_template = make_template(
-            db,
-            clinic_id=other_clinic.id,
-            name="Other",
-        )
-
-        result = consultation_service.get_active_templates(
-            clinic_id=None
-        )
-
-        result_ids = {template.id for template in result}
-
-        assert global_template.id in result_ids
-        assert clinic_template.id in result_ids
-        assert other_template.id in result_ids

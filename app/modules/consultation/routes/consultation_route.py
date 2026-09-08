@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, g, session
+from flask import Blueprint, jsonify, request, g
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
@@ -66,18 +66,27 @@ CONSULTATION_TEMPLATE_ROLES = (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _payload(schema):
+def _payload(schema, data=None):
     """
-    Validate the incoming JSON body using the supplied Pydantic schema.
+    Validate request payload using the supplied Pydantic schema.
+
+    Validation errors are converted into a clean JSON-safe 422 response.
+    Pydantic's default errors may contain ValueError objects inside `ctx`,
+    which are not directly JSON serializable by Flask.
     """
     try:
-        return schema.model_validate(
-            request.get_json(silent=True) or {}
-        )
+        payload_data = (
+            request.get_json(silent=True)
+            if data is None
+            else data
+        ) or {}
+
+        return schema.model_validate(payload_data)
+
     except PydanticValidationError as exc:
         return jsonify({
             "success": False,
-            "error": exc.errors(),
+            "error": exc.errors(include_context=False),
         }), 422
 
 
@@ -92,6 +101,7 @@ def _query_status():
 
     try:
         return ConsultationStatus(raw_status)
+
     except ValueError:
         return jsonify({
             "success": False,
@@ -113,6 +123,7 @@ def _query_consultation_type():
 
     try:
         return ConsultationType(raw_type)
+
     except ValueError:
         return jsonify({
             "success": False,
@@ -140,6 +151,7 @@ def _get_current_user():
 
     try:
         user_id = int(identity)
+
     except (TypeError, ValueError):
         raise ValidationError(
             "Invalid authentication identity"
@@ -158,7 +170,8 @@ def _get_current_user():
         )
 
     return user
-    
+
+
 def _get_authenticated_clinic_id():
     """
     Resolve the authenticated user's clinic.
@@ -203,6 +216,7 @@ def _resolve_template_clinic_id():
     if error is not None:
         if _is_admin():
             return None, None
+
         return None, error
 
     return clinic_id, None
@@ -273,14 +287,23 @@ def _serialize_template(template):
 @role_required(*CONSULTATION_WRITE_ROLES)
 def start():
     """
-    Start a new consultation for the authenticated user's clinic.
+    Start a consultation.
 
-    clinic_id is derived from authentication and cannot be supplied
-    by the client.
+    The clinic is always derived from the authenticated user.
+    A client-supplied clinic_id is ignored.
 
     POST /api/consultations/
     """
-    payload = _payload(ConsultationStartSchema)
+    raw_payload = request.get_json(silent=True) or {}
+
+    # Never trust client-supplied clinic_id.
+    # The clinic comes from the authenticated user.
+    raw_payload.pop("clinic_id", None)
+
+    payload = _payload(
+        ConsultationStartSchema,
+        raw_payload,
+    )
 
     if isinstance(payload, tuple):
         return payload
@@ -306,9 +329,6 @@ def start():
 def get(consultation_id: int):
     """
     Get a consultation belonging to the authenticated user's clinic.
-
-    Historical consultations remain accessible even if the clinic
-    is inactive or suspended.
 
     GET /api/consultations/<consultation_id>
     """
@@ -336,7 +356,12 @@ def update(consultation_id: int):
 
     PATCH /api/consultations/<consultation_id>
     """
-    payload = _payload(ConsultationUpdateSchema)
+    raw_payload = request.get_json(silent=True) or {}
+
+    payload = _payload(
+        ConsultationUpdateSchema,
+        raw_payload,
+    )
 
     if isinstance(payload, tuple):
         return payload
@@ -372,7 +397,12 @@ def complete(consultation_id: int):
 
     POST /api/consultations/<consultation_id>/complete
     """
-    payload = _payload(ConsultationCompleteSchema)
+    raw_payload = request.get_json(silent=True) or {}
+
+    payload = _payload(
+        ConsultationCompleteSchema,
+        raw_payload,
+    )
 
     if isinstance(payload, tuple):
         return payload
@@ -404,7 +434,9 @@ def cancel(consultation_id: int):
 
     POST /api/consultations/<consultation_id>/cancel
     """
-    payload = _payload(ConsultationCancelSchema)
+    payload = _payload(
+        ConsultationCancelSchema
+    )
 
     if isinstance(payload, tuple):
         return payload
@@ -515,12 +547,13 @@ def create_template():
 
     Non-admin users create templates for their authenticated clinic.
 
-    ADMIN may create a global template by explicitly using the
-    global-template service operation.
+    ADMIN may create a global template.
 
     POST /api/consultations/templates
     """
-    payload = _payload(ConsultationTemplateCreateSchema)
+    payload = _payload(
+        ConsultationTemplateCreateSchema
+    )
 
     if isinstance(payload, tuple):
         return payload
@@ -551,6 +584,8 @@ def active_templates():
 
     ADMIN may optionally query a specific clinic.
     Non-admin users cannot query another clinic.
+
+    GET /api/consultations/templates
     """
     raw_clinic_id = request.args.get("clinic_id")
 
@@ -559,10 +594,12 @@ def active_templates():
     if _is_admin():
         if raw_clinic_id is None:
             clinic_id = None
+
         else:
             try:
                 clinic_id = int(raw_clinic_id)
-            except ValueError:
+
+            except (TypeError, ValueError):
                 return jsonify({
                     "success": False,
                     "error": "clinic_id must be an integer",
@@ -573,6 +610,7 @@ def active_templates():
                     "success": False,
                     "error": "clinic_id must be greater than 0",
                 }), 422
+
     else:
         if error is not None:
             return error
@@ -580,7 +618,8 @@ def active_templates():
         if raw_clinic_id is not None:
             try:
                 requested_clinic_id = int(raw_clinic_id)
-            except ValueError:
+
+            except (TypeError, ValueError):
                 return jsonify({
                     "success": False,
                     "error": "clinic_id must be an integer",
@@ -601,7 +640,7 @@ def active_templates():
         clinic_id = authenticated_clinic_id
 
     templates = get_active_templates(
-        clinic_id=clinic_id
+        clinic_id=clinic_id,
     )
 
     return jsonify({

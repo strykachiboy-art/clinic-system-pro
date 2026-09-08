@@ -61,6 +61,7 @@ class Config:
 
 class DevelopmentConfig(Config):
     DEBUG = True
+    AI_PROVIDER = os.environ.get("AI_PROVIDER", "openai")
 
 
 class ProductionConfig(Config):

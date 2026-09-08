@@ -343,6 +343,82 @@ def _call_openai(
     return result
 
 
+def _development_provider(
+    feature: AIFeature,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Deterministic local provider for development/load testing.
+
+    This provider never contacts an external AI service.
+    Its output is still passed through the normal AI response
+    schema validation and persistence workflow.
+    """
+
+    if feature is AIFeature.DRUG_INTERACTION_CHECK:
+        return {
+            "summary": "No clinically significant interaction found.",
+            "interactions": [],
+            "recommendations": [
+                "Continue routine monitoring.",
+            ],
+        }
+
+    if feature is AIFeature.TRIAGE_ASSISTANT:
+        return {
+            "summary": "Patient requires clinical assessment.",
+            "risk_score": AIRiskLevel.MEDIUM.value,
+            "recommendation": "Arrange clinical review.",
+        }
+
+    if feature is AIFeature.LAB_RESULT_INTERPRETER:
+        return {
+            "summary": "Laboratory results reviewed.",
+            "interpretation": (
+                "Results require clinical correlation."
+            ),
+            "abnormal_findings": [],
+            "recommendations": [
+                "Review results with the treating clinician.",
+            ],
+        }
+
+    raise ValidationError(
+        f"Unsupported AI feature '{feature.value}'"
+    )
+
+
+def _get_configured_provider() -> AIProvider:
+    """
+    Resolve the configured AI provider.
+
+    Explicitly supplied providers from tests continue to take
+    precedence in _run_feature().
+    """
+
+    provider_name = current_app.config.get(
+        "AI_PROVIDER",
+        "openai",
+    )
+
+    if not isinstance(provider_name, str):
+        raise ValidationError(
+            "AI_PROVIDER must be a string"
+        )
+
+    provider_name = provider_name.strip().lower()
+
+    if provider_name == "openai":
+        return _call_openai
+
+    if provider_name == "development":
+        return _development_provider
+
+    raise ValidationError(
+        f"Unsupported AI provider '{provider_name}'"
+    )
+
+
 def _validate_provider_result(
     feature: AIFeature,
     result: dict[str, Any],
@@ -437,7 +513,7 @@ def _run_feature(
 
     ai_provider = (
         provider
-        or _call_openai
+        or _get_configured_provider()
     )
 
     result = ai_provider(

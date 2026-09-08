@@ -29,6 +29,21 @@ def _enum_value(value):
     return value.value if hasattr(value, "value") else value
 
 
+def _audit_value(value):
+    """
+    Convert a value into a JSON-safe representation for audit logs.
+
+    Enum values are reduced to their underlying values and time objects
+    are serialized using ISO-8601 format.
+    """
+    value = _enum_value(value)
+
+    if isinstance(value, time):
+        return value.isoformat()
+
+    return value
+
+
 def _utcnow():
     from datetime import datetime, timezone
 
@@ -54,9 +69,6 @@ def _validate_operating_hours(
 ):
     """
     Validate clinic operating hours.
-
-    Both values are optional. When both are supplied, opening must
-    occur before closing.
     """
     if (
         opening_time is not None
@@ -95,9 +107,6 @@ def _get_parent_clinic(
 ) -> Clinic:
     """
     Resolve a parent clinic.
-
-    Row locking is used when the caller is about to modify hierarchy
-    beneath the parent.
     """
     if parent_clinic_id <= 0:
         raise ValidationError("Invalid parent clinic ID")
@@ -548,11 +557,11 @@ def update_clinic(
         if current_value == new_value_raw:
             continue
 
-        old_value[key] = _enum_value(
+        old_value[key] = _audit_value(
             current_value
         )
 
-        new_value[key] = _enum_value(
+        new_value[key] = _audit_value(
             new_value_raw
         )
 
