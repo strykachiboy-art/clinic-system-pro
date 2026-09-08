@@ -12,6 +12,16 @@ from app.core.enums.patient_enums import (
 
 
 # ============================================================================
+# Shared request configuration
+# ============================================================================
+
+REQUEST_CONFIG = ConfigDict(
+    extra="forbid",
+    from_attributes=True,
+)
+
+
+# ============================================================================
 # Patient
 # ============================================================================
 
@@ -49,9 +59,7 @@ class PatientCreateSchema(BaseModel):
         max_length=50,
     )
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientUpdateSchema(BaseModel):
@@ -97,17 +105,13 @@ class PatientUpdateSchema(BaseModel):
         max_length=50,
     )
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientStatusUpdateSchema(BaseModel):
     is_active: bool
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientResponseSchema(BaseModel):
@@ -168,9 +172,7 @@ class PatientFamilyMemberCreateSchema(BaseModel):
         gt=0,
     )
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientFamilyMemberUpdateSchema(BaseModel):
@@ -194,9 +196,7 @@ class PatientFamilyMemberUpdateSchema(BaseModel):
         gt=0,
     )
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientFamilyMemberResponseSchema(BaseModel):
@@ -246,9 +246,7 @@ class PatientInsuranceCreateSchema(BaseModel):
     is_primary: bool = False
     is_active: bool = True
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientInsuranceUpdateSchema(BaseModel):
@@ -275,9 +273,7 @@ class PatientInsuranceUpdateSchema(BaseModel):
     is_primary: Optional[bool] = None
     is_active: Optional[bool] = None
 
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientInsuranceResponseSchema(BaseModel):
@@ -353,21 +349,12 @@ class PatientVitalsCreateSchema(BaseModel):
         ge=0,
     )
 
-    recorded_at: Optional[datetime] = None
-
     consultation_id: Optional[int] = Field(
         None,
         gt=0,
     )
 
-    recorded_by_id: Optional[int] = Field(
-        None,
-        gt=0,
-    )
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
+    model_config = REQUEST_CONFIG
 
 
 class PatientVitalsResponseSchema(BaseModel):

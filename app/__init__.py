@@ -31,7 +31,7 @@ def register_blueprints(app):
     from app.modules.ambulance.routes.ambulance_vehicle_routes import vehicle_bp
     from app.modules.ambulance.routes.ambulance_trip_routes import trip_bp
     from app.modules.hie.routes.hie_route import hie_bp
-    from app.modules.pharmacy.routes.pharmacy_route import pharmacy_bp
+    from app.modules.pharmacy.routes.pharmacy_routes import pharmacy_bp
     from app.modules.appointment.routes.appointment_route import appointment_bp
     from app.modules.billing.routes.billing_route import billing_bp
     from app.modules.clinic.routes.clinic_route import clinic_bp

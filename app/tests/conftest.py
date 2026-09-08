@@ -65,6 +65,7 @@ def db_session(app, db):
 
     rather than importing the global db object directly.
     """
+
     return db.session
 
 
@@ -124,14 +125,17 @@ def make_auth_headers(auth_headers_for):
 
     Usage:
 
-        headers = make_auth_headers(auth_headers_for, user)
+        headers = make_auth_headers(user)
+        headers = make_auth_headers(user, role=Role.ADMIN)
     """
 
     def _make(user, role=None):
-        return auth_headers_for(user, role=role)
+        return auth_headers_for(
+            user,
+            role=role,
+        )
 
     return _make
-
 
 
 # ============================================================================
@@ -160,6 +164,7 @@ def make_clinic(db):
             "name",
             f"Test Clinic {counter['n']}",
         )
+
         overrides.setdefault(
             "ai_credits",
             5,
@@ -184,6 +189,7 @@ def clinic(make_clinic):
 @pytest.fixture()
 def suspended_clinic(make_clinic):
     """Clinic in SUSPENDED state."""
+
     from app.core.enums.clinic_enums import ClinicStatus
 
     return make_clinic(
@@ -231,7 +237,11 @@ def make_user(db):
         )
 
         user = User(
-            clinic_id=clinic.id if clinic is not None else None,
+            clinic_id=(
+                clinic.id
+                if clinic is not None
+                else None
+            ),
             role=role,
             is_active=is_active,
             **overrides,
@@ -250,6 +260,7 @@ def make_user(db):
 @pytest.fixture()
 def user(make_user, clinic):
     """Default active ADMIN user."""
+
     from app.core.enums.role_enums import Role
 
     return make_user(
@@ -272,6 +283,7 @@ def make_message(db):
         MessageStatus,
         MessageType,
     )
+
     from app.modules.messages.models.message_model import Message
 
     counter = {"n": 0}
@@ -331,7 +343,8 @@ def make_message(db):
 # NOTIFICATION FIXTURES
 # ============================================================================
 
-@pytest.fixture
+
+@pytest.fixture()
 def make_notification(db_session):
     """
     Factory fixture for creating Notification records.
@@ -392,7 +405,7 @@ def make_notification(db_session):
     return _make_notification
 
 
-@pytest.fixture
+@pytest.fixture()
 def notification(
     make_notification,
     clinic,
@@ -409,8 +422,8 @@ def notification(
         clinic_id=clinic.id,
         user_id=user.id,
     )
-    
-    
+
+
 # ============================================================================
 # STAFF
 # ============================================================================
@@ -449,7 +462,9 @@ def make_staff(db, make_user):
     ):
         counter["n"] += 1
 
-        user_overrides = dict(user_overrides or {})
+        user_overrides = dict(
+            user_overrides or {}
+        )
 
         linked_user = make_user(
             clinic,
@@ -538,10 +553,12 @@ def make_patient(db):
             "first_name",
             "Jane",
         )
+
         overrides.setdefault(
             "last_name",
             "Doe",
         )
+
         overrides.setdefault(
             "patient_number",
             f"MRN-{counter['n']}",
@@ -579,7 +596,10 @@ def make_appointment(db):
         AppointmentStatus,
         AppointmentType,
     )
-    from app.modules.appointment.models.appointment_model import Appointment
+
+    from app.modules.appointment.models.appointment_model import (
+        Appointment,
+    )
 
     counter = {"n": 0}
 
@@ -639,7 +659,10 @@ def make_consultation(db):
         ConsultationStatus,
         ConsultationType,
     )
-    from app.modules.consultation.models.consultation_model import Consultation
+
+    from app.modules.consultation.models.consultation_model import (
+        Consultation,
+    )
 
     def _make(
         clinic,
@@ -700,7 +723,7 @@ def make_template(db):
 
         if name is None:
             name = (
-                f"Test Consultation Template "
+                "Test Consultation Template "
                 f"{counter['n']}"
             )
 
@@ -755,6 +778,7 @@ def make_drug(db):
             "name",
             f"Test Drug {counter['n']}",
         )
+
         overrides.setdefault(
             "is_active",
             True,
@@ -792,17 +816,21 @@ def make_drug_batch(db):
             "batch_number",
             f"BATCH-{counter['n']}",
         )
+
         overrides.setdefault(
             "quantity_on_hand",
             100,
         )
+
         overrides.setdefault(
             "reorder_level",
             20,
         )
+
         overrides.setdefault(
             "expiry_date",
-            date.today() + timedelta(days=90),
+            date.today()
+            + timedelta(days=90),
         )
 
         batch = DrugBatch(
@@ -828,7 +856,10 @@ def make_drug_batch(db):
 def make_prescription(db):
     """Factory for Prescription."""
 
-    from app.core.enums.prescription_enums import PrescriptionStatus
+    from app.core.enums.prescription_enums import (
+        PrescriptionStatus,
+    )
+
     from app.modules.prescription.models.prescription_model import (
         Prescription,
     )
@@ -996,6 +1027,7 @@ def make_lab_order(db):
     """Factory for LabOrder plus LabOrderItems."""
 
     from app.core.enums.lab_enums import LabOrderStatus
+
     from app.modules.lab.models.lab_model import (
         LabOrder,
         LabOrderItem,
@@ -1057,7 +1089,7 @@ def make_audit_log(db):
     Creates a raw AuditLog model. Pass a real user when the audit
     record should be associated with a user.
     """
-    
+
     from app.core.audit.models.audit_model import AuditLog
     from app.core.enums.audit_enums import AuditAction
 
@@ -1112,19 +1144,6 @@ def make_audit_log(db):
 def mock_ai_provider(monkeypatch):
     """
     Mock the AI provider boundary used by AI routes.
-
-    Usage:
-
-        mock_ai_provider.set_response(
-            {"risk_score": "low"}
-        )
-
-        response = client.post(...)
-
-        assert (
-            mock_ai_provider.last_call["feature"]
-            == AIFeature.TRIAGE_ASSISTANT
-        )
     """
 
     import app.modules.ai.services.ai_service as ai_service
@@ -1168,8 +1187,6 @@ def mock_ai_provider(monkeypatch):
 def assert_domain_error():
     """
     Assert an application/domain error handled by error_handlers.py.
-
-    Returns the decoded response body.
     """
 
     def _assert(response, status_code):
@@ -1210,7 +1227,11 @@ def assert_unauthorized():
     def _assert(response):
         body = response.get_json()
 
-        assert response.status_code in (401, 422), body
+        assert response.status_code in (
+            401,
+            422,
+        ), body
+
         assert "msg" in body
 
         return body

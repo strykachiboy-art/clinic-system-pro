@@ -57,9 +57,7 @@ pharmacy_bp = Blueprint(
 
 
 def _json_body() -> dict:
-    payload = request.get_json(
-        silent=True
-    )
+    payload = request.get_json(silent=True)
 
     if payload is None:
         return {}
@@ -72,27 +70,7 @@ def _json_body() -> dict:
     return payload
 
 
-def _required_query_int(
-    name: str,
-) -> int:
-    value = request.args.get(
-        name,
-        type=int,
-    )
-
-    if value is None or value <= 0:
-        raise ValidationError(
-            f"{name} query parameter is required "
-            f"and must be greater than zero"
-        )
-
-    return value
-
-
-def _serialize(
-    schema,
-    value,
-):
+def _serialize(schema, value):
     return schema.model_validate(
         value
     ).model_dump(
@@ -100,10 +78,7 @@ def _serialize(
     )
 
 
-def _serialize_many(
-    schema,
-    values,
-):
+def _serialize_many(schema, values):
     return [
         schema.model_validate(
             value
@@ -114,10 +89,8 @@ def _serialize_many(
     ]
 
 
-def _get_current_user():
-    """
-    Return the authenticated user.
-    """
+def _get_current_user() -> User:
+
     identity = get_jwt_identity()
 
     try:
@@ -127,7 +100,10 @@ def _get_current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -164,11 +140,15 @@ def _get_current_staff() -> Staff:
     """
     Resolve the Staff record belonging to the authenticated user.
 
-    Pharmacy dispensing must use the authenticated staff actor rather
-    than accepting dispensed_by_id from the request.
+    The dispensing actor is always derived from authentication.
     """
 
     user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a clinic"
+        )
 
     staff = (
         Staff.query
@@ -232,18 +212,8 @@ def get_drug_route(
 
     drug = get_drug(
         drug_id=drug_id,
+        clinic_id=clinic_id,
     )
-
-    # Global drugs are allowed in every clinic.
-    # Clinic-specific drugs must belong to this clinic.
-    if (
-        drug.clinic_id is not None
-        and drug.clinic_id != clinic_id
-    ):
-        raise ValidationError(
-            f"Drug {drug_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
 
     return jsonify(
         {
@@ -296,25 +266,13 @@ def update_drug_route(
 ):
     clinic_id = _get_current_clinic_id()
 
-    drug = get_drug(
-        drug_id=drug_id,
-    )
-
-    if (
-        drug.clinic_id is not None
-        and drug.clinic_id != clinic_id
-    ):
-        raise ValidationError(
-            f"Drug {drug_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
-
     payload = DrugUpdateSchema.model_validate(
         _json_body()
     )
 
     drug = update_drug(
         drug_id=drug_id,
+        clinic_id=clinic_id,
         **payload.model_dump(
             exclude_unset=True
         ),
@@ -342,21 +300,9 @@ def activate_drug_route(
 ):
     clinic_id = _get_current_clinic_id()
 
-    drug = get_drug(
-        drug_id=drug_id,
-    )
-
-    if (
-        drug.clinic_id is not None
-        and drug.clinic_id != clinic_id
-    ):
-        raise ValidationError(
-            f"Drug {drug_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
-
     drug = set_drug_active_status(
         drug_id=drug_id,
+        clinic_id=clinic_id,
         is_active=True,
     )
 
@@ -382,21 +328,9 @@ def deactivate_drug_route(
 ):
     clinic_id = _get_current_clinic_id()
 
-    drug = get_drug(
-        drug_id=drug_id,
-    )
-
-    if (
-        drug.clinic_id is not None
-        and drug.clinic_id != clinic_id
-    ):
-        raise ValidationError(
-            f"Drug {drug_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
-
     drug = set_drug_active_status(
         drug_id=drug_id,
+        clinic_id=clinic_id,
         is_active=False,
     )
 
@@ -493,13 +427,8 @@ def get_batch_route(
 
     batch = get_batch(
         batch_id=batch_id,
+        clinic_id=clinic_id,
     )
-
-    if batch.clinic_id != clinic_id:
-        raise ValidationError(
-            f"Drug batch {batch_id} does not belong to "
-            f"clinic {clinic_id}"
-        )
 
     return jsonify(
         {
@@ -584,14 +513,32 @@ def create_dispense_record_route():
     """
     Create a pharmacy dispensing transaction.
 
-    clinic_id and dispensed_by_id are deliberately NOT accepted
-    from the client.
-
+    clinic_id and dispensed_by_id are never accepted from the client.
     Both are derived from the authenticated user.
     """
 
-    clinic_id = _get_current_clinic_id()
-    staff = _get_current_staff()
+    user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a clinic"
+        )
+
+    clinic_id = user.clinic_id
+
+    staff = (
+        Staff.query
+        .filter(
+            Staff.user_id == user.id,
+            Staff.clinic_id == clinic_id,
+        )
+        .first()
+    )
+
+    if staff is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a staff record"
+        )
 
     payload = DispenseRecordCreateSchema.model_validate(
         _json_body()
@@ -630,19 +577,8 @@ def get_dispense_record_route(
 
     record = get_dispense_record(
         dispense_record_id=dispense_record_id,
+        clinic_id=clinic_id,
     )
-
-    if record.prescription is None:
-        raise ValidationError(
-            f"Dispense record {dispense_record_id} "
-            f"has no prescription"
-        )
-
-    if record.prescription.clinic_id != clinic_id:
-        raise ValidationError(
-            f"Dispense record {dispense_record_id} "
-            f"does not belong to clinic {clinic_id}"
-        )
 
     return jsonify(
         {
@@ -669,40 +605,8 @@ def list_dispense_records_route(
 
     records = list_dispense_records_for_prescription(
         prescription_id=prescription_id,
+        clinic_id=clinic_id,
     )
-
-    if records:
-        prescription = records[0].prescription
-
-        if prescription is None:
-            raise ValidationError(
-                f"Prescription {prescription_id} "
-                f"has no prescription record"
-            )
-
-        if prescription.clinic_id != clinic_id:
-            raise ValidationError(
-                f"Prescription {prescription_id} "
-                f"does not belong to clinic {clinic_id}"
-            )
-
-    else:
-        # The service may legitimately return no dispensing records.
-        # We therefore need to verify the prescription itself before
-        # returning an empty result.
-        from app.modules.pharmacy.services.pharmacy_service import (
-            _get_prescription_or_404,
-        )
-
-        prescription = _get_prescription_or_404(
-            prescription_id
-        )
-
-        if prescription.clinic_id != clinic_id:
-            raise ValidationError(
-                f"Prescription {prescription_id} "
-                f"does not belong to clinic {clinic_id}"
-            )
 
     return jsonify(
         {
@@ -728,37 +632,20 @@ def cancel_dispense_record_route(
     """
     Cancel a dispensing transaction.
 
-    The authenticated clinic is verified at the route boundary.
-
-    The service itself restores the exact stock recorded in
-    DispenseItem and performs the transactional update.
+    The authenticated clinic is passed to the service.
+    The service performs tenant validation, transactional updates,
+    and stock restoration.
     """
 
     clinic_id = _get_current_clinic_id()
 
-    # Validate the body even though it currently contains no fields.
     DispenseRecordCancelSchema.model_validate(
         _json_body()
     )
 
-    record = get_dispense_record(
-        dispense_record_id=dispense_record_id,
-    )
-
-    if record.prescription is None:
-        raise ValidationError(
-            f"Dispense record {dispense_record_id} "
-            f"has no prescription"
-        )
-
-    if record.prescription.clinic_id != clinic_id:
-        raise ValidationError(
-            f"Dispense record {dispense_record_id} "
-            f"does not belong to clinic {clinic_id}"
-        )
-
     record = cancel_dispense_record(
         dispense_record_id=dispense_record_id,
+        clinic_id=clinic_id,
     )
 
     return jsonify(

@@ -4,7 +4,11 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
 from app.core.auth.user.models.user_model import User
-from app.core.exceptions import DomainError, ValidationError
+from app.core.exceptions import (
+    DomainError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.enums.role_enums import Role
 from app.core.utils.decorators import role_required
 
@@ -84,12 +88,6 @@ def _get_current_user():
 
 
 def _get_current_clinic_id() -> int:
-    """
-    Return the clinic belonging to the authenticated user.
-
-    Patient data is clinic-scoped, so routes must never trust
-    clinic_id supplied by the client.
-    """
     user = _get_current_user()
 
     if user.clinic_id is None:
@@ -100,24 +98,13 @@ def _get_current_clinic_id() -> int:
     return user.clinic_id
 
 
-def _get_patient_in_current_clinic(
-    patient_id: int,
-) -> Patient:
-    """
-    Load a patient and ensure the patient belongs to the
-    authenticated user's clinic.
-    """
+def _get_patient_in_current_clinic(patient_id: int) -> Patient:
     clinic_id = _get_current_clinic_id()
 
-    patient = db.session.get(
-        Patient,
-        patient_id,
-    )
+    patient = db.session.get(Patient, patient_id)
 
     if patient is None:
-        raise ValidationError(
-            f"Patient {patient_id} not found"
-        )
+        raise NotFoundError(f"Patient {patient_id} not found")
 
     if patient.clinic_id != clinic_id:
         raise ValidationError(
@@ -135,24 +122,17 @@ def _validate_payload(schema_class):
         silent=True
     ) or {}
 
-    try:
-        return schema_class.model_validate(
-            payload
-        )
-    except PydanticValidationError as exc:
-        raise exc
+    return schema_class.model_validate(
+        payload
+    )
 
 
-def _validation_error_response(
-    exc: PydanticValidationError,
-):
-    return jsonify(
-        {
-            "success": False,
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }
-    ), 400
+def _validation_error_response(exc: PydanticValidationError):
+    return jsonify({
+        "success": False,
+        "error": "Validation failed",
+        "details": exc.errors(),
+    }), 422
 
 
 def _domain_error_response(
@@ -793,8 +773,7 @@ def record_vitals_route(
             None,
         )
 
-        # Do NOT trust recorded_by_id from the client.
-        # The authenticated JWT identity is the recorder.
+        # The authenticated JWT identity is always the recorder.
         _get_current_user()
 
         recorded_by_id = int(
@@ -803,6 +782,11 @@ def record_vitals_route(
 
         payload.pop(
             "recorded_by_id",
+            None,
+        )
+
+        payload.pop(
+            "recorded_at",
             None,
         )
 

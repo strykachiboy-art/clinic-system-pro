@@ -13,19 +13,3 @@ if __name__ == "__main__":
         debug=app.config.get("DEBUG", False),
     )
     
-# C:\Users\HP>psql -U postgres
-# 'psql' is not recognized as an internal or external command,
-# operable program or batch file.
-
-# C:\Users\HP>cd C:\Program Files\PostgreSQL\18\bin
-
-# C:\Program Files\PostgreSQL\18\bin>psql -U postgres
-# psql (18.3)
-# WARNING: Console code page (437) differs from Windows code page (1252)
-#          8-bit characters might not work correctly. See psql reference
-#          page "Notes for Windows users" for details.
-# Type "help" for help.
-
-# postgres=#
-
-# then we issue access tokens in login

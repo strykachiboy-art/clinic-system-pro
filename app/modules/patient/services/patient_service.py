@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import or_
@@ -70,6 +71,7 @@ _EDITABLE_VITAL_FIELDS = {
     "oxygen_saturation",
     "weight",
     "height",
+    "recorded_at",
 }
 
 
@@ -79,6 +81,88 @@ _EDITABLE_VITAL_FIELDS = {
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _serialize_audit_value(value):
+    """
+    Convert common Python/SQLAlchemy values into JSON-safe values.
+
+    Supports nested dictionaries and collections so audit payloads
+    remain serializable even when old/new values contain dates,
+    datetimes, enums, or nested structures.
+    """
+    if isinstance(value, Enum):
+        return value.value
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, date):
+        return value.isoformat()
+
+    if isinstance(value, dict):
+        return {
+            key: _serialize_audit_value(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [
+            _serialize_audit_value(item)
+            for item in value
+        ]
+
+    return value
+
+
+def _serialize_audit_changes(changes: dict) -> dict:
+    """
+    Make audit changes safe for JSON-backed audit fields.
+    """
+    return {
+        field: _serialize_audit_value(value)
+        for field, value in changes.items()
+    }
+
+
+def _audit(
+    *,
+    actor_id: Optional[int],
+    action: AuditAction,
+    resource_type: str,
+    resource_id: int,
+    description: str,
+    changes: Optional[dict] = None,
+) -> None:
+    """
+    Write an audit record.
+
+    Audit records are intentionally created even when actor_id is None.
+    The audit model allows a nullable user_id so system/background/service
+    operations can still be recorded.
+
+    The audit service expects:
+        user_id
+        action
+        resource_type/resource_id
+        description
+        new_value
+
+    The surrounding transactional decorator is responsible for committing
+    the audit record together with the service operation.
+    """
+    audit_changes = _serialize_audit_changes(
+        changes or {}
+    )
+
+    create_audit_log(
+        user_id=actor_id,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        description=description,
+        new_value=audit_changes,
+    )
 
 
 def _validate_patient_names(
@@ -101,6 +185,25 @@ def _validate_date_of_birth(
     ):
         raise ValidationError(
             "Date of birth cannot be in the future"
+        )
+
+
+def _validate_timestamp(
+    timestamp: Optional[datetime],
+) -> None:
+    """
+    Validate timestamps used by patient records.
+
+    Naive timestamps are accepted for compatibility with existing SQLite
+    test environments. Timezone-aware timestamps are normalized by the
+    database/application as appropriate.
+    """
+    if timestamp is None:
+        return
+
+    if not isinstance(timestamp, datetime):
+        raise ValidationError(
+            "Invalid timestamp"
         )
 
 
@@ -399,6 +502,7 @@ def list_patients(
 def create_patient(
     clinic_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> Patient:
     ensure_clinic_active(clinic_id)
 
@@ -446,11 +550,16 @@ def create_patient(
     db.session.add(patient)
     db.session.flush()
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.CREATE,
         resource_type="patient",
         resource_id=patient.id,
-        details={
+        description=(
+            f"Created patient {patient.id} "
+            f"in clinic {clinic_id}"
+        ),
+        changes={
             "clinic_id": clinic_id,
             "patient_number": patient.patient_number,
         },
@@ -463,6 +572,7 @@ def create_patient(
 def update_patient(
     patient_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> Patient:
     patient = _get_patient_or_404(
         patient_id
@@ -529,11 +639,16 @@ def update_patient(
     if changed_fields:
         patient.updated_at = _utcnow()
 
-        create_audit_log(
+        _audit(
+            actor_id=actor_id,
             action=AuditAction.UPDATE,
             resource_type="patient",
             resource_id=patient.id,
-            details={
+            description=(
+                f"Updated patient {patient.id} "
+                f"in clinic {patient.clinic_id}"
+            ),
+            changes={
                 "clinic_id": patient.clinic_id,
                 "changed_fields": changed_fields,
             },
@@ -546,6 +661,7 @@ def update_patient(
 def set_active_status(
     patient_id: int,
     is_active: bool,
+    actor_id: Optional[int] = None,
 ) -> Patient:
     """
     Activate/deactivate a patient.
@@ -568,11 +684,16 @@ def set_active_status(
     patient.is_active = is_active
     patient.updated_at = _utcnow()
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.UPDATE,
         resource_type="patient",
         resource_id=patient.id,
-        details={
+        description=(
+            f"Changed patient {patient.id} active status "
+            f"in clinic {patient.clinic_id}"
+        ),
+        changes={
             "clinic_id": patient.clinic_id,
             "is_active": {
                 "old": old_status,
@@ -616,6 +737,7 @@ def list_family_members(
 def add_family_member(
     patient_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> PatientFamilyMember:
     patient = _get_patient_or_404(
         patient_id
@@ -671,11 +793,16 @@ def add_family_member(
     db.session.add(member)
     db.session.flush()
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.CREATE,
         resource_type="patient_family_member",
         resource_id=member.id,
-        details={
+        description=(
+            f"Added family member {member.id} "
+            f"to patient {patient.id}"
+        ),
+        changes={
             "clinic_id": patient.clinic_id,
             "patient_id": patient.id,
             "related_patient_id": related_patient_id,
@@ -690,6 +817,7 @@ def update_family_member(
     patient_id: int,
     family_member_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> PatientFamilyMember:
     patient = _get_patient_or_404(
         patient_id
@@ -754,11 +882,16 @@ def update_family_member(
     if changed_fields:
         member.updated_at = _utcnow()
 
-        create_audit_log(
+        _audit(
+            actor_id=actor_id,
             action=AuditAction.UPDATE,
             resource_type="patient_family_member",
             resource_id=member.id,
-            details={
+            description=(
+                f"Updated family member {member.id} "
+                f"for patient {patient.id}"
+            ),
+            changes={
                 "clinic_id": patient.clinic_id,
                 "patient_id": patient.id,
                 "changed_fields": changed_fields,
@@ -772,6 +905,7 @@ def update_family_member(
 def remove_family_member(
     patient_id: int,
     family_member_id: int,
+    actor_id: Optional[int] = None,
 ) -> None:
     patient = _get_patient_or_404(
         patient_id
@@ -786,11 +920,16 @@ def remove_family_member(
         family_member_id,
     )
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.DELETE,
         resource_type="patient_family_member",
         resource_id=member.id,
-        details={
+        description=(
+            f"Removed family member {member.id} "
+            f"from patient {patient.id}"
+        ),
+        changes={
             "clinic_id": patient.clinic_id,
             "patient_id": patient.id,
         },
@@ -832,6 +971,7 @@ def list_insurances(
 def add_insurance(
     patient_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> PatientInsurance:
     patient = _get_patient_or_404(
         patient_id
@@ -921,11 +1061,16 @@ def add_insurance(
     db.session.add(insurance)
     db.session.flush()
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.CREATE,
         resource_type="patient_insurance",
         resource_id=insurance.id,
-        details={
+        description=(
+            f"Added insurance {insurance.id} "
+            f"to patient {patient.id}"
+        ),
+        changes={
             "clinic_id": patient.clinic_id,
             "patient_id": patient.id,
             "provider_name": insurance.provider_name,
@@ -941,6 +1086,7 @@ def update_insurance(
     patient_id: int,
     insurance_id: int,
     data: dict,
+    actor_id: Optional[int] = None,
 ) -> PatientInsurance:
     patient = _get_patient_or_404(
         patient_id
@@ -1043,11 +1189,16 @@ def update_insurance(
     if changed_fields:
         insurance.updated_at = _utcnow()
 
-        create_audit_log(
+        _audit(
+            actor_id=actor_id,
             action=AuditAction.UPDATE,
             resource_type="patient_insurance",
             resource_id=insurance.id,
-            details={
+            description=(
+                f"Updated insurance {insurance.id} "
+                f"for patient {patient.id}"
+            ),
+            changes={
                 "clinic_id": patient.clinic_id,
                 "patient_id": patient.id,
                 "changed_fields": changed_fields,
@@ -1115,6 +1266,7 @@ def record_vitals(
     data: dict,
     consultation_id: Optional[int] = None,
     recorded_by_id: Optional[int] = None,
+    actor_id: Optional[int] = None,
 ) -> PatientVitals:
     patient = _get_patient_or_404(
         patient_id
@@ -1146,6 +1298,12 @@ def record_vitals(
             "At least one vital measurement is required"
         )
 
+    recorded_at = data.get("recorded_at")
+
+    _validate_timestamp(
+        recorded_at
+    )
+
     _validate_consultation_for_vitals(
         patient,
         consultation_id,
@@ -1160,7 +1318,6 @@ def record_vitals(
         patient_id=patient.id,
         consultation_id=consultation_id,
         recorded_by_id=recorded_by_id,
-
         temperature_c=data.get(
             "temperature"
         ),
@@ -1187,14 +1344,22 @@ def record_vitals(
         ),
     )
 
+    if recorded_at is not None:
+        vitals.recorded_at = recorded_at
+
     db.session.add(vitals)
     db.session.flush()
 
-    create_audit_log(
+    _audit(
+        actor_id=actor_id,
         action=AuditAction.CREATE,
         resource_type="patient_vitals",
         resource_id=vitals.id,
-        details={
+        description=(
+            f"Recorded vitals {vitals.id} "
+            f"for patient {patient.id}"
+        ),
+        changes={
             "clinic_id": patient.clinic_id,
             "patient_id": patient.id,
             "consultation_id": consultation_id,
