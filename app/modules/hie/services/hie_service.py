@@ -124,15 +124,18 @@ def _get_integration(
 
         return integration
 
-    integration = (
-        HIEIntegration.query
-        .filter(
+    statement = (
+        db.select(HIEIntegration)
+        .where(
             HIEIntegration.clinic_id == clinic_id,
             HIEIntegration.provider == "malaffi",
             HIEIntegration.status == HIEIntegrationStatus.ACTIVE,
         )
-        .first()
     )
+
+    integration = db.session.execute(
+        statement
+    ).scalars().first()
 
     if integration is None:
         raise ValidationError(
@@ -160,7 +163,9 @@ def _validate_integration(
             f"{integration.status.value}"
         )
 
-    provider = (integration.provider or "").strip().lower()
+    provider = (
+        integration.provider or ""
+    ).strip().lower()
 
     if not provider:
         raise ValidationError(
@@ -270,12 +275,12 @@ def _create_submission(
     Create a pending HIE submission after validating its ownership
     relationships.
     """
-    if clinic_id <= 0:
+    if clinic_id is None or clinic_id <= 0:
         raise ValidationError(
             "Invalid clinic ID"
         )
 
-    if integration_id <= 0:
+    if integration_id is None or integration_id <= 0:
         raise ValidationError(
             "Invalid HIE integration ID"
         )
@@ -334,7 +339,7 @@ def _mark_submission_success(
     Mark an HIE submission as successful and persist the provider
     response metadata.
     """
-    if submission_id <= 0:
+    if submission_id is None or submission_id <= 0:
         raise ValidationError(
             "Invalid HIE submission ID"
         )
@@ -374,7 +379,7 @@ def _mark_submission_failure(
     """
     Mark an HIE submission as failed and increment its retry count.
     """
-    if submission_id <= 0:
+    if submission_id is None or submission_id <= 0:
         raise ValidationError(
             "Invalid HIE submission ID"
         )
@@ -404,7 +409,7 @@ def _update_last_sync(
     """
     Update the last successful HIE synchronization timestamp.
     """
-    if integration_id <= 0:
+    if integration_id is None or integration_id <= 0:
         raise ValidationError(
             "Invalid HIE integration ID"
         )
@@ -997,38 +1002,44 @@ def list_hie_submissions(
             "Invalid HIE submission status"
         )
 
-    query = HIESubmission.query.filter(
-        HIESubmission.clinic_id == clinic_id
+    statement = (
+        db.select(HIESubmission)
+        .where(
+            HIESubmission.clinic_id == clinic_id
+        )
     )
 
     if integration_id is not None:
-        query = query.filter(
-            HIESubmission.integration_id == integration_id
+        statement = statement.where(
+            HIESubmission.integration_id
+            == integration_id
         )
 
     if patient_id is not None:
-        query = query.filter(
-            HIESubmission.patient_id == patient_id
+        statement = statement.where(
+            HIESubmission.patient_id
+            == patient_id
         )
 
     if operation is not None:
-        query = query.filter(
-            HIESubmission.operation == operation
+        statement = statement.where(
+            HIESubmission.operation
+            == operation
         )
 
     if status is not None:
-        query = query.filter(
-            HIESubmission.status == status
+        statement = statement.where(
+            HIESubmission.status
+            == status
         )
 
-    return (
-        query
-        .order_by(
-            HIESubmission.created_at.desc()
-        )
-        .paginate(
-            page=page,
-            per_page=per_page,
-            error_out=False,
-        )
+    statement = statement.order_by(
+        HIESubmission.created_at.desc()
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
     )

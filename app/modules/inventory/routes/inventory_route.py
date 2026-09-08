@@ -5,6 +5,7 @@ import json
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import select
 
 from app.extensions import db
 from app.core.auth.user.models.user_model import User
@@ -69,6 +70,12 @@ from app.modules.inventory.services.inventory_service import (
     update_supplier,
 )
 
+from app.modules.staff.models.staff_model import Staff
+
+
+# ============================================================================
+# BLUEPRINT
+# ============================================================================
 
 inventory_bp = Blueprint(
     "inventory",
@@ -80,7 +87,6 @@ inventory_bp = Blueprint(
 # ============================================================================
 # ROUTE HELPERS
 # ============================================================================
-
 
 def _json_body() -> dict:
     payload = request.get_json(silent=True)
@@ -144,9 +150,12 @@ def _validation_response(
 
 def _validate_json(schema):
     try:
-        return schema.model_validate(
-            _json_body()
-        ), None
+        return (
+            schema.model_validate(
+                _json_body()
+            ),
+            None,
+        )
 
     except PydanticValidationError as exc:
         return None, _validation_response(exc)
@@ -172,15 +181,25 @@ def _query_without(*excluded: str) -> dict:
     }
 
 
-def _serialize(schema, value):
-    return schema.model_validate(value).model_dump(
+def _serialize(
+    schema,
+    value,
+):
+    return schema.model_validate(
+        value
+    ).model_dump(
         mode="json"
     )
 
 
-def _serialize_many(schema, values):
+def _serialize_many(
+    schema,
+    values,
+):
     return [
-        schema.model_validate(value).model_dump(
+        schema.model_validate(
+            value
+        ).model_dump(
             mode="json"
         )
         for value in values
@@ -200,7 +219,10 @@ def _get_current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -224,9 +246,10 @@ def _get_current_clinic_id() -> int:
     """
     user = _get_current_user()
 
-    if user.clinic_id is None:
+    if user.clinic_id is None or user.clinic_id <= 0:
         raise ValidationError(
-            "Authenticated user is not associated with a clinic"
+            "Authenticated user is not associated "
+            "with a clinic"
         )
 
     return user.clinic_id
@@ -238,16 +261,21 @@ def _get_current_staff_id() -> int:
 
     Actor identity is always derived from JWT context.
     """
-    from app.modules.staff.models.staff_model import Staff
-
     user = _get_current_user()
 
-    staff = (
-        Staff.query
-        .filter(
+    statement = (
+        select(Staff)
+        .where(
             Staff.user_id == user.id,
             Staff.clinic_id == user.clinic_id,
         )
+    )
+
+    staff = (
+        db.session.execute(
+            statement
+        )
+        .scalars()
         .first()
     )
 
@@ -294,7 +322,9 @@ def _get_requested_clinic_id(
     return current_clinic_id
 
 
-def _service_error_response(exc):
+def _service_error_response(
+    exc,
+):
     if isinstance(exc, NotFoundError):
         return jsonify(
             {
@@ -323,9 +353,11 @@ def _service_error_response(exc):
 # INVENTORY ITEMS
 # ============================================================================
 
-
 @inventory_bp.get("/items")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def list_items():
     try:
         clinic_id = _get_current_clinic_id()
@@ -363,7 +395,10 @@ def list_items():
 
 
 @inventory_bp.get("/items/low-stock")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def low_stock_items():
     try:
         clinic_id = _get_current_clinic_id()
@@ -391,8 +426,13 @@ def low_stock_items():
 
 
 @inventory_bp.get("/items/<int:item_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def get_item(item_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def get_item(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -420,7 +460,10 @@ def get_item(item_id: int):
 
 
 @inventory_bp.post("/items")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def create_item():
     payload, error = _validate_json(
         InventoryItemCreateSchema
@@ -437,8 +480,7 @@ def create_item():
             exclude_unset=True
         )
 
-        # Tenant and actor identity are authoritative
-        # from the authenticated JWT context.
+        # JWT-derived tenant and actor identity are authoritative.
         item_data["clinic_id"] = clinic_id
         item_data["performed_by_id"] = staff_id
 
@@ -465,8 +507,13 @@ def create_item():
 
 
 @inventory_bp.patch("/items/<int:item_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def update_item(item_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def update_item(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -505,7 +552,9 @@ def update_item(item_id: int):
 
 @inventory_bp.post("/items/<int:item_id>/deactivate")
 @role_required(Role.ADMIN)
-def deactivate_item(item_id: int):
+def deactivate_item(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -534,7 +583,9 @@ def deactivate_item(item_id: int):
 
 @inventory_bp.post("/items/<int:item_id>/reactivate")
 @role_required(Role.ADMIN)
-def reactivate_item(item_id: int):
+def reactivate_item(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -565,10 +616,14 @@ def reactivate_item(item_id: int):
 # INVENTORY BATCHES
 # ============================================================================
 
-
 @inventory_bp.get("/items/<int:item_id>/batches")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def list_batches(item_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def list_batches(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -604,8 +659,13 @@ def list_batches(item_id: int):
 
 
 @inventory_bp.get("/batches/<int:batch_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def get_batch(batch_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def get_batch(
+    batch_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -633,7 +693,10 @@ def get_batch(batch_id: int):
 
 
 @inventory_bp.post("/batches")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def create_batch():
     payload, error = _validate_json(
         InventoryBatchCreateSchema
@@ -649,9 +712,8 @@ def create_batch():
             exclude_unset=True
         )
 
-        # InventoryBatch inherits its authoritative clinic
-        # through InventoryItem. The compatibility clinic_id
-        # argument is still forced to the authenticated clinic.
+        # InventoryBatch derives tenancy through its item.
+        # The compatibility clinic_id is forced to JWT clinic.
         batch_data["clinic_id"] = clinic_id
 
         batch = create_inventory_batch(
@@ -677,8 +739,13 @@ def create_batch():
 
 
 @inventory_bp.patch("/batches/<int:batch_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def update_batch(batch_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def update_batch(
+    batch_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -716,7 +783,10 @@ def update_batch(batch_id: int):
 
 
 @inventory_bp.get("/batches/expiring")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def expiring_batches():
     try:
         clinic_id = _get_current_clinic_id()
@@ -755,10 +825,14 @@ def expiring_batches():
 # STOCK MOVEMENTS
 # ============================================================================
 
-
 @inventory_bp.get("/items/<int:item_id>/movements")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def list_movements(item_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def list_movements(
+    item_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -786,7 +860,10 @@ def list_movements(item_id: int):
 
 
 @inventory_bp.post("/movements")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def create_movement():
     payload, error = _validate_json(
         StockMovementCreateSchema
@@ -803,8 +880,7 @@ def create_movement():
             exclude_unset=True
         )
 
-        # Tenant and actor identity are authoritative
-        # from the authenticated JWT context.
+        # JWT-derived tenant and actor identity are authoritative.
         movement_data["clinic_id"] = clinic_id
         movement_data["performed_by_id"] = staff_id
 
@@ -834,9 +910,11 @@ def create_movement():
 # SUPPLIERS
 # ============================================================================
 
-
 @inventory_bp.get("/suppliers")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def list_inventory_suppliers():
     try:
         clinic_id = _get_current_clinic_id()
@@ -872,8 +950,13 @@ def list_inventory_suppliers():
 
 
 @inventory_bp.get("/suppliers/<int:supplier_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def get_inventory_supplier(supplier_id: int):
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def get_inventory_supplier(
+    supplier_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -901,7 +984,10 @@ def get_inventory_supplier(supplier_id: int):
 
 
 @inventory_bp.post("/suppliers")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def create_inventory_supplier():
     payload, error = _validate_json(
         InventorySupplierCreateSchema
@@ -915,17 +1001,40 @@ def create_inventory_supplier():
             exclude_unset=True
         )
 
-        requested_clinic_id = supplier_data.get(
-            "clinic_id"
-        )
+        current_clinic_id = _get_current_clinic_id()
 
-        # A normal supplier belongs to the authenticated
-        # clinic. Only ADMIN can explicitly create a global
-        # supplier by supplying clinic_id=None.
-        supplier_data["clinic_id"] = _get_requested_clinic_id(
-            requested_clinic_id,
-            allow_global=True,
-        )
+        if "clinic_id" in payload.model_fields_set:
+            requested_clinic_id = payload.clinic_id
+
+            # Explicit null means global supplier.
+            # Only ADMIN may create one.
+            if requested_clinic_id is None:
+                user = _get_current_user()
+
+                if getattr(user, "role", None) != Role.ADMIN:
+                    raise ValidationError(
+                        "Only administrators can create "
+                        "global suppliers"
+                    )
+
+                supplier_data["clinic_id"] = None
+
+            elif requested_clinic_id != current_clinic_id:
+                raise ValidationError(
+                    "Requested clinic does not match "
+                    "the authenticated user's clinic"
+                )
+
+            else:
+                supplier_data["clinic_id"] = (
+                    current_clinic_id
+                )
+
+        else:
+            # Omitted clinic_id means the authenticated clinic.
+            supplier_data["clinic_id"] = (
+                current_clinic_id
+            )
 
         supplier = create_supplier(
             **supplier_data
@@ -951,7 +1060,9 @@ def create_inventory_supplier():
 
 @inventory_bp.patch("/suppliers/<int:supplier_id>")
 @role_required(Role.ADMIN)
-def update_inventory_supplier(supplier_id: int):
+def update_inventory_supplier(
+    supplier_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -988,9 +1099,13 @@ def update_inventory_supplier(supplier_id: int):
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/suppliers/<int:supplier_id>/deactivate")
+@inventory_bp.post(
+    "/suppliers/<int:supplier_id>/deactivate"
+)
 @role_required(Role.ADMIN)
-def deactivate_inventory_supplier(supplier_id: int):
+def deactivate_inventory_supplier(
+    supplier_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -1017,9 +1132,13 @@ def deactivate_inventory_supplier(supplier_id: int):
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/suppliers/<int:supplier_id>/reactivate")
+@inventory_bp.post(
+    "/suppliers/<int:supplier_id>/reactivate"
+)
 @role_required(Role.ADMIN)
-def reactivate_inventory_supplier(supplier_id: int):
+def reactivate_inventory_supplier(
+    supplier_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -1050,9 +1169,11 @@ def reactivate_inventory_supplier(supplier_id: int):
 # INVENTORY TRANSFERS
 # ============================================================================
 
-
 @inventory_bp.get("/transfers")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def list_transfers():
     try:
         clinic_id = _get_current_clinic_id()
@@ -1087,9 +1208,16 @@ def list_transfers():
         return _service_error_response(exc)
 
 
-@inventory_bp.get("/transfers/<int:transfer_id>")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def get_transfer(transfer_id: int):
+@inventory_bp.get(
+    "/transfers/<int:transfer_id>"
+)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def get_transfer(
+    transfer_id: int,
+):
     try:
         clinic_id = _get_current_clinic_id()
 
@@ -1117,7 +1245,10 @@ def get_transfer(transfer_id: int):
 
 
 @inventory_bp.post("/transfers")
-@role_required(Role.ADMIN, Role.PHARMACIST)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
 def create_transfer():
     payload, error = _validate_json(
         InventoryTransferCreateSchema
@@ -1134,20 +1265,24 @@ def create_transfer():
             exclude_unset=True
         )
 
-        supplied_source_clinic_id = transfer_data.get(
-            "source_clinic_id"
+        supplied_source_clinic_id = (
+            transfer_data.get(
+                "source_clinic_id"
+            )
         )
 
-        # Source clinic is always the authenticated clinic.
-        # A client cannot create a transfer from another tenant.
         if supplied_source_clinic_id != clinic_id:
             raise ValidationError(
                 "Source clinic does not match "
                 "the authenticated user's clinic"
             )
 
-        transfer_data["source_clinic_id"] = clinic_id
-        transfer_data["requested_by_id"] = staff_id
+        transfer_data["source_clinic_id"] = (
+            clinic_id
+        )
+        transfer_data["requested_by_id"] = (
+            staff_id
+        )
 
         transfer = create_inventory_transfer(
             **transfer_data
@@ -1171,9 +1306,16 @@ def create_transfer():
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/transfers/<int:transfer_id>/approve")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def approve_transfer(transfer_id: int):
+@inventory_bp.post(
+    "/transfers/<int:transfer_id>/approve"
+)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def approve_transfer(
+    transfer_id: int,
+):
     payload, error = _validate_json(
         InventoryTransferApproveSchema
     )
@@ -1181,7 +1323,8 @@ def approve_transfer(transfer_id: int):
     if error:
         return error
 
-    # Payload is intentionally not used for actor identity.
+    # Compatibility field is intentionally ignored.
+    # Actor identity comes from JWT.
     del payload
 
     try:
@@ -1212,9 +1355,16 @@ def approve_transfer(transfer_id: int):
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/transfers/<int:transfer_id>/complete")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def complete_transfer(transfer_id: int):
+@inventory_bp.post(
+    "/transfers/<int:transfer_id>/complete"
+)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def complete_transfer(
+    transfer_id: int,
+):
     payload, error = _validate_json(
         InventoryTransferCompleteSchema
     )
@@ -1222,7 +1372,8 @@ def complete_transfer(transfer_id: int):
     if error:
         return error
 
-    # Payload is intentionally not used for actor identity.
+    # Compatibility field is intentionally ignored.
+    # Actor identity comes from JWT.
     del payload
 
     try:
@@ -1253,9 +1404,16 @@ def complete_transfer(transfer_id: int):
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/transfers/<int:transfer_id>/cancel")
-@role_required(Role.ADMIN, Role.PHARMACIST)
-def cancel_transfer(transfer_id: int):
+@inventory_bp.post(
+    "/transfers/<int:transfer_id>/cancel"
+)
+@role_required(
+    Role.ADMIN,
+    Role.PHARMACIST,
+)
+def cancel_transfer(
+    transfer_id: int,
+):
     payload, error = _validate_json(
         InventoryTransferCancelSchema
     )

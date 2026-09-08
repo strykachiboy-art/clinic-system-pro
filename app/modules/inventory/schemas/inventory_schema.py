@@ -223,7 +223,6 @@ class InventorySupplierUpdateSchema(BaseModel):
         default=None,
         max_length=255,
     )
-    is_active: bool | None = None
 
     @field_validator(
         "name",
@@ -240,7 +239,9 @@ class InventorySupplierUpdateSchema(BaseModel):
     @classmethod
     def validate_name(cls, value):
         if value is not None and not value:
-            raise ValueError("Supplier name cannot be empty")
+            raise ValueError(
+                "Supplier name cannot be empty"
+            )
 
         return value
 

@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import func, or_, select
+
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
@@ -77,21 +79,29 @@ def _serialize_enum(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
 
 
-def _normalize_optional_text(value: str | None) -> str | None:
+def _normalize_optional_text(
+    value: str | None,
+) -> str | None:
     if value is None:
         return None
 
     if not isinstance(value, str):
-        raise ValidationError("Expected a string value")
+        raise ValidationError(
+            "Expected a string value"
+        )
 
     value = value.strip()
 
     return value or None
 
 
-def _validate_positive_quantity(quantity: int) -> None:
+def _validate_positive_quantity(
+    quantity: int,
+) -> None:
     if not isinstance(quantity, int):
-        raise ValidationError("Quantity must be an integer")
+        raise ValidationError(
+            "Quantity must be an integer"
+        )
 
     if quantity <= 0:
         raise ValidationError(
@@ -114,8 +124,13 @@ def _validate_non_negative(
         )
 
 
-def _get_active_clinic(clinic_id: int) -> Clinic:
-    clinic = db.session.get(Clinic, clinic_id)
+def _get_active_clinic(
+    clinic_id: int,
+) -> Clinic:
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
 
     if clinic is None:
         raise NotFoundError(
@@ -143,8 +158,13 @@ def _ensure_same_clinic(
         )
 
 
-def _get_staff(staff_id: int) -> Staff:
-    staff = db.session.get(Staff, staff_id)
+def _get_staff(
+    staff_id: int,
+) -> Staff:
+    staff = db.session.get(
+        Staff,
+        staff_id,
+    )
 
     if staff is None:
         raise NotFoundError(
@@ -175,7 +195,9 @@ def _validate_staff_for_clinic(
     return staff
 
 
-def _get_item(item_id: int) -> InventoryItem:
+def _get_item(
+    item_id: int,
+) -> InventoryItem:
     item = db.session.get(
         InventoryItem,
         item_id,
@@ -189,11 +211,20 @@ def _get_item(item_id: int) -> InventoryItem:
     return item
 
 
-def _get_locked_item(item_id: int) -> InventoryItem:
-    item = (
-        InventoryItem.query
-        .filter(InventoryItem.id == item_id)
+def _get_locked_item(
+    item_id: int,
+) -> InventoryItem:
+    statement = (
+        select(InventoryItem)
+        .where(
+            InventoryItem.id == item_id,
+        )
         .with_for_update()
+    )
+
+    item = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -208,10 +239,17 @@ def _get_locked_item(item_id: int) -> InventoryItem:
 def _get_locked_transfer(
     transfer_id: int,
 ) -> InventoryTransfer:
-    transfer = (
-        InventoryTransfer.query
-        .filter(InventoryTransfer.id == transfer_id)
+    statement = (
+        select(InventoryTransfer)
+        .where(
+            InventoryTransfer.id == transfer_id,
+        )
         .with_for_update()
+    )
+
+    transfer = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -226,7 +264,9 @@ def _get_locked_transfer(
 def _get_locked_active_item(
     item_id: int,
 ) -> InventoryItem:
-    item = _get_locked_item(item_id)
+    item = _get_locked_item(
+        item_id
+    )
 
     if not item.is_active:
         raise ConflictError(
@@ -244,7 +284,9 @@ def _validate_item_clinic(
         _ensure_same_clinic(
             expected_clinic_id=clinic_id,
             actual_clinic_id=item.clinic_id,
-            resource_name=f"Inventory item {item.id}",
+            resource_name=(
+                f"Inventory item {item.id}"
+            ),
         )
 
     return item
@@ -269,10 +311,17 @@ def _get_supplier(
 def _get_locked_supplier(
     supplier_id: int,
 ) -> InventorySupplier:
-    supplier = (
-        InventorySupplier.query
-        .filter(InventorySupplier.id == supplier_id)
+    statement = (
+        select(InventorySupplier)
+        .where(
+            InventorySupplier.id == supplier_id,
+        )
         .with_for_update()
+    )
+
+    supplier = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -320,7 +369,9 @@ def _ensure_supplier_mutation_clinic(
 
         clinic_id = supplier.clinic_id
 
-    _get_active_clinic(clinic_id)
+    _get_active_clinic(
+        clinic_id
+    )
 
     _validate_supplier_for_clinic(
         supplier,
@@ -330,7 +381,9 @@ def _ensure_supplier_mutation_clinic(
     return clinic_id
 
 
-def _get_batch(batch_id: int) -> InventoryBatch:
+def _get_batch(
+    batch_id: int,
+) -> InventoryBatch:
     batch = db.session.get(
         InventoryBatch,
         batch_id,
@@ -347,10 +400,17 @@ def _get_batch(batch_id: int) -> InventoryBatch:
 def _get_locked_batch(
     batch_id: int,
 ) -> InventoryBatch:
-    batch = (
-        InventoryBatch.query
-        .filter(InventoryBatch.id == batch_id)
+    statement = (
+        select(InventoryBatch)
+        .where(
+            InventoryBatch.id == batch_id,
+        )
         .with_for_update()
+    )
+
+    batch = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -395,7 +455,9 @@ def _validate_batch_expiry(
         )
 
 
-def _audit_value(value: Any) -> Any:
+def _audit_value(
+    value: Any,
+) -> Any:
     if hasattr(value, "value"):
         return value.value
 
@@ -411,7 +473,10 @@ def _audit_value(value: Any) -> Any:
 def _build_change_dict(
     old_values: dict[str, Any],
     new_values: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+]:
     old_value = {
         key: _audit_value(value)
         for key, value in old_values.items()
@@ -435,7 +500,10 @@ def _validate_stock_invariants(
             f"Inventory item {item.id} has invalid negative stock"
         )
 
-    if batch is not None and batch.quantity_on_hand < 0:
+    if (
+        batch is not None
+        and batch.quantity_on_hand < 0
+    ):
         raise ConflictError(
             f"Inventory batch {batch.id} has invalid negative stock"
         )
@@ -449,7 +517,9 @@ def get_inventory_item(
     item_id: int,
     clinic_id: int | None = None,
 ) -> InventoryItem:
-    item = _get_item(item_id)
+    item = _get_item(
+        item_id
+    )
 
     _validate_item_clinic(
         item,
@@ -465,31 +535,39 @@ def list_inventory_items(
     low_stock_only: bool = False,
     include_inactive: bool = False,
 ) -> list[InventoryItem]:
-    _get_active_clinic(clinic_id)
+    _get_active_clinic(
+        clinic_id
+    )
 
-    query = InventoryItem.query.filter_by(
-        clinic_id=clinic_id,
+    statement = select(
+        InventoryItem
+    ).where(
+        InventoryItem.clinic_id == clinic_id,
     )
 
     if not include_inactive:
-        query = query.filter_by(
-            is_active=True,
+        statement = statement.where(
+            InventoryItem.is_active.is_(True),
         )
 
     if category is not None:
-        query = query.filter_by(
-            category=category,
+        statement = statement.where(
+            InventoryItem.category == category,
         )
 
     if low_stock_only:
-        query = query.filter(
+        statement = statement.where(
             InventoryItem.quantity_on_hand
             <= InventoryItem.reorder_level
         )
 
+    statement = statement.order_by(
+        InventoryItem.name.asc()
+    )
+
     return (
-        query
-        .order_by(InventoryItem.name.asc())
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -515,9 +593,14 @@ def create_inventory_item(
     performed_by_id: int | None = None,
     **fields,
 ) -> InventoryItem:
-    _get_active_clinic(clinic_id)
+    _get_active_clinic(
+        clinic_id
+    )
 
-    if not isinstance(name, str) or not name.strip():
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+    ):
         raise ValidationError(
             "Inventory item name is required"
         )
@@ -543,7 +626,10 @@ def create_inventory_item(
     if fields.get("name") is not None:
         name = fields.pop("name")
 
-    if not isinstance(name, str) or not name.strip():
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+    ):
         raise ValidationError(
             "Inventory item name is required"
         )
@@ -551,12 +637,20 @@ def create_inventory_item(
     sku = fields.get("sku")
 
     if sku is not None:
-        sku = _normalize_optional_text(sku)
+        sku = _normalize_optional_text(
+            sku
+        )
 
         if sku:
+            statement = select(
+                InventoryItem
+            ).where(
+                InventoryItem.sku == sku,
+            )
+
             existing = (
-                InventoryItem.query
-                .filter(InventoryItem.sku == sku)
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -571,14 +665,20 @@ def create_inventory_item(
     barcode = fields.get("barcode")
 
     if barcode is not None:
-        barcode = _normalize_optional_text(barcode)
+        barcode = _normalize_optional_text(
+            barcode
+        )
 
         if barcode:
+            statement = select(
+                InventoryItem
+            ).where(
+                InventoryItem.barcode == barcode,
+            )
+
             existing = (
-                InventoryItem.query
-                .filter(
-                    InventoryItem.barcode == barcode
-                )
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -609,7 +709,9 @@ def create_inventory_item(
         **fields,
     )
 
-    db.session.add(item)
+    db.session.add(
+        item
+    )
     db.session.flush()
 
     if initial_quantity > 0:
@@ -635,7 +737,9 @@ def create_inventory_item(
             reference_id=item.id,
         )
 
-        db.session.add(movement)
+        db.session.add(
+            movement
+        )
         db.session.flush()
 
     create_audit_log(
@@ -660,10 +764,13 @@ def update_inventory_item(
     clinic_id: int | None = None,
     **fields,
 ) -> InventoryItem:
-    item = _get_locked_item(item_id)
+    item = _get_locked_item(
+        item_id
+    )
 
-    # Every mutation must occur while the owning clinic is active.
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -692,7 +799,11 @@ def update_inventory_item(
                     "Inventory item name cannot be empty"
                 )
 
-        if key in {"sku", "barcode", "unit"}:
+        if key in {
+            "sku",
+            "barcode",
+            "unit",
+        }:
             new_value = _normalize_optional_text(
                 new_value
             )
@@ -712,12 +823,16 @@ def update_inventory_item(
             continue
 
         if key == "sku" and new_value:
+            statement = select(
+                InventoryItem
+            ).where(
+                InventoryItem.sku == new_value,
+                InventoryItem.id != item.id,
+            )
+
             existing = (
-                InventoryItem.query
-                .filter(
-                    InventoryItem.sku == new_value,
-                    InventoryItem.id != item.id,
-                )
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -728,12 +843,16 @@ def update_inventory_item(
                 )
 
         if key == "barcode" and new_value:
+            statement = select(
+                InventoryItem
+            ).where(
+                InventoryItem.barcode == new_value,
+                InventoryItem.id != item.id,
+            )
+
             existing = (
-                InventoryItem.query
-                .filter(
-                    InventoryItem.barcode == new_value,
-                    InventoryItem.id != item.id,
-                )
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -777,9 +896,13 @@ def deactivate_inventory_item(
     item_id: int,
     clinic_id: int | None = None,
 ) -> InventoryItem:
-    item = _get_locked_item(item_id)
+    item = _get_locked_item(
+        item_id
+    )
 
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -814,9 +937,13 @@ def reactivate_inventory_item(
     item_id: int,
     clinic_id: int | None = None,
 ) -> InventoryItem:
-    item = _get_locked_item(item_id)
+    item = _get_locked_item(
+        item_id
+    )
 
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -854,7 +981,9 @@ def get_supplier(
     supplier_id: int,
     clinic_id: int | None = None,
 ) -> InventorySupplier:
-    supplier = _get_supplier(supplier_id)
+    supplier = _get_supplier(
+        supplier_id
+    )
 
     if clinic_id is not None:
         _validate_supplier_for_clinic(
@@ -870,26 +999,34 @@ def list_suppliers(
     include_inactive: bool = False,
 ) -> list[InventorySupplier]:
     if clinic_id is not None:
-        _get_active_clinic(clinic_id)
+        _get_active_clinic(
+            clinic_id
+        )
 
-    query = InventorySupplier.query
+    statement = select(
+        InventorySupplier
+    )
 
     if clinic_id is not None:
-        query = query.filter(
-            db.or_(
+        statement = statement.where(
+            or_(
                 InventorySupplier.clinic_id == clinic_id,
                 InventorySupplier.clinic_id.is_(None),
             )
         )
 
     if not include_inactive:
-        query = query.filter_by(
-            is_active=True,
+        statement = statement.where(
+            InventorySupplier.is_active.is_(True),
         )
 
+    statement = statement.order_by(
+        InventorySupplier.name.asc()
+    )
+
     return (
-        query
-        .order_by(InventorySupplier.name.asc())
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -901,9 +1038,14 @@ def create_supplier(
     **fields,
 ) -> InventorySupplier:
     if clinic_id is not None:
-        _get_active_clinic(clinic_id)
+        _get_active_clinic(
+            clinic_id
+        )
 
-    if not isinstance(name, str) or not name.strip():
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+    ):
         raise ValidationError(
             "Supplier name is required"
         )
@@ -918,21 +1060,31 @@ def create_supplier(
 
     name = name.strip()
 
-    duplicate_query = InventorySupplier.query.filter(
-        db.func.lower(
+    duplicate_statement = select(
+        InventorySupplier
+    ).where(
+        func.lower(
             InventorySupplier.name
         ) == name.lower(),
     )
 
     if clinic_id is not None:
-        duplicate_query = duplicate_query.filter(
-            db.or_(
+        duplicate_statement = duplicate_statement.where(
+            or_(
                 InventorySupplier.clinic_id == clinic_id,
                 InventorySupplier.clinic_id.is_(None),
             )
         )
 
-    if duplicate_query.first():
+    existing = (
+        db.session.execute(
+            duplicate_statement
+        )
+        .scalars()
+        .first()
+    )
+
+    if existing:
         raise ConflictError(
             f"Supplier '{name}' already exists"
         )
@@ -948,7 +1100,9 @@ def create_supplier(
         **fields,
     )
 
-    db.session.add(supplier)
+    db.session.add(
+        supplier
+    )
     db.session.flush()
 
     create_audit_log(
@@ -981,9 +1135,7 @@ def update_supplier(
         clinic_id=clinic_id,
     )
 
-    unknown = set(fields) - (
-        _SUPPLIER_EDITABLE_FIELDS
-    )
+    unknown = set(fields) - _SUPPLIER_EDITABLE_FIELDS
 
     if unknown:
         raise ValidationError(
@@ -1020,30 +1172,38 @@ def update_supplier(
             continue
 
         if key == "name" and new_value:
-            duplicate_query = (
-                InventorySupplier.query
-                .filter(
-                    db.func.lower(
-                        InventorySupplier.name
-                    ) == new_value.lower(),
-                    InventorySupplier.id != supplier.id,
-                )
+            duplicate_statement = select(
+                InventorySupplier
+            ).where(
+                func.lower(
+                    InventorySupplier.name
+                ) == new_value.lower(),
+                InventorySupplier.id != supplier.id,
             )
 
             if supplier.clinic_id is None:
                 # A global supplier name must remain globally unique.
-                duplicate_query = duplicate_query
-
+                pass
             else:
-                duplicate_query = duplicate_query.filter(
-                    db.or_(
-                        InventorySupplier.clinic_id
-                        == supplier.clinic_id,
-                        InventorySupplier.clinic_id.is_(None),
+                duplicate_statement = (
+                    duplicate_statement.where(
+                        or_(
+                            InventorySupplier.clinic_id
+                            == supplier.clinic_id,
+                            InventorySupplier.clinic_id.is_(None),
+                        )
                     )
                 )
 
-            if duplicate_query.first():
+            duplicate = (
+                db.session.execute(
+                    duplicate_statement
+                )
+                .scalars()
+                .first()
+            )
+
+            if duplicate:
                 raise ConflictError(
                     f"Supplier '{new_value}' already exists"
                 )
@@ -1163,12 +1323,18 @@ def get_inventory_batch(
     item_id: int | None = None,
     clinic_id: int | None = None,
 ) -> InventoryBatch:
-    batch = _get_batch(batch_id)
+    batch = _get_batch(
+        batch_id
+    )
 
-    item = _get_item(batch.item_id)
+    item = _get_item(
+        batch.item_id
+    )
 
     if item_id is not None:
-        requested_item = _get_item(item_id)
+        requested_item = _get_item(
+            item_id
+        )
 
         _validate_batch_for_item(
             batch=batch,
@@ -1194,21 +1360,25 @@ def list_inventory_batches(
         clinic_id,
     )
 
-    query = InventoryBatch.query.filter_by(
-        item_id=item.id,
+    statement = select(
+        InventoryBatch
+    ).where(
+        InventoryBatch.item_id == item.id,
     )
 
     if not include_inactive:
-        query = query.filter_by(
-            is_active=True,
+        statement = statement.where(
+            InventoryBatch.is_active.is_(True),
         )
 
+    statement = statement.order_by(
+        InventoryBatch.expiry_date.asc(),
+        InventoryBatch.received_at.asc(),
+    )
+
     return (
-        query
-        .order_by(
-            InventoryBatch.expiry_date.asc(),
-            InventoryBatch.received_at.asc(),
-        )
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1222,9 +1392,13 @@ def create_inventory_batch(
     supplier_id: int | None = None,
     clinic_id: int | None = None,
 ) -> InventoryBatch:
-    item = _get_locked_active_item(item_id)
+    item = _get_locked_active_item(
+        item_id
+    )
 
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -1241,12 +1415,16 @@ def create_inventory_batch(
 
     batch_number = batch_number.strip()
 
+    statement = select(
+        InventoryBatch
+    ).where(
+        InventoryBatch.item_id == item.id,
+        InventoryBatch.batch_number == batch_number,
+    )
+
     existing = (
-        InventoryBatch.query
-        .filter(
-            InventoryBatch.item_id == item.id,
-            InventoryBatch.batch_number == batch_number,
-        )
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -1261,7 +1439,9 @@ def create_inventory_batch(
             "Unit cost cannot be negative"
         )
 
-    _validate_batch_expiry(expiry_date)
+    _validate_batch_expiry(
+        expiry_date
+    )
 
     if supplier_id is not None:
         supplier = _get_supplier(
@@ -1287,7 +1467,9 @@ def create_inventory_batch(
         expiry_date=expiry_date,
     )
 
-    db.session.add(batch)
+    db.session.add(
+        batch
+    )
     db.session.flush()
 
     create_audit_log(
@@ -1318,13 +1500,17 @@ def update_inventory_batch(
     clinic_id: int | None = None,
     **fields,
 ) -> InventoryBatch:
-    batch = _get_locked_batch(batch_id)
+    batch = _get_locked_batch(
+        batch_id
+    )
 
     item = _get_locked_item(
         batch.item_id
     )
 
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -1353,13 +1539,17 @@ def update_inventory_batch(
                     "Batch number cannot be empty"
                 )
 
+            statement = select(
+                InventoryBatch
+            ).where(
+                InventoryBatch.item_id == batch.item_id,
+                InventoryBatch.batch_number == new_value,
+                InventoryBatch.id != batch.id,
+            )
+
             duplicate = (
-                InventoryBatch.query
-                .filter(
-                    InventoryBatch.item_id == batch.item_id,
-                    InventoryBatch.batch_number == new_value,
-                    InventoryBatch.id != batch.id,
-                )
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -1441,7 +1631,9 @@ def list_expiring_inventory_batches(
     clinic_id: int,
     days: int = 30,
 ) -> list[InventoryBatch]:
-    _get_active_clinic(clinic_id)
+    _get_active_clinic(
+        clinic_id
+    )
 
     if not isinstance(days, int):
         raise ValidationError(
@@ -1454,12 +1646,18 @@ def list_expiring_inventory_batches(
         )
 
     today = date.today()
-    expiry_limit = today + timedelta(days=days)
+    expiry_limit = today + timedelta(
+        days=days
+    )
 
-    return (
-        InventoryBatch.query
-        .join(InventoryItem)
-        .filter(
+    statement = (
+        select(InventoryBatch)
+        .join(
+            InventoryItem,
+            InventoryItem.id
+            == InventoryBatch.item_id,
+        )
+        .where(
             InventoryItem.clinic_id == clinic_id,
             InventoryItem.is_active.is_(True),
             InventoryBatch.is_active.is_(True),
@@ -1471,6 +1669,11 @@ def list_expiring_inventory_batches(
         .order_by(
             InventoryBatch.expiry_date.asc()
         )
+    )
+
+    return (
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1488,12 +1691,19 @@ def get_stock_movements(
         clinic_id,
     )
 
-    return (
-        StockMovement.query
-        .filter_by(item_id=item.id)
+    statement = (
+        select(StockMovement)
+        .where(
+            StockMovement.item_id == item.id,
+        )
         .order_by(
             StockMovement.created_at.desc()
         )
+    )
+
+    return (
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1522,7 +1732,9 @@ def _resolve_movement_direction(
             abs(quantity),
         )
 
-    _validate_positive_quantity(quantity)
+    _validate_positive_quantity(
+        quantity
+    )
 
     if movement_type in INCREASING_MOVEMENTS:
         return (
@@ -1557,9 +1769,13 @@ def record_stock_movement(
 ) -> StockMovement:
     # Critical stock mutation:
     # lock the item before checking or changing quantity.
-    item = _get_locked_active_item(item_id)
+    item = _get_locked_active_item(
+        item_id
+    )
 
-    _get_active_clinic(item.clinic_id)
+    _get_active_clinic(
+        item.clinic_id
+    )
 
     _validate_item_clinic(
         item,
@@ -1582,14 +1798,18 @@ def record_stock_movement(
 
     if batch_id is not None:
         # Lock the batch before reading or modifying its stock.
-        batch = _get_locked_batch(batch_id)
+        batch = _get_locked_batch(
+            batch_id
+        )
 
         _validate_batch_for_item(
             batch=batch,
             item=item,
         )
 
-        _validate_batch_active(batch)
+        _validate_batch_active(
+            batch
+        )
 
     _validate_stock_invariants(
         item=item,
@@ -1597,7 +1817,10 @@ def record_stock_movement(
     )
 
     if direction == StockMovementDirection.OUT:
-        if item.quantity_on_hand < effective_quantity:
+        if (
+            item.quantity_on_hand
+            < effective_quantity
+        ):
             raise ConflictError(
                 f"Insufficient stock for inventory item "
                 f"{item.id}. Available: "
@@ -1607,7 +1830,8 @@ def record_stock_movement(
 
         if (
             batch is not None
-            and batch.quantity_on_hand < effective_quantity
+            and batch.quantity_on_hand
+            < effective_quantity
         ):
             raise ConflictError(
                 f"Insufficient stock in batch {batch.id}. "
@@ -1615,16 +1839,24 @@ def record_stock_movement(
                 f"requested: {effective_quantity}"
             )
 
-        item.quantity_on_hand -= effective_quantity
+        item.quantity_on_hand -= (
+            effective_quantity
+        )
 
         if batch is not None:
-            batch.quantity_on_hand -= effective_quantity
+            batch.quantity_on_hand -= (
+                effective_quantity
+            )
 
     else:
-        item.quantity_on_hand += effective_quantity
+        item.quantity_on_hand += (
+            effective_quantity
+        )
 
         if batch is not None:
-            batch.quantity_on_hand += effective_quantity
+            batch.quantity_on_hand += (
+                effective_quantity
+            )
 
     _validate_stock_invariants(
         item=item,
@@ -1633,11 +1865,17 @@ def record_stock_movement(
 
     movement = StockMovement(
         item_id=item.id,
-        batch_id=batch.id if batch else None,
+        batch_id=(
+            batch.id
+            if batch
+            else None
+        ),
         movement_type=movement_type,
         direction=direction,
         quantity=effective_quantity,
-        reason=_normalize_optional_text(reason),
+        reason=_normalize_optional_text(
+            reason
+        ),
         performed_by_id=performed_by_id,
         reference_type=_normalize_optional_text(
             reference_type
@@ -1645,7 +1883,9 @@ def record_stock_movement(
         reference_id=reference_id,
     )
 
-    db.session.add(movement)
+    db.session.add(
+        movement
+    )
     db.session.flush()
 
     create_audit_log(
@@ -1653,8 +1893,10 @@ def record_stock_movement(
         entity_type="StockMovement",
         entity_id=movement.id,
         description=(
-            f"Stock movement recorded for item {item.id}: "
-            f"{direction.value} {effective_quantity}"
+            f"Stock movement recorded for item "
+            f"{item.id}: "
+            f"{direction.value} "
+            f"{effective_quantity}"
         ),
         new_value={
             "item_id": item.id,
@@ -1696,7 +1938,8 @@ def get_inventory_transfer(
     if clinic_id is not None:
         if (
             transfer.source_clinic_id != clinic_id
-            and transfer.destination_clinic_id != clinic_id
+            and transfer.destination_clinic_id
+            != clinic_id
         ):
             raise ValidationError(
                 f"Inventory transfer {transfer_id} "
@@ -1710,26 +1953,33 @@ def list_inventory_transfers(
     clinic_id: int,
     status: InventoryTransferStatus | None = None,
 ) -> list[InventoryTransfer]:
-    _get_active_clinic(clinic_id)
+    _get_active_clinic(
+        clinic_id
+    )
 
-    query = InventoryTransfer.query.filter(
-        db.or_(
-            InventoryTransfer.source_clinic_id == clinic_id,
+    statement = select(
+        InventoryTransfer
+    ).where(
+        or_(
+            InventoryTransfer.source_clinic_id
+            == clinic_id,
             InventoryTransfer.destination_clinic_id
             == clinic_id,
         )
     )
 
     if status is not None:
-        query = query.filter_by(
-            status=status,
+        statement = statement.where(
+            InventoryTransfer.status == status,
         )
 
+    statement = statement.order_by(
+        InventoryTransfer.created_at.desc()
+    )
+
     return (
-        query
-        .order_by(
-            InventoryTransfer.created_at.desc()
-        )
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1745,7 +1995,9 @@ def create_inventory_transfer(
     batch_id: int | None = None,
     reason: str | None = None,
 ) -> InventoryTransfer:
-    _validate_positive_quantity(quantity)
+    _validate_positive_quantity(
+        quantity
+    )
 
     if source_clinic_id == destination_clinic_id:
         raise ValidationError(
@@ -1769,7 +2021,9 @@ def create_inventory_transfer(
     _ensure_same_clinic(
         expected_clinic_id=source_clinic.id,
         actual_clinic_id=item.clinic_id,
-        resource_name=f"Inventory item {item.id}",
+        resource_name=(
+            f"Inventory item {item.id}"
+        ),
     )
 
     _validate_staff_for_clinic(
@@ -1796,7 +2050,9 @@ def create_inventory_transfer(
             item=item,
         )
 
-        _validate_batch_active(batch)
+        _validate_batch_active(
+            batch
+        )
 
         if batch.quantity_on_hand < quantity:
             raise ConflictError(
@@ -1816,12 +2072,16 @@ def create_inventory_transfer(
         destination_clinic_id=destination_clinic_id,
         quantity=quantity,
         status=InventoryTransferStatus.PENDING,
-        reason=_normalize_optional_text(reason),
+        reason=_normalize_optional_text(
+            reason
+        ),
         requested_by_id=requested_by_id,
         requested_at=_utcnow(),
     )
 
-    db.session.add(transfer)
+    db.session.add(
+        transfer
+    )
     db.session.flush()
 
     create_audit_log(
@@ -1869,10 +2129,15 @@ def approve_inventory_transfer(
         _ensure_same_clinic(
             expected_clinic_id=clinic_id,
             actual_clinic_id=transfer.source_clinic_id,
-            resource_name=f"Inventory transfer {transfer.id}",
+            resource_name=(
+                f"Inventory transfer {transfer.id}"
+            ),
         )
 
-    if transfer.status != InventoryTransferStatus.PENDING:
+    if (
+        transfer.status
+        != InventoryTransferStatus.PENDING
+    ):
         raise ConflictError(
             f"Transfer {transfer.id} cannot be approved "
             f"from status '{transfer.status.value}'"
@@ -1923,9 +2188,9 @@ def _get_or_create_destination_item(
     source_item: InventoryItem,
     destination_clinic_id: int,
 ) -> InventoryItem:
-    destination_item = (
-        InventoryItem.query
-        .filter(
+    statement = (
+        select(InventoryItem)
+        .where(
             InventoryItem.clinic_id
             == destination_clinic_id,
             InventoryItem.name
@@ -1934,6 +2199,11 @@ def _get_or_create_destination_item(
             == source_item.category,
         )
         .with_for_update()
+    )
+
+    destination_item = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -1958,7 +2228,9 @@ def _get_or_create_destination_item(
         is_active=True,
     )
 
-    db.session.add(destination_item)
+    db.session.add(
+        destination_item
+    )
     db.session.flush()
 
     create_audit_log(
@@ -1983,15 +2255,20 @@ def _get_or_create_destination_batch(
     source_batch: InventoryBatch,
     destination_item: InventoryItem,
 ) -> InventoryBatch:
-    destination_batch = (
-        InventoryBatch.query
-        .filter(
+    statement = (
+        select(InventoryBatch)
+        .where(
             InventoryBatch.item_id
             == destination_item.id,
             InventoryBatch.batch_number
             == source_batch.batch_number,
         )
         .with_for_update()
+    )
+
+    destination_batch = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -2035,7 +2312,9 @@ def _get_or_create_destination_batch(
         is_active=True,
     )
 
-    db.session.add(destination_batch)
+    db.session.add(
+        destination_batch
+    )
     db.session.flush()
 
     create_audit_log(
@@ -2082,7 +2361,9 @@ def complete_inventory_transfer(
         _ensure_same_clinic(
             expected_clinic_id=clinic_id,
             actual_clinic_id=transfer.source_clinic_id,
-            resource_name=f"Inventory transfer {transfer.id}",
+            resource_name=(
+                f"Inventory transfer {transfer.id}"
+            ),
         )
 
     if transfer.status not in (
@@ -2107,7 +2388,9 @@ def complete_inventory_transfer(
     _ensure_same_clinic(
         expected_clinic_id=transfer.source_clinic_id,
         actual_clinic_id=source_item.clinic_id,
-        resource_name=f"Inventory item {source_item.id}",
+        resource_name=(
+            f"Inventory item {source_item.id}"
+        ),
     )
 
     source_batch = None
@@ -2131,7 +2414,10 @@ def complete_inventory_transfer(
         batch=source_batch,
     )
 
-    if source_item.quantity_on_hand < transfer.quantity:
+    if (
+        source_item.quantity_on_hand
+        < transfer.quantity
+    ):
         raise ConflictError(
             f"Insufficient source stock for transfer "
             f"{transfer.id}. Available: "
@@ -2153,13 +2439,17 @@ def complete_inventory_transfer(
 
     destination_item = _get_or_create_destination_item(
         source_item=source_item,
-        destination_clinic_id=transfer.destination_clinic_id,
+        destination_clinic_id=(
+            transfer.destination_clinic_id
+        ),
     )
 
     # The destination item belongs to the destination clinic
     # by construction, but verify the invariant explicitly.
     _ensure_same_clinic(
-        expected_clinic_id=transfer.destination_clinic_id,
+        expected_clinic_id=(
+            transfer.destination_clinic_id
+        ),
         actual_clinic_id=destination_item.clinic_id,
         resource_name=(
             f"Destination inventory item "
@@ -2192,7 +2482,9 @@ def complete_inventory_transfer(
     # SOURCE
     # ------------------------------------------------------------------
 
-    source_item.quantity_on_hand -= transfer.quantity
+    source_item.quantity_on_hand -= (
+        transfer.quantity
+    )
 
     if source_batch is not None:
         source_batch.quantity_on_hand -= (
@@ -2220,7 +2512,9 @@ def complete_inventory_transfer(
         reference_id=transfer.id,
     )
 
-    db.session.add(source_movement)
+    db.session.add(
+        source_movement
+    )
 
     # ------------------------------------------------------------------
     # DESTINATION
@@ -2256,7 +2550,9 @@ def complete_inventory_transfer(
         reference_id=transfer.id,
     )
 
-    db.session.add(destination_movement)
+    db.session.add(
+        destination_movement
+    )
 
     # ------------------------------------------------------------------
     # COMPLETE TRANSFER
@@ -2284,7 +2580,9 @@ def complete_inventory_transfer(
                 InventoryTransferStatus.COMPLETED.value
             ),
             "performed_by_id": performed_by_id,
-            "destination_item_id": destination_item.id,
+            "destination_item_id": (
+                destination_item.id
+            ),
             "destination_batch_id": (
                 destination_batch.id
                 if destination_batch
@@ -2317,7 +2615,9 @@ def cancel_inventory_transfer(
         _ensure_same_clinic(
             expected_clinic_id=clinic_id,
             actual_clinic_id=transfer.source_clinic_id,
-            resource_name=f"Inventory transfer {transfer.id}",
+            resource_name=(
+                f"Inventory transfer {transfer.id}"
+            ),
         )
 
     if transfer.status in (
