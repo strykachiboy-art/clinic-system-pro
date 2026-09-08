@@ -2,13 +2,13 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from sqlalchemy import select
+
 from app.extensions import db
 from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.exceptions import DomainError
 from app.core.utils.decorators import role_required
-from app.extensions import db
 
 from app.modules.lab.schemas.lab_schema import (
     LabEquipmentLinkSchema,
@@ -83,10 +83,12 @@ LAB_VIEW_ROLES = (
 # Authentication / tenancy helpers
 # ---------------------------------------------------------------------
 
+
 def _get_current_user():
     """
     Return the authenticated user.
     """
+
     identity = get_jwt_identity()
 
     try:
@@ -159,12 +161,17 @@ def _get_current_staff() -> Staff:
             "with a clinic"
         )
 
-    staff = (
-        Staff.query
-        .filter(
+    statement = (
+        select(Staff)
+        .where(
             Staff.user_id == user.id,
             Staff.clinic_id == user.clinic_id,
         )
+    )
+
+    staff = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -184,6 +191,7 @@ def _get_current_staff_id() -> int:
 # ---------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------
+
 
 def _handle_route_error(exc):
     """
@@ -216,6 +224,7 @@ def _validation_error_response(exc):
 # ---------------------------------------------------------------------
 # Serializers
 # ---------------------------------------------------------------------
+
 
 def _serialize_lab_test(test):
     return {
@@ -377,6 +386,7 @@ def _serialize_lab_order(order):
 # Lab test catalog
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post("/tests")
 @role_required(*LAB_MANAGEMENT_ROLES)
 def create_lab_test_route():
@@ -503,6 +513,7 @@ def update_lab_test_route(test_id: int):
 # Lab orders
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post("/orders")
 @role_required(*LAB_CLINICAL_ROLES)
 def create_lab_order_route():
@@ -589,6 +600,7 @@ def list_orders_for_patient_route():
 # Sample collection
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post(
     "/orders/<int:order_id>/collect-sample"
 )
@@ -625,6 +637,7 @@ def collect_sample_route(order_id: int):
 # ---------------------------------------------------------------------
 # Equipment
 # ---------------------------------------------------------------------
+
 
 @lab_bp.post(
     "/orders/<int:order_id>/equipment"
@@ -665,6 +678,7 @@ def link_equipment_route(order_id: int):
 # Sample processing
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post(
     "/orders/<int:order_id>/process"
 )
@@ -704,6 +718,7 @@ def process_sample_route(order_id: int):
 # Result entry
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post(
     "/order-items/<int:order_item_id>/result"
 )
@@ -741,6 +756,7 @@ def enter_result_route(order_item_id: int):
 # ---------------------------------------------------------------------
 # Result verification
 # ---------------------------------------------------------------------
+
 
 @lab_bp.post(
     "/orders/<int:order_id>/verify"
@@ -780,6 +796,7 @@ def verify_results_route(order_id: int):
 # Order completion
 # ---------------------------------------------------------------------
 
+
 @lab_bp.post(
     "/orders/<int:order_id>/complete"
 )
@@ -806,6 +823,7 @@ def complete_order_route(order_id: int):
 # ---------------------------------------------------------------------
 # Cancellation
 # ---------------------------------------------------------------------
+
 
 @lab_bp.post(
     "/orders/<int:order_id>/cancel"

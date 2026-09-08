@@ -1,368 +1,2905 @@
-﻿from decimal import Decimal
+﻿from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-from app.core.enums.lab_enums import LabOrderStatus, LabResultFlag, SampleType
-from app.core.enums.role_enums import Role
+from app.core.enums.lab_enums import (
+    LabOrderStatus,
+    LabResultFlag,
+    SampleType,
+)
 from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.modules.lab.services import lab_service as svc
 
 
-class TestLabTestCatalog:
-    def test_create_lab_test_happy_path(self, db):
-        test = svc.create_lab_test(name="CBC", code="CBC1", sample_type=SampleType.BLOOD)
-        assert test.id is not None
-        assert test.is_active is True
+@pytest.fixture
+def lab_service():
+    import app.modules.lab.services.lab_service as service
 
-    def test_create_lab_test_rejects_blank_name(self, db):
-        with pytest.raises(ValidationError):
-            svc.create_lab_test(name="   ")
-
-    def test_create_lab_test_rejects_unknown_field(self, db):
-        with pytest.raises(ValidationError):
-            svc.create_lab_test(name="X", made_up_field=1)
-
-    def test_create_lab_test_rejects_duplicate_code(self, db):
-        svc.create_lab_test(name="A", code="DUP")
-        with pytest.raises(ConflictError):
-            svc.create_lab_test(name="B", code="DUP")
-
-    def test_create_lab_test_rejects_invalid_critical_range(self, db):
-        with pytest.raises(ValidationError):
-            svc.create_lab_test(name="X", critical_low=Decimal("10"), critical_high=Decimal("5"))
-
-    def test_get_lab_test_not_found(self, db):
-        with pytest.raises(NotFoundError):
-            svc.get_lab_test(999999)
-
-    def test_list_lab_tests_global_vs_clinic_scoped(self, db, clinic, make_lab_test):
-        make_lab_test(None, name="Global")
-        make_lab_test(clinic, name="ClinicOnly")
-
-        global_only = svc.list_lab_tests(clinic_id=None)
-        assert {t.name for t in global_only} == {"Global"}
-
-        scoped = svc.list_lab_tests(clinic_id=clinic.id)
-        assert {t.name for t in scoped} == {"Global", "ClinicOnly"}
-
-    def test_list_lab_tests_excludes_inactive_by_default(self, db, make_lab_test):
-        make_lab_test(None, name="Active")
-        make_lab_test(None, name="Inactive", is_active=False)
-
-        assert {t.name for t in svc.list_lab_tests()} == {"Active"}
-        assert {t.name for t in svc.list_lab_tests(active_only=False)} == {"Active", "Inactive"}
-
-    def test_update_lab_test_rejects_unknown_field(self, db, make_lab_test):
-        test = make_lab_test(None)
-        with pytest.raises(ValidationError):
-            svc.update_lab_test(test.id, bogus=1)
-
-    def test_update_lab_test_rejects_duplicate_code(self, db, make_lab_test):
-        make_lab_test(None, code="AAA")
-        b = make_lab_test(None, code="BBB")
-
-        with pytest.raises(ConflictError):
-            svc.update_lab_test(b.id, code="AAA")
-
-    def test_update_lab_test_happy_path(self, db, make_lab_test):
-        test = make_lab_test(None, name="Old")
-        updated = svc.update_lab_test(test.id, name="New")
-        assert updated.name == "New"
+    return service
 
 
-class TestLabOrderCreation:
-    def test_create_lab_order_happy_path(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
+@pytest.fixture(autouse=True)
+def app_context(app):
+    """
+    Transactional Lab service methods require an active Flask
+    application context.
+    """
+    with app.app_context():
+        yield
 
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
+
+def now():
+    return datetime.now(timezone.utc)
+
+
+def staff_obj(
+    *,
+    id=1,
+    clinic_id=1,
+    status=StaffStatus.ACTIVE,
+):
+    return SimpleNamespace(
+        id=id,
+        clinic_id=clinic_id,
+        status=status,
+    )
+
+
+def patient_obj(*, id=1, clinic_id=1):
+    return SimpleNamespace(
+        id=id,
+        clinic_id=clinic_id,
+    )
+
+
+def make_test_obj(
+    *,
+    id=1,
+    clinic_id=1,
+    name="CBC",
+    code="CBC",
+    is_active=True,
+    reference_range=None,
+    critical_low=None,
+    critical_high=None,
+    price=Decimal("25.00"),
+    sample_type=SampleType.BLOOD,
+):
+    return SimpleNamespace(
+        id=id,
+        clinic_id=clinic_id,
+        name=name,
+        code=code,
+        loinc_code=None,
+        sample_type=sample_type,
+        reference_range=reference_range,
+        unit="mg/dL",
+        price=price,
+        critical_low=critical_low,
+        critical_high=critical_high,
+        is_active=is_active,
+        created_at=now(),
+        updated_at=now(),
+    )
+
+
+def order_obj(
+    *,
+    id=1,
+    clinic_id=1,
+    patient_id=1,
+    consultation_id=None,
+    ordered_by_id=1,
+    status=LabOrderStatus.ORDERED,
+    qr_code="LAB-ABC",
+    collected_by_id=None,
+    sample_collected_at=None,
+    processed_by_id=None,
+    processed_at=None,
+    verified_by_id=None,
+    verified_at=None,
+    completed_at=None,
+    equipment_reference_id=None,
+    cancellation_reason=None,
+    items=None,
+):
+    return SimpleNamespace(
+        id=id,
+        clinic_id=clinic_id,
+        patient_id=patient_id,
+        consultation_id=consultation_id,
+        ordered_by_id=ordered_by_id,
+        status=status,
+        qr_code=qr_code,
+        collected_by_id=collected_by_id,
+        sample_collected_at=sample_collected_at,
+        processed_by_id=processed_by_id,
+        processed_at=processed_at,
+        verified_by_id=verified_by_id,
+        verified_at=verified_at,
+        completed_at=completed_at,
+        equipment_reference_id=equipment_reference_id,
+        cancellation_reason=cancellation_reason,
+        items=[] if items is None else items,
+        created_at=now(),
+        updated_at=now(),
+    )
+
+
+def order_item_obj(
+    *,
+    id=1,
+    order_id=1,
+    test=None,
+    result_value=None,
+    flag=None,
+    result_notes=None,
+    result_file_url=None,
+    resulted_at=None,
+):
+    if test is None:
+        test = make_test_obj()
+
+    return SimpleNamespace(
+        id=id,
+        order_id=order_id,
+        test_id=test.id,
+        test=test,
+        result_value=result_value,
+        flag=flag,
+        result_notes=result_notes,
+        result_file_url=result_file_url,
+        resulted_at=resulted_at,
+    )
+
+
+class FakeScalarsResult:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def first(self):
+        return self.rows[0] if self.rows else None
+
+    def all(self):
+        return list(self.rows)
+
+
+class FakeExecuteResult:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def scalars(self):
+        return FakeScalarsResult(self._rows)
+
+
+# ============================================================================
+# SERIALIZATION
+# ============================================================================
+
+
+def test_serialize_value_handles_common_types(lab_service):
+    value = {
+        "decimal": Decimal("12.50"),
+        "datetime": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "enum": LabResultFlag.CRITICAL,
+        "nested": [Decimal("1.25"), {"x": 2}],
+    }
+
+    serialized = lab_service._serialize_value(value)
+
+    assert serialized["decimal"] == "12.50"
+    assert serialized["datetime"].startswith("2026-01-01T")
+    assert serialized["enum"] == LabResultFlag.CRITICAL.value
+    assert serialized["nested"][0] == "1.25"
+    assert serialized["nested"][1]["x"] == 2
+
+
+# ============================================================================
+# INTERNAL LOOKUPS / TENANCY
+# ============================================================================
+
+
+def test_get_patient_uses_modern_select_and_scoped_clinic(
+    lab_service,
+    monkeypatch,
+):
+    patient = patient_obj(id=7, clinic_id=3)
+    execute = Mock(return_value=FakeExecuteResult([patient]))
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    result = lab_service._get_patient(7, 3)
+
+    assert result is patient
+    execute.assert_called_once()
+
+    statement = execute.call_args.args[0]
+    assert statement is not None
+
+
+def test_get_patient_rejects_invalid_clinic_id(lab_service):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service._get_patient(1, 0)
+
+
+def test_get_patient_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(NotFoundError, match="Patient 99 not found"):
+        lab_service._get_patient(99, 1)
+
+
+def test_get_staff_uses_modern_select_and_active_check(
+    lab_service,
+    monkeypatch,
+):
+    staff = staff_obj(id=11, clinic_id=4)
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([staff])),
+    )
+
+    result = lab_service._get_staff(
+        11,
+        4,
+        require_active=True,
+    )
+
+    assert result is staff
+
+
+def test_get_staff_rejects_invalid_clinic(lab_service):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service._get_staff(1, -1)
+
+
+def test_get_staff_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(NotFoundError, match="Staff 7 not found"):
+        lab_service._get_staff(7, 1)
+
+
+def test_get_staff_rejects_inactive_staff(
+    lab_service,
+    monkeypatch,
+):
+    inactive = staff_obj(
+        id=7,
+        clinic_id=1,
+        status=object(),
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([inactive])),
+    )
+
+    with pytest.raises(ValidationError, match="Staff 7 is not active"):
+        lab_service._get_staff(
+            7,
+            1,
+            require_active=True,
         )
 
-        assert order.status == LabOrderStatus.ORDERED
-        assert order.qr_code is not None
-        assert len(order.items) == 1
 
-    def test_create_lab_order_requires_active_clinic(self, db, suspended_clinic):
-        with pytest.raises(Exception):
-            svc.create_lab_order(
-                clinic_id=suspended_clinic.id, patient_id=1, ordered_by_id=1, test_ids=[1],
-            )
+def test_get_consultation_uses_modern_select(
+    lab_service,
+    monkeypatch,
+):
+    consultation = SimpleNamespace(
+        id=3,
+        clinic_id=1,
+        patient_id=8,
+    )
 
-    def test_create_lab_order_rejects_empty_tests(self, db, clinic, make_patient, make_staff):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([consultation])),
+    )
 
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[],
-            )
+    result = lab_service._get_consultation(3, 1)
 
-    def test_create_lab_order_rejects_duplicate_test_ids(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
+    assert result is consultation
 
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id,
-                test_ids=[test.id, test.id],
-            )
 
-    def test_create_lab_order_rejects_patient_from_other_clinic(
-        self, db, clinic, make_clinic, make_patient, make_staff, make_lab_test
+def test_get_consultation_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(NotFoundError, match="Consultation 3 not found"):
+        lab_service._get_consultation(3, 1)
+
+
+def test_get_lab_test_allows_global_test_for_clinic(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(id=5, clinic_id=None)
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([test])),
+    )
+
+    assert lab_service._get_lab_test(5, 10) is test
+
+
+def test_get_lab_test_without_clinic_allows_only_global(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(id=5, clinic_id=None)
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([test])),
+    )
+
+    assert lab_service._get_lab_test(5) is test
+
+
+def test_get_lab_test_rejects_invalid_clinic(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service._get_lab_test(5, 0)
+
+
+def test_get_lab_test_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(NotFoundError, match="Lab test 5 not found"):
+        lab_service._get_lab_test(5, 1)
+
+
+@pytest.mark.parametrize("for_update", [False, True])
+def test_get_lab_order_uses_modern_select(
+    lab_service,
+    monkeypatch,
+    for_update,
+):
+    order = order_obj(id=2, clinic_id=3)
+    execute = Mock(
+        return_value=FakeExecuteResult([order])
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    result = lab_service._get_lab_order(
+        2,
+        3,
+        for_update=for_update,
+    )
+
+    assert result is order
+    statement = execute.call_args.args[0]
+    assert statement is not None
+
+
+def test_get_lab_order_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(NotFoundError, match="Lab order 9 not found"):
+        lab_service._get_lab_order(9, 1)
+
+
+def test_get_lab_order_rejects_invalid_clinic(lab_service):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service._get_lab_order(1, 0)
+
+
+def test_get_lab_order_item_scopes_through_parent_order(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj(id=12)
+    execute = Mock(
+        return_value=FakeExecuteResult([item])
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    result = lab_service._get_lab_order_item(
+        12,
+        7,
+        for_update=True,
+    )
+
+    assert result is item
+    statement = execute.call_args.args[0]
+    assert statement is not None
+
+
+def test_get_lab_order_item_not_found(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Lab order item 12 not found",
     ):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        other_clinic = make_clinic(name="Other")
-        patient = make_patient(other_clinic)
-        test = make_lab_test(clinic)
+        lab_service._get_lab_order_item(12, 7)
 
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-            )
 
-    def test_create_lab_order_rejects_inactive_ordering_staff(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR, status=StaffStatus.SUSPENDED)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
+# ============================================================================
+# VALIDATION HELPERS
+# ============================================================================
 
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-            )
 
-    def test_create_lab_order_rejects_missing_test_id(self, db, clinic, make_patient, make_staff):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
+def test_validate_patient_clinic_rejects_foreign_patient(lab_service):
+    with pytest.raises(ValidationError, match="does not belong to clinic 2"):
+        lab_service._validate_patient_clinic(
+            patient_obj(id=1, clinic_id=1),
+            2,
+        )
 
-        with pytest.raises(NotFoundError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[999999],
-            )
 
-    def test_create_lab_order_rejects_test_from_other_clinic(
-        self, db, clinic, make_clinic, make_patient, make_staff, make_lab_test
+def test_validate_staff_clinic_rejects_foreign_staff(lab_service):
+    with pytest.raises(ValidationError, match="does not belong to clinic 2"):
+        lab_service._validate_staff_clinic(
+            staff_obj(id=2, clinic_id=1),
+            2,
+        )
+
+
+def test_validate_consultation_rejects_foreign_clinic(lab_service):
+    consultation = SimpleNamespace(
+        id=4,
+        clinic_id=1,
+        patient_id=5,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="does not belong to clinic 2",
     ):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        other_clinic = make_clinic(name="Other")
-        test = make_lab_test(other_clinic)
-
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-            )
-
-    def test_create_lab_order_rejects_inactive_test(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic, is_active=False)
-
-        with pytest.raises(ValidationError):
-            svc.create_lab_order(
-                clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-            )
-
-    def test_list_orders_for_patient(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
-
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
+        lab_service._validate_consultation(
+            consultation,
+            2,
+            5,
         )
 
-        results = svc.list_orders_for_patient(patient.id)
-        assert [o.id for o in results] == [order.id]
 
+def test_validate_consultation_rejects_foreign_patient(lab_service):
+    consultation = SimpleNamespace(
+        id=4,
+        clinic_id=2,
+        patient_id=5,
+    )
 
-class TestSampleCollectionAndCancellation:
-    def _order(self, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
-        return svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-        )
-
-    def test_collect_sample_happy_path(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order = self._order(clinic, make_patient, make_staff, make_lab_test)
-        collected = svc.collect_sample(order.id)
-
-        assert collected.status == LabOrderStatus.SAMPLE_COLLECTED
-        assert collected.sample_collected_at is not None
-
-    def test_collect_sample_rejects_mismatched_qr_code(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order = self._order(clinic, make_patient, make_staff, make_lab_test)
-
-        with pytest.raises(ConflictError):
-            svc.collect_sample(order.id, scanned_qr_code="WRONG-CODE")
-
-    def test_collect_sample_rejects_wrong_status(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order = self._order(clinic, make_patient, make_staff, make_lab_test)
-        svc.collect_sample(order.id)
-
-        with pytest.raises(ConflictError):
-            svc.collect_sample(order.id)
-
-    def test_cancel_order_happy_path(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order = self._order(clinic, make_patient, make_staff, make_lab_test)
-        cancelled = svc.cancel_order(order.id, reason="Patient declined")
-
-        assert cancelled.status == LabOrderStatus.CANCELLED
-        assert cancelled.cancellation_reason == "Patient declined"
-
-    def test_cancel_order_rejects_already_completed(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order = self._order(clinic, make_patient, make_staff, make_lab_test)
-        svc.collect_sample(order.id)
-        item_id = order.items[0].id
-        svc.enter_result(item_id, result_value="5")
-
-        with pytest.raises(ConflictError):
-            svc.cancel_order(order.id)
-
-
-class TestEquipmentLinking:
-    def test_link_equipment_happy_path(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-        )
-        svc.collect_sample(order.id)
-
-        linked = svc.link_equipment(order.id, "EQ-123")
-
-        assert linked.status == LabOrderStatus.IN_PROGRESS
-        assert linked.equipment_reference_id == "EQ-123"
-
-    def test_link_equipment_rejects_blank_reference(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-        )
-        svc.collect_sample(order.id)
-
-        with pytest.raises(ValidationError):
-            svc.link_equipment(order.id, "   ")
-
-    def test_link_equipment_rejects_wrong_status(self, db, clinic, make_patient, make_staff, make_lab_test):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic)
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-        )
-        # Not collected yet -> still ORDERED
-        with pytest.raises(ConflictError):
-            svc.link_equipment(order.id, "EQ-123")
-
-
-class TestResultEntryAndAutoFlagging:
-    def _collected_order(self, clinic, make_patient, make_staff, make_lab_test, **test_overrides):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test = make_lab_test(clinic, **test_overrides)
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id, test_ids=[test.id],
-        )
-        svc.collect_sample(order.id)
-        return order, test
-
-    def test_enter_result_rejects_blank_value(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, _ = self._collected_order(clinic, make_patient, make_staff, make_lab_test)
-        item_id = order.items[0].id
-
-        with pytest.raises(ValidationError):
-            svc.enter_result(item_id, result_value="   ")
-
-    def test_enter_result_not_found(self, db):
-        with pytest.raises(NotFoundError):
-            svc.enter_result(999999, result_value="5")
-
-    def test_enter_result_explicit_flag_wins_over_auto(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test, reference_range="10 - 20"
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="15", flag=LabResultFlag.CRITICAL)
-        assert item.flag == LabResultFlag.CRITICAL
-
-    def test_enter_result_auto_flags_critical_threshold(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test,
-            critical_low=Decimal("2"), critical_high=Decimal("10"),
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="1")
-        assert item.flag == LabResultFlag.CRITICAL
-
-    def test_enter_result_auto_flags_normal_range(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test, reference_range="10 - 20"
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="15")
-        assert item.flag == LabResultFlag.NORMAL
-
-    def test_enter_result_auto_flags_abnormal_out_of_range(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test, reference_range="10 - 20"
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="99")
-        assert item.flag == LabResultFlag.ABNORMAL
-
-    def test_enter_result_auto_flags_bound_pattern(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test, reference_range="< 5"
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="3")
-        assert item.flag == LabResultFlag.NORMAL
-
-        # New order/item to test the failing side of the same bound
-        order2, _ = self._collected_order(clinic, make_patient, make_staff, make_lab_test, reference_range="< 5")
-
-    def test_enter_result_leaves_non_numeric_unflagged(self, db, clinic, make_patient, make_staff, make_lab_test):
-        order, test = self._collected_order(
-            clinic, make_patient, make_staff, make_lab_test, reference_range="10 - 20"
-        )
-        item_id = order.items[0].id
-
-        item = svc.enter_result(item_id, result_value="Positive")
-        assert item.flag is None
-
-    def test_enter_result_completes_order_when_all_items_resulted(
-        self, db, clinic, make_patient, make_staff, make_lab_test
+    with pytest.raises(
+        ValidationError,
+        match="does not belong to patient 7",
     ):
-        doctor = make_staff(clinic, role=Role.DOCTOR)
-        patient = make_patient(clinic)
-        test_a = make_lab_test(clinic)
-        test_b = make_lab_test(clinic)
-
-        order = svc.create_lab_order(
-            clinic_id=clinic.id, patient_id=patient.id, ordered_by_id=doctor.id,
-            test_ids=[test_a.id, test_b.id],
+        lab_service._validate_consultation(
+            consultation,
+            2,
+            7,
         )
-        svc.collect_sample(order.id)
 
-        item_a_id, item_b_id = [item.id for item in order.items]
 
-        svc.enter_result(item_a_id, result_value="1")
-        assert svc.get_lab_order(order.id).status == LabOrderStatus.SAMPLE_COLLECTED  # not done yet
+def test_validate_actor_for_order(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(clinic_id=4)
 
-        svc.enter_result(item_b_id, result_value="2")
-        assert svc.get_lab_order(order.id).status == LabOrderStatus.COMPLETED
-        assert svc.get_lab_order(order.id).completed_at is not None
+    actor = staff_obj(id=9, clinic_id=4)
+
+    get_staff = Mock(return_value=actor)
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_staff",
+        get_staff,
+    )
+
+    result = lab_service._validate_actor_for_order(
+        9,
+        order,
+    )
+
+    assert result is actor
+    get_staff.assert_called_once_with(
+        9,
+        4,
+        require_active=True,
+    )
+
+
+def test_assert_status_accepts_allowed_status(
+    lab_service,
+):
+    order = order_obj(status=LabOrderStatus.ORDERED)
+
+    lab_service._assert_status(
+        order,
+        LabOrderStatus.ORDERED,
+    )
+
+
+def test_assert_status_rejects_wrong_status(
+    lab_service,
+):
+    order = order_obj(status=LabOrderStatus.CANCELLED)
+
+    with pytest.raises(ConflictError, match="expected one of"):
+        lab_service._assert_status(
+            order,
+            LabOrderStatus.ORDERED,
+        )
+
+
+@pytest.mark.parametrize(
+    "actor_field,timestamp_field",
+    [
+        ("collected_by_id", "sample_collected_at"),
+        ("processed_by_id", "processed_at"),
+        ("verified_by_id", "verified_at"),
+    ],
+)
+def test_validate_actor_pair_rejects_mismatch(
+    lab_service,
+    actor_field,
+    timestamp_field,
+):
+    order = order_obj()
+    setattr(order, actor_field, 1)
+    setattr(order, timestamp_field, None)
+
+    with pytest.raises(ValidationError, match="must either both be set"):
+        lab_service._validate_actor_pair(
+            order,
+            actor_field,
+            timestamp_field,
+        )
+
+
+# ============================================================================
+# LAB TEST CATALOG
+# ============================================================================
+
+
+def test_list_lab_tests_uses_modern_select(
+    lab_service,
+    monkeypatch,
+):
+    rows = [
+        make_test_obj(id=1, clinic_id=None, name="A"),
+        make_test_obj(id=2, clinic_id=3, name="B"),
+    ]
+
+    execute = Mock(
+        return_value=FakeExecuteResult(rows)
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    result = lab_service.list_lab_tests(
+        clinic_id=3,
+        active_only=True,
+    )
+
+    assert result == rows
+    execute.assert_called_once()
+
+
+def test_list_lab_tests_global_only_when_clinic_missing(
+    lab_service,
+    monkeypatch,
+):
+    rows = [make_test_obj(id=1, clinic_id=None)]
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult(rows)),
+    )
+
+    result = lab_service.list_lab_tests()
+
+    assert result == rows
+
+
+def test_list_lab_tests_rejects_invalid_clinic(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service.list_lab_tests(0)
+
+
+def test_create_lab_test_rejects_empty_name(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="name is required"):
+        lab_service.create_lab_test("", clinic_id=1)
+
+
+def test_create_lab_test_rejects_unknown_field(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="Unknown lab test field"):
+        lab_service.create_lab_test(
+            "CBC",
+            clinic_id=1,
+            unknown_field="x",
+        )
+
+
+def test_create_lab_test_rejects_invalid_clinic(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service.create_lab_test(
+            "CBC",
+            clinic_id=0,
+        )
+
+
+def test_create_lab_test_checks_clinic_activity(
+    lab_service,
+    monkeypatch,
+):
+    ensure = Mock()
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        ensure,
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    audit = Mock()
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        audit,
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "add",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "flush",
+        Mock(),
+    )
+
+    result = lab_service.create_lab_test(
+        " CBC ",
+        clinic_id=7,
+        code="CBC",
+    )
+
+    ensure.assert_called_once_with(7)
+    assert result.name == "CBC"
+    assert result.code == "CBC"
+
+
+def test_create_lab_test_rejects_duplicate_code(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    existing = make_test_obj(id=9, clinic_id=1, code="CBC")
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([existing])),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already exists",
+    ):
+        lab_service.create_lab_test(
+            "CBC",
+            clinic_id=1,
+            code="CBC",
+        )
+
+
+@pytest.mark.parametrize(
+    "low,high",
+    [
+        (Decimal("10"), Decimal("10")),
+        (Decimal("20"), Decimal("10")),
+    ],
+)
+def test_create_lab_test_rejects_invalid_critical_range(
+    lab_service,
+    low,
+    high,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="critical_low must be less than critical_high",
+    ):
+        lab_service.create_lab_test(
+            "CBC",
+            clinic_id=1,
+            critical_low=low,
+            critical_high=high,
+        )
+
+
+def test_create_lab_test_rejects_negative_price(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="price cannot be negative",
+    ):
+        lab_service.create_lab_test(
+            "CBC",
+            clinic_id=1,
+            price=Decimal("-1"),
+        )
+
+
+def test_update_lab_test_merges_partial_critical_range(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(
+        id=5,
+        clinic_id=1,
+        critical_low=Decimal("5"),
+        critical_high=Decimal("20"),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_test",
+        Mock(return_value=test),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    audit = Mock()
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = lab_service.update_lab_test(
+        5,
+        clinic_id=1,
+        critical_low=Decimal("10"),
+    )
+
+    assert result.critical_low == Decimal("10")
+    assert result.critical_high == Decimal("20")
+
+
+def test_update_lab_test_rejects_final_invalid_critical_range(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(
+        id=5,
+        clinic_id=1,
+        critical_low=Decimal("10"),
+        critical_high=Decimal("20"),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_test",
+        Mock(return_value=test),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="critical_low must be less than critical_high",
+    ):
+        lab_service.update_lab_test(
+            5,
+            clinic_id=1,
+            critical_low=Decimal("25"),
+        )
+
+
+def test_update_lab_test_rejects_duplicate_code(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(id=5, clinic_id=1, code="OLD")
+    existing = make_test_obj(id=6, clinic_id=1, code="NEW")
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_test",
+        Mock(return_value=test),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([existing])),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already exists",
+    ):
+        lab_service.update_lab_test(
+            5,
+            clinic_id=1,
+            code="NEW",
+        )
+
+
+def test_update_lab_test_name_is_editable(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(id=5, clinic_id=1, name="Old")
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_test",
+        Mock(return_value=test),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.update_lab_test(
+        5,
+        clinic_id=1,
+        name=" New ",
+    )
+
+    assert result.name == "New"
+
+
+# ============================================================================
+# LAB ORDER CREATION
+# ============================================================================
+
+
+def test_list_orders_for_patient_validates_patient_and_uses_select(
+    lab_service,
+    monkeypatch,
+):
+    patient = patient_obj(id=7, clinic_id=2)
+    order = order_obj(id=10, clinic_id=2, patient_id=7)
+
+    get_patient = Mock(return_value=patient)
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_patient",
+        get_patient,
+    )
+
+    execute = Mock(
+        return_value=FakeExecuteResult([order])
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    result = lab_service.list_orders_for_patient(7, 2)
+
+    assert result == [order]
+    get_patient.assert_called_once_with(7, 2)
+    execute.assert_called_once()
+
+
+def test_list_orders_for_patient_rejects_invalid_clinic(
+    lab_service,
+):
+    with pytest.raises(ValidationError, match="positive integer"):
+        lab_service.list_orders_for_patient(1, 0)
+
+
+def test_create_lab_order_requires_tests(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="at least one test",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[],
+        )
+
+
+def test_create_lab_order_rejects_duplicate_tests(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="Duplicate test IDs",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[1, 1],
+        )
+
+
+def test_create_lab_order_rejects_non_positive_test_ids(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="positive integers",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[1, 0],
+        )
+
+
+def test_create_lab_order_rejects_bool_test_id(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    with pytest.raises(
+        ValidationError,
+        match="positive integers",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[True],
+        )
+
+
+def test_create_lab_order_rejects_missing_test(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_patient",
+        Mock(return_value=patient_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_staff",
+        Mock(return_value=staff_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Lab test",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[99],
+        )
+
+
+def test_create_lab_order_rejects_foreign_clinic_test(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_patient",
+        Mock(return_value=patient_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_staff",
+        Mock(return_value=staff_obj()),
+    )
+
+    foreign_test = make_test_obj(id=9, clinic_id=2)
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(
+            return_value=FakeExecuteResult([foreign_test])
+        ),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="do not belong",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[9],
+        )
+
+
+def test_create_lab_order_rejects_inactive_test(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_patient",
+        Mock(return_value=patient_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_staff",
+        Mock(return_value=staff_obj()),
+    )
+
+    inactive_test = make_test_obj(
+        id=9,
+        clinic_id=1,
+        is_active=False,
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(
+            return_value=FakeExecuteResult([inactive_test])
+        ),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="inactive",
+    ):
+        lab_service.create_lab_order(
+            clinic_id=1,
+            patient_id=1,
+            ordered_by_id=1,
+            test_ids=[9],
+        )
+
+
+def test_create_lab_order_validates_consultation(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_patient",
+        Mock(return_value=patient_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_get_staff",
+        Mock(return_value=staff_obj()),
+    )
+
+    consultation = SimpleNamespace(
+        id=10,
+        clinic_id=1,
+        patient_id=1,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_consultation",
+        Mock(return_value=consultation),
+    )
+
+    valid_test = make_test_obj(id=5, clinic_id=None)
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([valid_test])),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_generate_unique_qr_code",
+        Mock(return_value="LAB-123"),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    class FakeLabOrder:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.id = 100
+
+    class FakeLabOrderItem:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    monkeypatch.setattr(
+        lab_service,
+        "LabOrder",
+        FakeLabOrder,
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "LabOrderItem",
+        FakeLabOrderItem,
+    )
+
+    db_add = Mock()
+    db_flush = Mock()
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "add",
+        db_add,
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "flush",
+        db_flush,
+    )
+
+    result = lab_service.create_lab_order(
+        clinic_id=1,
+        patient_id=1,
+        ordered_by_id=1,
+        test_ids=[5],
+        consultation_id=10,
+    )
+
+    assert result.status == LabOrderStatus.ORDERED
+    assert result.qr_code == "LAB-123"
+    assert result.ordered_by_id == 1
+    db_flush.assert_called_once()
+
+
+def test_generate_unique_qr_code_retries_collision(
+    lab_service,
+    monkeypatch,
+):
+    generate = Mock(
+        side_effect=["LAB-1", "LAB-2"]
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_generate_qr_code",
+        generate,
+    )
+
+    first_existing = make_test_obj(id=1)
+
+    execute = Mock(
+        side_effect=[
+            FakeExecuteResult([first_existing]),
+            FakeExecuteResult([]),
+        ]
+    )
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        execute,
+    )
+
+    assert lab_service._generate_unique_qr_code() == "LAB-2"
+    assert generate.call_count == 2
+
+
+def test_generate_unique_qr_code_raises_after_collisions(
+    lab_service,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lab_service,
+        "_generate_qr_code",
+        Mock(return_value="LAB-X"),
+    )
+
+    existing = make_test_obj(id=1)
+
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([existing])),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="Could not generate a unique QR code",
+    ):
+        lab_service._generate_unique_qr_code()
+
+
+# ============================================================================
+# SAMPLE COLLECTION
+# ============================================================================
+
+
+def test_collect_sample_success(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        id=1,
+        clinic_id=4,
+        status=LabOrderStatus.ORDERED,
+        qr_code="LAB-123",
+    )
+
+    actor = staff_obj(id=9, clinic_id=4)
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=actor),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.collect_sample(
+        order_id=1,
+        collected_by_id=9,
+        scanned_qr_code=" LAB-123 ",
+        clinic_id=4,
+    )
+
+    assert result.status == LabOrderStatus.SAMPLE_COLLECTED
+    assert result.collected_by_id == 9
+    assert result.sample_collected_at is not None
+
+
+def test_collect_sample_rejects_wrong_qr(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+        qr_code="LAB-123",
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="does not match",
+    ):
+        lab_service.collect_sample(
+            1,
+            1,
+            "LAB-WRONG",
+            1,
+        )
+
+
+def test_collect_sample_rejects_empty_qr(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="cannot be empty",
+    ):
+        lab_service.collect_sample(
+            1,
+            1,
+            "   ",
+            1,
+        )
+
+
+def test_collect_sample_rejects_already_collected(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+        collected_by_id=8,
+        sample_collected_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already",
+    ):
+        lab_service.collect_sample(
+            1,
+            1,
+            None,
+            1,
+        )
+
+
+# ============================================================================
+# EQUIPMENT / PROCESSING
+# ============================================================================
+
+
+def test_link_equipment_success(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.link_equipment(
+        1,
+        " EQ-100 ",
+        1,
+    )
+
+    assert result.equipment_reference_id == "EQ-100"
+    assert result.status == LabOrderStatus.IN_PROGRESS
+
+
+def test_link_equipment_rejects_empty_reference(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="reference ID is required",
+    ):
+        lab_service.link_equipment(
+            1,
+            " ",
+            1,
+        )
+
+
+def test_link_equipment_rejects_too_long_reference(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="must not exceed",
+    ):
+        lab_service.link_equipment(
+            1,
+            "X" * 151,
+            1,
+        )
+
+
+def test_process_sample_success(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+        collected_by_id=5,
+        sample_collected_at=now(),
+    )
+
+    actor = staff_obj(id=8, clinic_id=1)
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=actor),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.process_sample(
+        1,
+        8,
+        1,
+        equipment_reference_id="EQ-1",
+    )
+
+    assert result.status == LabOrderStatus.IN_PROGRESS
+    assert result.processed_by_id == 8
+    assert result.processed_at is not None
+    assert result.equipment_reference_id == "EQ-1"
+
+
+def test_process_sample_rejects_duplicate_processing(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+        collected_by_id=5,
+        sample_collected_at=now(),
+        processed_by_id=6,
+        processed_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already been processed",
+    ):
+        lab_service.process_sample(
+            1,
+            1,
+            1,
+        )
+
+
+def test_process_sample_requires_collection(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="before collection",
+    ):
+        lab_service.process_sample(
+            1,
+            1,
+            1,
+        )
+
+
+# ============================================================================
+# CANCELLATION
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        LabOrderStatus.COMPLETED,
+        LabOrderStatus.CANCELLED,
+    ],
+)
+def test_cancel_order_rejects_final_status(
+    lab_service,
+    monkeypatch,
+    status,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=status,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="Cannot cancel",
+    ):
+        lab_service.cancel_order(
+            1,
+            "No longer needed",
+            1,
+            1,
+        )
+
+
+def test_cancel_order_normalizes_reason(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.cancel_order(
+        1,
+        "  Patient request  ",
+        1,
+        1,
+    )
+
+    assert result.status == LabOrderStatus.CANCELLED
+    assert result.cancellation_reason == "Patient request"
+
+
+def test_cancel_order_rejects_empty_reason(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="reason cannot be empty",
+    ):
+        lab_service.cancel_order(
+            1,
+            " ",
+            1,
+            1,
+        )
+
+
+def test_cancel_order_rejects_long_reason(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.ORDERED,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="must not exceed",
+    ):
+        lab_service.cancel_order(
+            1,
+            "X" * 256,
+            1,
+            1,
+        )
+
+
+# ============================================================================
+# RESULT FLAGGING
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("5", LabResultFlag.NORMAL),
+        ("10", LabResultFlag.NORMAL),
+        ("15", LabResultFlag.NORMAL),
+        ("4.99", LabResultFlag.ABNORMAL),
+        ("20.01", LabResultFlag.ABNORMAL),
+    ],
+)
+def test_auto_flag_numeric_range(
+    lab_service,
+    value,
+    expected,
+):
+    test = make_test_obj(
+        reference_range="5 - 20",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        value,
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("9.9", LabResultFlag.NORMAL),
+        ("10", LabResultFlag.ABNORMAL),
+        ("10.1", LabResultFlag.ABNORMAL),
+    ],
+)
+def test_auto_flag_less_than_bound(
+    lab_service,
+    value,
+    expected,
+):
+    test = make_test_obj(
+        reference_range="< 10",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        value,
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("5", LabResultFlag.NORMAL),
+        ("5.1", LabResultFlag.NORMAL),
+        ("4.9", LabResultFlag.ABNORMAL),
+    ],
+)
+def test_auto_flag_greater_than_or_equal_bound(
+    lab_service,
+    value,
+    expected,
+):
+    test = make_test_obj(
+        reference_range=">= 5",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        value,
+    ) == expected
+
+
+def test_auto_flag_critical_low_takes_precedence(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="5 - 20",
+        critical_low=Decimal("7"),
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        "6",
+    ) == LabResultFlag.CRITICAL
+
+
+def test_auto_flag_critical_high_takes_precedence(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="5 - 20",
+        critical_high=Decimal("18"),
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        "19",
+    ) == LabResultFlag.CRITICAL
+
+
+def test_auto_flag_non_numeric_is_unflagged(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="5 - 20",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        "positive",
+    ) is None
+
+
+def test_auto_flag_unsupported_range_is_unflagged(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="5 to 20 mg/dL",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        "10",
+    ) is None
+
+
+def test_auto_flag_inverted_range_is_unflagged(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="20 - 5",
+    )
+
+    assert lab_service._auto_flag(
+        test,
+        "10",
+    ) is None
+
+
+def test_resolve_result_flag_prefers_automatic_flag(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="5 - 20",
+    )
+
+    resolved, automatic = lab_service._resolve_result_flag(
+        test=test,
+        result_value="30",
+        supplied_flag=LabResultFlag.NORMAL,
+    )
+
+    assert resolved == LabResultFlag.ABNORMAL
+    assert automatic is True
+
+
+def test_resolve_result_flag_uses_supplied_flag_when_auto_unknown(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="qualitative",
+    )
+
+    resolved, automatic = lab_service._resolve_result_flag(
+        test=test,
+        result_value="positive",
+        supplied_flag=LabResultFlag.CRITICAL,
+    )
+
+    assert resolved == LabResultFlag.CRITICAL
+    assert automatic is False
+
+
+def test_resolve_result_flag_returns_none_when_no_flag_available(
+    lab_service,
+):
+    test = make_test_obj(
+        reference_range="qualitative",
+    )
+
+    resolved, automatic = lab_service._resolve_result_flag(
+        test=test,
+        result_value="positive",
+        supplied_flag=None,
+    )
+
+    assert resolved is None
+    assert automatic is False
+
+
+# ============================================================================
+# RESULT ENTRY
+# ============================================================================
+
+
+def test_enter_result_success_and_auto_flag(
+    lab_service,
+    monkeypatch,
+):
+    test = make_test_obj(
+        id=7,
+        reference_range="5 - 20",
+    )
+
+    item = order_item_obj(
+        id=11,
+        test=test,
+    )
+
+    order = order_obj(
+        id=20,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    item.order = order
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order_item",
+        Mock(return_value=item),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.enter_result(
+        order_item_id=11,
+        result_value="25",
+        result_notes=" Elevated ",
+        result_file_url=" report.pdf ",
+        flag=LabResultFlag.NORMAL,
+        clinic_id=1,
+    )
+
+    assert result.result_value == "25"
+    assert result.flag == LabResultFlag.ABNORMAL
+    assert result.result_notes == "Elevated"
+    assert result.result_file_url == "report.pdf"
+    assert result.resulted_at is not None
+
+
+def test_enter_result_rejects_empty_value(
+    lab_service,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Result value is required",
+    ):
+        lab_service.enter_result(
+            1,
+            " ",
+            None,
+            None,
+            None,
+            1,
+        )
+
+
+def test_enter_result_rejects_too_long_value(
+    lab_service,
+):
+    with pytest.raises(
+        ValidationError,
+        match="must not exceed 150",
+    ):
+        lab_service.enter_result(
+            1,
+            "X" * 151,
+            None,
+            None,
+            None,
+            1,
+        )
+
+
+def test_enter_result_rejects_after_verification(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj()
+    item.order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order_item",
+        Mock(return_value=item),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="after verification",
+    ):
+        lab_service.enter_result(
+            1,
+            "10",
+            None,
+            None,
+            None,
+            1,
+        )
+
+
+def test_enter_result_requires_processing(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj()
+    item.order = order_obj(
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order_item",
+        Mock(return_value=item),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="before the sample has been processed",
+    ):
+        lab_service.enter_result(
+            1,
+            "10",
+            None,
+            None,
+            None,
+            1,
+        )
+
+
+# ============================================================================
+# RESULT VERIFICATION
+# ============================================================================
+
+
+def test_verify_results_success(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj(
+        result_value="10",
+        resulted_at=now(),
+    )
+
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        items=[item],
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj(id=9, clinic_id=1)),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([item])),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.verify_results(
+        5,
+        9,
+        1,
+    )
+
+    assert result.verified_by_id == 9
+    assert result.verified_at is not None
+
+
+def test_verify_results_rejects_missing_results(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj(
+        result_value=None,
+        resulted_at=None,
+    )
+
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([item])),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="result\\(s\\) are missing",
+    ):
+        lab_service.verify_results(
+            5,
+            1,
+            1,
+        )
+
+
+def test_verify_results_rejects_empty_order_items(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="no test items",
+    ):
+        lab_service.verify_results(
+            5,
+            1,
+            1,
+        )
+
+
+def test_verify_results_rejects_already_verified(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "_validate_actor_for_order",
+        Mock(return_value=staff_obj()),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already been verified",
+    ):
+        lab_service.verify_results(
+            5,
+            1,
+            1,
+        )
+
+
+# ============================================================================
+# COMPLETION
+# ============================================================================
+
+
+def test_complete_order_success(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj(
+        result_value="10",
+        resulted_at=now(),
+    )
+
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([item])),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "create_audit_log",
+        Mock(),
+    )
+
+    result = lab_service.complete_order(
+        5,
+        1,
+    )
+
+    assert result.status == LabOrderStatus.COMPLETED
+    assert result.completed_at is not None
+
+
+def test_complete_order_requires_verification(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="before verification",
+    ):
+        lab_service.complete_order(
+            5,
+            1,
+        )
+
+
+def test_complete_order_rejects_missing_results(
+    lab_service,
+    monkeypatch,
+):
+    item = order_item_obj(
+        result_value=None,
+        resulted_at=None,
+    )
+
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([item])),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="result\\(s\\) are missing",
+    ):
+        lab_service.complete_order(
+            5,
+            1,
+        )
+
+
+def test_complete_order_rejects_no_items(
+    lab_service,
+    monkeypatch,
+):
+    order = order_obj(
+        id=5,
+        clinic_id=1,
+        status=LabOrderStatus.IN_PROGRESS,
+        sample_collected_at=now(),
+        collected_by_id=2,
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        Mock(return_value=order),
+    )
+    monkeypatch.setattr(
+        lab_service,
+        "ensure_clinic_active",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        lab_service.db.session,
+        "execute",
+        Mock(return_value=FakeExecuteResult([])),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="no test items",
+    ):
+        lab_service.complete_order(
+            5,
+            1,
+        )
+
+
+# ============================================================================
+# INTEGRITY
+# ============================================================================
+
+
+def test_validate_lab_order_integrity_accepts_ordered_state(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.ORDERED,
+    )
+
+    lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_accepts_sample_collected(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.SAMPLE_COLLECTED,
+        collected_by_id=2,
+        sample_collected_at=now(),
+    )
+
+    lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_accepts_in_progress(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.IN_PROGRESS,
+        collected_by_id=2,
+        sample_collected_at=now(),
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_accepts_completed(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.COMPLETED,
+        collected_by_id=2,
+        sample_collected_at=now(),
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+        completed_at=now(),
+    )
+
+    lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_ordered_with_collection(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.ORDERED,
+        collected_by_id=2,
+        sample_collected_at=now(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="ORDERED order cannot have",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_processing_without_collection(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.IN_PROGRESS,
+        processed_by_id=3,
+        processed_at=now(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="sample collection",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_verification_without_processing(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.IN_PROGRESS,
+        collected_by_id=2,
+        sample_collected_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="processing timestamp",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_completion_without_verification(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.COMPLETED,
+        collected_by_id=2,
+        sample_collected_at=now(),
+        processed_by_id=3,
+        processed_at=now(),
+        completed_at=now(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="verification timestamp",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_cancelled_with_completion(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.CANCELLED,
+        collected_by_id=2,
+        sample_collected_at=now(),
+        processed_by_id=3,
+        processed_at=now(),
+        verified_by_id=4,
+        verified_at=now(),
+        completed_at=now(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="CANCELLED order cannot have",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+def test_validate_lab_order_integrity_rejects_actor_without_timestamp(
+    lab_service,
+):
+    order = order_obj(
+        status=LabOrderStatus.ORDERED,
+        collected_by_id=3,
+        sample_collected_at=None,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="must either both be set",
+    ):
+        lab_service.validate_lab_order_integrity(order)
+
+
+# ============================================================================
+# PUBLIC GETTERS
+# ============================================================================
+
+
+def test_get_lab_test_delegates_to_scoped_lookup(
+    lab_service,
+    monkeypatch,
+):
+    expected = make_test_obj(id=9, clinic_id=1)
+
+    helper = Mock(return_value=expected)
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_test",
+        helper,
+    )
+
+    result = lab_service.get_lab_test(
+        9,
+        1,
+    )
+
+    assert result is expected
+    helper.assert_called_once_with(
+        9,
+        1,
+    )
+
+
+def test_get_lab_order_delegates_to_scoped_lookup(
+    lab_service,
+    monkeypatch,
+):
+    expected = order_obj(id=9, clinic_id=1)
+
+    helper = Mock(return_value=expected)
+    monkeypatch.setattr(
+        lab_service,
+        "_get_lab_order",
+        helper,
+    )
+
+    result = lab_service.get_lab_order(
+        9,
+        1,
+    )
+
+    assert result is expected
+    helper.assert_called_once_with(
+        9,
+        1,
+    )

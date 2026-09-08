@@ -4,6 +4,8 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import or_, select
+
 from app.extensions import db
 from app.core.utils.decorators import transactional
 from app.core.utils.qrcode_util import generate_tracking_code
@@ -102,12 +104,17 @@ def _get_patient(
             "clinic_id must be a positive integer"
         )
 
-    patient = (
-        Patient.query
-        .filter(
+    statement = (
+        select(Patient)
+        .where(
             Patient.id == patient_id,
             Patient.clinic_id == clinic_id,
         )
+    )
+
+    patient = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -134,12 +141,17 @@ def _get_staff(
             "clinic_id must be a positive integer"
         )
 
-    staff = (
-        Staff.query
-        .filter(
+    statement = (
+        select(Staff)
+        .where(
             Staff.id == staff_id,
             Staff.clinic_id == clinic_id,
         )
+    )
+
+    staff = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -197,12 +209,17 @@ def _get_consultation(
         Consultation,
     )
 
-    consultation = (
-        Consultation.query
-        .filter(
+    statement = (
+        select(Consultation)
+        .where(
             Consultation.id == consultation_id,
             Consultation.clinic_id == clinic_id,
         )
+    )
+
+    consultation = (
+        db.session.execute(statement)
+        .scalars()
         .first()
     )
 
@@ -247,8 +264,11 @@ def _get_lab_test(
         - only global catalog tests are allowed
     """
 
-    query = LabTest.query.filter(
-        LabTest.id == test_id
+    statement = (
+        select(LabTest)
+        .where(
+            LabTest.id == test_id
+        )
     )
 
     if clinic_id is not None:
@@ -257,18 +277,22 @@ def _get_lab_test(
                 "clinic_id must be a positive integer"
             )
 
-        query = query.filter(
-            db.or_(
+        statement = statement.where(
+            or_(
                 LabTest.clinic_id == clinic_id,
                 LabTest.clinic_id.is_(None),
             )
         )
     else:
-        query = query.filter(
+        statement = statement.where(
             LabTest.clinic_id.is_(None)
         )
 
-    test = query.first()
+    test = (
+        db.session.execute(statement)
+        .scalars()
+        .first()
+    )
 
     if test is None:
         raise NotFoundError(
@@ -296,18 +320,22 @@ def _get_lab_order(
             "clinic_id must be a positive integer"
         )
 
-    query = (
-        LabOrder.query
-        .filter(
+    statement = (
+        select(LabOrder)
+        .where(
             LabOrder.id == order_id,
             LabOrder.clinic_id == clinic_id,
         )
     )
 
     if for_update:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    order = query.first()
+    order = (
+        db.session.execute(statement)
+        .scalars()
+        .first()
+    )
 
     if order is None:
         raise NotFoundError(
@@ -333,22 +361,26 @@ def _get_lab_order_item(
             "clinic_id must be a positive integer"
         )
 
-    query = (
-        LabOrderItem.query
+    statement = (
+        select(LabOrderItem)
         .join(
             LabOrder,
             LabOrder.id == LabOrderItem.order_id,
         )
-        .filter(
+        .where(
             LabOrderItem.id == order_item_id,
             LabOrder.clinic_id == clinic_id,
         )
     )
 
     if for_update:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    item = query.first()
+    item = (
+        db.session.execute(statement)
+        .scalars()
+        .first()
+    )
 
     if item is None:
         raise NotFoundError(
@@ -442,7 +474,7 @@ def list_lab_tests(
         Return global entries plus clinic-specific entries.
     """
 
-    query = LabTest.query
+    statement = select(LabTest)
 
     if clinic_id is not None:
         if clinic_id <= 0:
@@ -450,25 +482,29 @@ def list_lab_tests(
                 "clinic_id must be a positive integer"
             )
 
-        query = query.filter(
-            db.or_(
+        statement = statement.where(
+            or_(
                 LabTest.clinic_id == clinic_id,
                 LabTest.clinic_id.is_(None),
             )
         )
     else:
-        query = query.filter(
+        statement = statement.where(
             LabTest.clinic_id.is_(None)
         )
 
     if active_only:
-        query = query.filter(
+        statement = statement.where(
             LabTest.is_active.is_(True)
         )
 
-    return (
-        query
-        .order_by(LabTest.name)
+    statement = statement.order_by(
+        LabTest.name
+    )
+
+    return list(
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -514,11 +550,16 @@ def create_lab_test(
         fields["code"] = code or None
 
     if code:
-        existing = (
-            LabTest.query
-            .filter(
+        statement = (
+            select(LabTest)
+            .where(
                 LabTest.code == code
             )
+        )
+
+        existing = (
+            db.session.execute(statement)
+            .scalars()
             .first()
         )
 
@@ -622,12 +663,17 @@ def update_lab_test(
         fields["code"] = code or None
 
         if code:
-            existing = (
-                LabTest.query
-                .filter(
+            statement = (
+                select(LabTest)
+                .where(
                     LabTest.code == code,
                     LabTest.id != test.id,
                 )
+            )
+
+            existing = (
+                db.session.execute(statement)
+                .scalars()
                 .first()
             )
 
@@ -738,15 +784,20 @@ def list_orders_for_patient(
         clinic_id,
     )
 
-    return (
-        LabOrder.query
-        .filter(
+    statement = (
+        select(LabOrder)
+        .where(
             LabOrder.patient_id == patient_id,
             LabOrder.clinic_id == clinic_id,
         )
         .order_by(
             LabOrder.created_at.desc()
         )
+    )
+
+    return list(
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -768,11 +819,16 @@ def _generate_unique_qr_code() -> str:
     for _ in range(10):
         qr_code = _generate_qr_code()
 
-        existing = (
-            LabOrder.query
-            .filter(
+        statement = (
+            select(LabOrder)
+            .where(
                 LabOrder.qr_code == qr_code
             )
+        )
+
+        existing = (
+            db.session.execute(statement)
+            .scalars()
             .first()
         )
 
@@ -886,11 +942,16 @@ def create_lab_order(
     # Test validation
     # -------------------------------------------------------------
 
-    tests = (
-        LabTest.query
-        .filter(
+    statement = (
+        select(LabTest)
+        .where(
             LabTest.id.in_(test_ids)
         )
+    )
+
+    tests = list(
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1791,19 +1852,6 @@ def verify_results(
 ) -> LabOrder:
     """
     Verify every result on a laboratory order.
-
-    Requirements:
-
-        - order belongs to authenticated clinic
-        - order is IN_PROGRESS
-        - sample has been collected
-        - sample has been processed
-        - every item has a result
-        - every result has resulted_at
-        - order has not already been verified
-        - verification actor is active and same-clinic
-
-    Verification does NOT complete the order.
     """
 
     order = _get_lab_order(
@@ -1859,12 +1907,17 @@ def verify_results(
             "Lab order already has a verification actor"
         )
 
-    items = (
-        LabOrderItem.query
-        .filter(
+    statement = (
+        select(LabOrderItem)
+        .where(
             LabOrderItem.order_id == order.id
         )
         .with_for_update()
+    )
+
+    items = list(
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -1927,16 +1980,6 @@ def complete_order(
 ) -> LabOrder:
     """
     Finalize a verified laboratory order.
-
-    Requirements:
-
-        - order belongs to authenticated clinic
-        - order is IN_PROGRESS
-        - order has been verified
-        - verification actor/timestamp exist
-        - processing actor/timestamp exist
-        - every item has a result
-        - every item has resulted_at
     """
 
     order = _get_lab_order(
@@ -1977,12 +2020,17 @@ def complete_order(
             "a processing timestamp"
         )
 
-    items = (
-        LabOrderItem.query
-        .filter(
+    statement = (
+        select(LabOrderItem)
+        .where(
             LabOrderItem.order_id == order.id
         )
         .with_for_update()
+    )
+
+    items = list(
+        db.session.execute(statement)
+        .scalars()
         .all()
     )
 
@@ -2047,13 +2095,6 @@ def validate_lab_order_integrity(
 ) -> None:
     """
     Validate the actor/timestamp lifecycle of an existing order.
-
-    Useful for:
-
-        - tests
-        - administrative repair checks
-        - migration validation
-        - data-integrity tooling
     """
 
     _validate_actor_pair(

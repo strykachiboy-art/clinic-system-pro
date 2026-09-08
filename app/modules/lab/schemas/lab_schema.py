@@ -1,7 +1,12 @@
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from app.core.enums.lab_enums import (
     LabResultFlag,
@@ -85,6 +90,12 @@ class LabTestCreateSchema(BaseModel):
 
 
 class LabTestUpdateSchema(BaseModel):
+    name: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=150,
+    )
+
     loinc_code: Optional[str] = Field(
         None,
         max_length=20,
@@ -132,11 +143,13 @@ class LabTestUpdateSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_critical_range(self):
-        # Validates the case where both values are supplied.
-        #
-        # If only one value is supplied during a partial update,
-        # the service must merge it with the existing database
-        # value and validate the final range.
+        """
+        Validate the range when both thresholds are supplied.
+
+        During partial updates, the service merges a single supplied
+        threshold with the existing persisted threshold and validates
+        the final range.
+        """
         if (
             self.critical_low is not None
             and self.critical_high is not None
@@ -198,9 +211,14 @@ class LabOrderCreateSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_test_ids(self):
-        if any(test_id <= 0 for test_id in self.test_ids):
+        if any(
+            not isinstance(test_id, int)
+            or isinstance(test_id, bool)
+            or test_id <= 0
+            for test_id in self.test_ids
+        ):
             raise ValueError(
-                "All test_ids must be greater than zero"
+                "All test_ids must be positive integers"
             )
 
         if len(self.test_ids) != len(set(self.test_ids)):
@@ -270,6 +288,8 @@ class LabVerificationSchema(BaseModel):
     Verifies a laboratory order/result.
 
     verified_by_id and verified_at are controlled by the service.
+
+    No client-controlled fields are accepted.
     """
 
     model_config = ConfigDict(
@@ -322,8 +342,11 @@ class LabResultCreateSchema(BaseModel):
     """
     Creates or records a result for a laboratory order item.
 
-    The service controls resulted_at and the identity of the
-    authenticated laboratory staff member.
+    The service controls:
+
+        - resulted_at
+        - authenticated actor identity
+        - automatic result flagging
     """
 
     result_value: str = Field(
@@ -334,7 +357,10 @@ class LabResultCreateSchema(BaseModel):
 
     flag: Optional[LabResultFlag] = None
 
-    result_notes: Optional[str] = None
+    result_notes: Optional[str] = Field(
+        None,
+        max_length=1000,
+    )
 
     result_file_url: Optional[str] = Field(
         None,
