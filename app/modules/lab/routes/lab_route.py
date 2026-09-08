@@ -214,10 +214,24 @@ def _handle_route_error(exc):
 
 
 def _validation_error_response(exc):
+    details = []
+
+    for error in exc.errors():
+        clean_error = {
+            "type": error.get("type"),
+            "loc": list(error.get("loc", ())),
+            "msg": error.get("msg"),
+        }
+
+        if "input" in error:
+            clean_error["input"] = error["input"]
+
+        details.append(clean_error)
+
     return jsonify({
         "success": False,
         "error": "Validation failed",
-        "details": exc.errors(),
+        "details": details,
     }), 422
 
 
