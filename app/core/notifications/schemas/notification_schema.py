@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from app.core.enums.notification_enums import (
     NotificationChannel,
@@ -28,6 +33,10 @@ class NotificationCreateSchema(BaseModel):
     status, is_read, retry_count and delivery timestamps
     are service-controlled and cannot be supplied by clients.
     """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     user_id: int = Field(
         ...,
@@ -65,6 +74,29 @@ class NotificationCreateSchema(BaseModel):
         gt=0,
     )
 
+    @field_validator("title", "message")
+    @classmethod
+    def validate_required_strings(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("must not be blank")
+
+        return value
+
+    @field_validator("reference_type")
+    @classmethod
+    def normalize_reference_type(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
 
 # ============================================================================
 # READ REQUEST
@@ -75,7 +107,6 @@ class NotificationReadSchema(BaseModel):
     """
     Empty request schema used by read/read-all endpoints.
     """
-
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -90,9 +121,13 @@ class NotificationStatusUpdateSchema(BaseModel):
     """
     Internal schema for delivery workers.
 
-    This should NOT be exposed through ordinary
+    it is not exposed through ordinary
     authenticated notification routes.
     """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     status: NotificationStatus
 
@@ -100,6 +135,19 @@ class NotificationStatusUpdateSchema(BaseModel):
         default=None,
         max_length=2000,
     )
+
+    @field_validator("error_message")
+    @classmethod
+    def normalize_error_message(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 # ============================================================================

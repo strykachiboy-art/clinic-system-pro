@@ -43,7 +43,7 @@ def register_blueprints(app):
     from app.modules.reports.routes.reports_route import reports_bp
     from app.modules.staff.routes.staff_route import staff_bp
     from app.modules.ward.routes.ward_route import ward_bp
-    from app.modules.messages.routes.message_route import message_bp
+    from app.modules.messages.routes.message_routes import message_bp
     from app.core.notifications.routes.notification_route import notification_bp
 
     app.register_blueprint(web_bp)

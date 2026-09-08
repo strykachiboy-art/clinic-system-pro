@@ -122,10 +122,7 @@ def _normalize_enum(
 
     try:
         return enum_class(value)
-    except (
-        ValueError,
-        TypeError,
-    ):
+    except (ValueError, TypeError):
         raise ValidationError(
             f"Invalid {field_name}"
         )
@@ -254,6 +251,51 @@ def _normalize_type(notification_type):
 
 
 # ============================================================================
+# PROVIDER BOUNDARY
+# ============================================================================
+
+
+def _deliver_with_provider(notification):
+    """
+    Provider integration boundary.
+
+    This function intentionally contains no concrete provider
+    implementation yet.
+
+    EMAIL -> email provider
+    SMS   -> SMS provider
+    PUSH  -> push provider
+
+    A real provider implementation should return True only
+    when the provider accepts the notification successfully.
+
+    Provider-specific message IDs or metadata can be added
+    here later without changing the notification service API.
+    """
+
+    if notification.channel == NotificationChannel.EMAIL:
+        # Email provider integration goes here.
+        #
+        # Example future behavior:
+        # return email_provider.send(...)
+        #
+        # Keep this boundary isolated from routes and Celery.
+        return True
+
+    if notification.channel == NotificationChannel.SMS:
+        # SMS provider integration goes here.
+        return True
+
+    if notification.channel == NotificationChannel.PUSH:
+        # Push provider integration goes here.
+        return True
+
+    raise ValidationError(
+        "Unsupported notification channel for delivery"
+    )
+
+
+# ============================================================================
 # CREATE NOTIFICATION
 # ============================================================================
 
@@ -295,15 +337,15 @@ def create_notification(
     )
 
     notification_type = _normalize_type(
-        notification_type
+        notification_type,
     )
 
     priority = _normalize_priority(
-        priority
+        priority,
     )
 
     channel = _normalize_channel(
-        channel
+        channel,
     )
 
     reference_type = _normalize_optional_string(
@@ -375,7 +417,7 @@ def queue_notification_delivery(
     Queue an external notification for asynchronous
     delivery.
 
-    IN_APP notifications are not sent through Celery.
+    IN_APP notifications do not require Celery delivery.
     """
 
     notification = _get_notification(
@@ -416,12 +458,22 @@ def deliver_notification(
     """
     Background notification delivery entrypoint.
 
-    Provider-specific EMAIL/SMS/PUSH delivery should be
-    implemented behind this boundary.
+    Celery is responsible for asynchronous execution.
 
-    The task deliberately does not expose provider logic
-    to HTTP routes.
+    Provider-specific delivery is isolated behind
+    _deliver_with_provider().
+
+    The task is intentionally not exposed directly through
+    ordinary HTTP routes.
     """
+
+    try:
+        _validate_positive_id(
+            notification_id,
+            "Notification ID",
+        )
+    except ValidationError:
+        return False
 
     notification = db.session.get(
         Notification,
@@ -431,29 +483,50 @@ def deliver_notification(
     if notification is None:
         return False
 
+    # Terminal states are idempotent.
     if notification.status in (
         NotificationStatus.DELIVERED,
         NotificationStatus.READ,
     ):
         return True
 
+    # In-app notifications are persisted directly and do not
+    # require an external provider.
     if notification.channel == NotificationChannel.IN_APP:
         return False
 
     try:
+        # --------------------------------------------------------------------
+        # Mark the delivery attempt as SENT.
+        #
+        # SENT means the application has begun an external
+        # provider delivery attempt.
+        # --------------------------------------------------------------------
+
         notification.status = NotificationStatus.SENT
         notification.sent_at = _utcnow()
 
-        # ------------------------------------------------------------
-        # Provider integration boundary.
+        db.session.flush()
+
+        # --------------------------------------------------------------------
+        # Provider boundary.
         #
-        # EMAIL -> email provider
-        # SMS   -> SMS provider
-        # PUSH  -> push provider
-        #
-        # Actual provider integrations should be implemented
-        # behind this boundary.
-        # ------------------------------------------------------------
+        # The provider implementation is responsible for
+        # communicating with EMAIL/SMS/PUSH infrastructure.
+        # --------------------------------------------------------------------
+
+        provider_success = _deliver_with_provider(
+            notification,
+        )
+
+        if not provider_success:
+            raise RuntimeError(
+                "Notification provider rejected delivery"
+            )
+
+        # --------------------------------------------------------------------
+        # Provider accepted the notification.
+        # --------------------------------------------------------------------
 
         notification.status = (
             NotificationStatus.DELIVERED
@@ -509,6 +582,11 @@ def get_user_notifications(
     Return notifications belonging to a clinic-owned user.
     """
 
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     _get_user(
         user_id,
         clinic_id=clinic_id,
@@ -544,6 +622,16 @@ def get_notification_for_user(
     user_id,
     clinic_id,
 ):
+    _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     notification = _get_notification(
         notification_id,
         clinic_id=clinic_id,
@@ -572,6 +660,16 @@ def mark_notification_read(
     Mark one notification as read.
     """
 
+    _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     notification = _get_notification(
         notification_id,
         clinic_id=clinic_id,
@@ -586,7 +684,6 @@ def mark_notification_read(
     if notification.is_read:
         return notification
 
-    # Capture the old state BEFORE changing it.
     old_status = notification.status
     old_is_read = notification.is_read
 
@@ -626,6 +723,11 @@ def mark_all_notifications_read(
     """
     Mark every unread notification for a user as read.
     """
+
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
     _get_user(
         user_id,
@@ -713,7 +815,9 @@ def update_notification_delivery_status(
     now = _utcnow()
 
     if status == NotificationStatus.SENT:
-        notification.sent_at = now
+        notification.sent_at = (
+            notification.sent_at or now
+        )
 
     elif status == NotificationStatus.DELIVERED:
         notification.sent_at = (

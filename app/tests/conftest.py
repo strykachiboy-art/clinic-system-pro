@@ -8,6 +8,17 @@ from flask_jwt_extended import create_access_token
 from app import create_app
 from app.extensions import db as _db
 
+from app.core.enums.notification_enums import (
+    NotificationChannel,
+    NotificationPriority,
+    NotificationStatus,
+    NotificationType,
+)
+
+from app.core.notifications.models.notification_models import (
+    Notification,
+)
+
 
 # ============================================================================
 # APP / DATABASE / CLIENT
@@ -120,6 +131,7 @@ def make_auth_headers(auth_headers_for):
         return auth_headers_for(user, role=role)
 
     return _make
+
 
 
 # ============================================================================
@@ -247,6 +259,158 @@ def user(make_user, clinic):
     )
 
 
+# ============================================================================
+# MESSAGE
+# ============================================================================
+
+
+@pytest.fixture()
+def make_message(db):
+
+    from app.core.enums.message_enums import (
+        MessagePriority,
+        MessageStatus,
+        MessageType,
+    )
+    from app.modules.messages.models.message_model import Message
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        sender,
+        recipient,
+        subject=None,
+        body="Test message body",
+        message_type=MessageType.DIRECT,
+        status=MessageStatus.SENT,
+        priority=MessagePriority.NORMAL,
+        parent_message=None,
+        sent_at=None,
+        read_at=None,
+        deleted_at=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if subject is None:
+            subject = f"Test Message {counter['n']}"
+
+        if sent_at is None:
+            sent_at = datetime.now(timezone.utc)
+
+        message = Message(
+            clinic_id=clinic.id,
+            sender_id=sender.id,
+            recipient_id=recipient.id,
+            subject=subject,
+            body=body,
+            message_type=message_type,
+            status=status,
+            priority=priority,
+            parent_message_id=(
+                parent_message.id
+                if parent_message is not None
+                else None
+            ),
+            sent_at=sent_at,
+            read_at=read_at,
+            deleted_at=deleted_at,
+            **overrides,
+        )
+
+        db.session.add(message)
+        db.session.flush()
+
+        return message
+
+    return _make
+
+
+# ============================================================================
+# NOTIFICATION FIXTURES
+# ============================================================================
+
+@pytest.fixture
+def make_notification(db_session):
+    """
+    Factory fixture for creating Notification records.
+
+    Keeps notification creation centralized so service tests do not
+    duplicate model construction logic.
+    """
+
+    def _make_notification(
+        *,
+        clinic_id,
+        user_id,
+        title="Test Notification",
+        message="This is a test notification.",
+        notification_type=NotificationType.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        channel=NotificationChannel.IN_APP,
+        status=NotificationStatus.PENDING,
+        reference_type=None,
+        reference_id=None,
+        is_read=False,
+        read_at=None,
+        sent_at=None,
+        delivered_at=None,
+        failed_at=None,
+        error_message=None,
+        retry_count=0,
+        created_at=None,
+        updated_at=None,
+    ):
+        notification = Notification(
+            clinic_id=clinic_id,
+            user_id=user_id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            priority=priority,
+            channel=channel,
+            status=status,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            is_read=is_read,
+            read_at=read_at,
+            sent_at=sent_at,
+            delivered_at=delivered_at,
+            failed_at=failed_at,
+            error_message=error_message,
+            retry_count=retry_count,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
+        db_session.add(notification)
+        db_session.flush()
+
+        return notification
+
+    return _make_notification
+
+
+@pytest.fixture
+def notification(
+    make_notification,
+    clinic,
+    user,
+):
+    """
+    Default notification fixture.
+
+    Creates a pending in-app notification belonging to the
+    default clinic and authenticated test user.
+    """
+
+    return make_notification(
+        clinic_id=clinic.id,
+        user_id=user.id,
+    )
+    
+    
 # ============================================================================
 # STAFF
 # ============================================================================
