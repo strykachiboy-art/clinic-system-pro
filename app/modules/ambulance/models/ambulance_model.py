@@ -8,6 +8,7 @@ from app.core.enums.ambulance_enums import (
     TripType,
     VehicleStatus,
 )
+
 from app.core.enums.staff_enums import StaffStatus
 
 
@@ -17,6 +18,14 @@ def _utcnow():
 
 class AmbulanceVehicle(db.Model):
     __tablename__ = "ambulance_vehicles"
+
+    __table_args__ = (
+        db.Index(
+            "ix_ambulance_vehicles_clinic_plate",
+            "clinic_id",
+            "plate_number",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -102,6 +111,19 @@ class AmbulanceTrip(db.Model):
             """,
             name="ck_ambulance_trip_distinct_crew",
         ),
+        db.Index(
+            "ix_ambulance_trips_clinic_requested",
+            "clinic_id",
+            "requested_at",
+            "id",
+        ),
+        db.Index(
+            "ix_ambulance_trips_clinic_status_requested",
+            "clinic_id",
+            "status",
+            "requested_at",
+            "id",
+        ),
     )
 
     id = db.Column(
@@ -153,6 +175,7 @@ class AmbulanceTrip(db.Model):
         db.Enum(TripStatus),
         default=TripStatus.REQUESTED,
         nullable=False,
+        index=True,
     )
 
     admission_id = db.Column(
@@ -209,6 +232,7 @@ class AmbulanceTrip(db.Model):
         db.DateTime,
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     dispatched_at = db.Column(

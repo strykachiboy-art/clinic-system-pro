@@ -4,6 +4,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
 )
 
 from app.core.enums.ambulance_enums import (
@@ -12,150 +13,146 @@ from app.core.enums.ambulance_enums import (
 )
 
 
-# ============================================================================
-# Ambulance Trip Schemas
-# ============================================================================
+MAX_ADDRESS_LENGTH = 255
+MAX_NOTES_LENGTH = 2000
+MAX_CANCELLATION_REASON_LENGTH = 255
 
 
 class AmbulanceTripRequestSchema(BaseModel):
-    """
-    Request schema for creating an ambulance trip.
-    """
-
-    trip_type: TripType = Field(
-        ...,
-        description="Type of ambulance trip",
-    )
+    trip_type: TripType = Field(...)
 
     patient_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description=(
-            "ID of the patient, if already identified"
-        ),
     )
 
     admission_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description=(
-            "ID of the admission associated "
-            "with the ambulance trip"
-        ),
     )
 
     pickup_address: Optional[str] = Field(
         default=None,
-        max_length=255,
-        description="Pickup location/address",
+        max_length=MAX_ADDRESS_LENGTH,
     )
 
     destination_address: Optional[str] = Field(
         default=None,
-        max_length=255,
-        description="Destination location/address",
+        max_length=MAX_ADDRESS_LENGTH,
     )
 
     notes: Optional[str] = Field(
         default=None,
-        description="Additional notes for the ambulance trip",
+        max_length=MAX_NOTES_LENGTH,
     )
 
+    @field_validator(
+        "pickup_address",
+        "destination_address",
+        "notes",
+    )
+    @classmethod
+    def validate_optional_strings(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Value cannot be blank")
+
+        return value
+
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
 class AmbulanceTripDispatchSchema(BaseModel):
-    """
-    Assigns an ambulance vehicle and crew to a requested trip.
-    """
-
     vehicle_id: int = Field(
         ...,
         gt=0,
-        description="ID of the ambulance vehicle",
     )
 
     driver_id: int = Field(
         ...,
         gt=0,
-        description="ID of the driver",
     )
 
     paramedic_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="ID of the paramedic or EMT",
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
 class AmbulanceTripStatusSchema(BaseModel):
-    """
-    Requests the next valid status in the ambulance
-    trip lifecycle.
-    """
-
-    status: TripStatus = Field(
-        ...,
-        description=(
-            "Next status in the ambulance "
-            "trip lifecycle"
-        ),
-    )
+    status: TripStatus = Field(...)
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
 class AmbulanceTripPatientSchema(BaseModel):
-    """
-    Links a patient to an ambulance trip.
-    """
-
     patient_id: int = Field(
         ...,
         gt=0,
-        description="ID of the patient",
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
 class AmbulanceTripInvoiceSchema(BaseModel):
-    """
-    Links an invoice to a completed ambulance trip.
-    """
-
     invoice_id: int = Field(
         ...,
         gt=0,
-        description="ID of the invoice",
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
 class AmbulanceTripCancelSchema(BaseModel):
-    """
-    Cancels an ambulance trip.
-    """
-
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Reason for cancelling the ambulance trip",
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_CANCELLATION_REASON_LENGTH,
     )
 
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Cancellation reason is required"
+            )
+
+        return value
+
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )

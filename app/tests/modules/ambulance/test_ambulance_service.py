@@ -1,61 +1,50 @@
-﻿# app/tests/modules/ambulance/test_ambulance_service.py
+﻿from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from flask import g
 
+from app.core.enums.ambulance_enums import (
+    EquipmentLevel,
+    TripStatus,
+    TripType,
+    VehicleStatus,
+)
+from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import StaffStatus
-from app.core.enums.ambulance_enums import TripStatus, TripType
-from app.core.enums.ambulance_enums import VehicleStatus
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.modules.ambulance.services import ambulance_service
+from app.tests.modules.ward.test_ward_service import _create_admission
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def mock_ambulance_side_effects(monkeypatch):
-    """
-    Keep service unit tests focused on ambulance service behavior.
-
-    The real transaction decorator is intentionally left untouched.
-    """
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "ensure_clinic_active",
-        Mock(),
-    )
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "create_audit_log",
-        Mock(),
-    )
 
 
 def make_user(
+    *,
     user_id=1,
-    clinic_id=10,
-    is_active=True,
+    clinic_id=1,
     role=Role.ADMIN,
+    is_active=True,
 ):
     return SimpleNamespace(
         id=user_id,
         clinic_id=clinic_id,
-        is_active=is_active,
         role=role,
+        is_active=is_active,
     )
 
 
 def make_patient(
-    patient_id=100,
-    clinic_id=10,
+    *,
+    patient_id=1,
+    clinic_id=1,
     is_active=True,
 ):
     return SimpleNamespace(
@@ -66,46 +55,113 @@ def make_patient(
 
 
 def make_vehicle(
+    *,
     vehicle_id=1,
-    clinic_id=10,
-    plate_number="AB-123",
-    capacity=2,
+    clinic_id=1,
+    plate_number="AMB-001",
+    equipment_level=EquipmentLevel.BLS,
+    capacity=4,
     status=VehicleStatus.AVAILABLE,
 ):
     return SimpleNamespace(
         id=vehicle_id,
         clinic_id=clinic_id,
         plate_number=plate_number,
+        equipment_level=equipment_level,
         capacity=capacity,
         status=status,
-        equipment_level=SimpleNamespace(value="BLS"),
+    )
+
+
+def make_staff(
+    *,
+    staff_id=1,
+    clinic_id=1,
+    role=Role.DRIVER,
+    status=StaffStatus.ACTIVE,
+    user=None,
+):
+    if user is None:
+        user = make_user(
+            user_id=staff_id,
+            clinic_id=clinic_id,
+            role=role,
+        )
+
+    return SimpleNamespace(
+        id=staff_id,
+        clinic_id=clinic_id,
+        status=status,
+        user=user,
+    )
+
+
+def make_admission(
+    *,
+    admission_id=1,
+    patient=None,
+):
+    if patient is None:
+        patient = make_patient()
+
+    return SimpleNamespace(
+        id=admission_id,
+        patient_id=patient.id,
+        patient=patient,
+    )
+
+
+def make_invoice(
+    *,
+    invoice_id=1,
+    clinic_id=1,
+    patient_id=1,
+    ambulance_trip=None,
+):
+    return SimpleNamespace(
+        id=invoice_id,
+        clinic_id=clinic_id,
+        patient_id=patient_id,
+        ambulance_trip=ambulance_trip,
     )
 
 
 def make_trip(
+    *,
     trip_id=1,
-    clinic_id=10,
+    clinic_id=1,
     status=TripStatus.REQUESTED,
     patient=None,
     admission=None,
     vehicle=None,
+    driver=None,
+    paramedic=None,
+    invoice=None,
 ):
     return SimpleNamespace(
         id=trip_id,
         clinic_id=clinic_id,
+        trip_type=TripType.EMERGENCY_PICKUP,
         status=status,
         patient=patient,
-        patient_id=getattr(patient, "id", None),
+        patient_id=patient.id if patient else None,
         admission=admission,
-        admission_id=getattr(admission, "id", None),
+        admission_id=admission.id if admission else None,
         vehicle=vehicle,
-        vehicle_id=getattr(vehicle, "id", None),
-        driver=None,
-        driver_id=None,
-        paramedic=None,
-        paramedic_id=None,
-        invoice=None,
-        invoice_id=None,
+        vehicle_id=vehicle.id if vehicle else None,
+        driver=driver,
+        driver_id=driver.id if driver else None,
+        paramedic=paramedic,
+        paramedic_id=paramedic.id if paramedic else None,
+        invoice=invoice,
+        invoice_id=invoice.id if invoice else None,
+        pickup_address=None,
+        pickup_lat=None,
+        pickup_lng=None,
+        destination_address=None,
+        destination_lat=None,
+        destination_lng=None,
+        notes=None,
         dispatched_at=None,
         pickup_at=None,
         completed_at=None,
@@ -114,400 +170,52 @@ def make_trip(
     )
 
 
-def make_staff(
-    staff_id=50,
-    clinic_id=10,
-    role=Role.DRIVER,
-    active=True,
-    linked_user=None,
-):
-    if linked_user is None:
-        linked_user = make_user(
-            user_id=staff_id + 1000,
-            clinic_id=clinic_id,
-            is_active=active,
-            role=role,
-        )
-
-    return SimpleNamespace(
-        id=staff_id,
-        clinic_id=clinic_id,
-        status=StaffStatus.ACTIVE if active else next(
-            status
-            for status in StaffStatus
-            if status != StaffStatus.ACTIVE
-        ),
-        user=linked_user,
-        user_id=linked_user.id if linked_user else None,
-    )
-
-
-def make_invoice(
-    invoice_id=500,
-    clinic_id=10,
-    patient_id=100,
-):
-    return SimpleNamespace(
-        id=invoice_id,
-        clinic_id=clinic_id,
-        patient_id=patient_id,
-    )
-
-
-def install_current_user(monkeypatch, user):
-    """
-    Mock the service's db.session.get(User, id) lookup while using
-    a real Flask request context.
-    """
-
-    original_get = ambulance_service.db.session.get
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        return original_get(model, object_id)
-
+def install_locked_trip(monkeypatch, trip):
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_lock_trip",
+        Mock(return_value=trip),
     )
 
 
-# ---------------------------------------------------------------------------
-# Authentication / clinic helpers
-# ---------------------------------------------------------------------------
-
-def test_current_user_requires_request_context():
-    with pytest.raises(ValidationError, match="Authenticated request context is required"):
-        ambulance_service._current_user()
-
-
-def test_current_user_requires_current_user_id(app, monkeypatch):
-    with app.test_request_context():
-        g.current_user_id = None
-
-        with pytest.raises(ValidationError):
-            ambulance_service._current_user()
-
-
-def test_current_user_loads_active_user(app, monkeypatch):
-    user = make_user()
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        result = ambulance_service._current_user()
-
-        assert result is user
-
-
-def test_current_user_rejects_missing_user(app, monkeypatch):
-    with app.test_request_context():
-        g.current_user_id = 999
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=None),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service._current_user()
-
-
-def test_current_user_rejects_inactive_user(app, monkeypatch):
-    user = make_user(is_active=False)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service._current_user()
-
-
-def test_current_clinic_id_requires_clinic(app, monkeypatch):
-    user = make_user(clinic_id=None)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service._current_clinic_id()
-
-
-def test_current_clinic_id_returns_authenticated_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        assert ambulance_service._current_clinic_id() == 10
-
-
-def test_assert_authenticated_clinic_skips_without_request_context():
-    ambulance_service._assert_authenticated_clinic(999)
-
-
-def test_assert_authenticated_clinic_rejects_cross_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service._assert_authenticated_clinic(20)
-
-
-def test_assert_authenticated_clinic_allows_same_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        ambulance_service._assert_authenticated_clinic(10)
-
-
-# ---------------------------------------------------------------------------
-# Vehicle lookup
-# ---------------------------------------------------------------------------
-
-def test_get_vehicle_returns_vehicle(app, monkeypatch):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        def fake_get(model, object_id):
-            if model is ambulance_service.User:
-                return user
-            if model is ambulance_service.AmbulanceVehicle:
-                return vehicle
-            return None
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            fake_get,
-        )
-
-        result = ambulance_service.get_vehicle(vehicle.id)
-
-        assert result is vehicle
-
-
-def test_get_vehicle_not_found(app, monkeypatch):
-    user = make_user()
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        def fake_get(model, object_id):
-            if model is ambulance_service.User:
-                return user
-            return None
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            fake_get,
-        )
-
-        with pytest.raises(NotFoundError):
-            ambulance_service.get_vehicle(999)
-
-
-def test_get_vehicle_rejects_other_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(clinic_id=20)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        def fake_get(model, object_id):
-            if model is ambulance_service.User:
-                return user
-            if model is ambulance_service.AmbulanceVehicle:
-                return vehicle
-            return None
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            fake_get,
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service.get_vehicle(vehicle.id)
-
-
-# ---------------------------------------------------------------------------
-# Vehicle listing
-# ---------------------------------------------------------------------------
-
-def test_list_vehicles_requires_authenticated_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        query = Mock()
-        query.filter_by.return_value = query
-        query.order_by.return_value = query
-        query.all.return_value = []
-
-        monkeypatch.setattr(
-            ambulance_service.AmbulanceVehicle,
-            "query",
-            query,
-        )
-
-        result = ambulance_service.list_vehicles(10)
-
-        assert result == []
-
-
-def test_list_vehicles_rejects_other_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service.list_vehicles(20)
-
-
-def test_list_vehicles_filters_status(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle()
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        query = Mock()
-        query.filter_by.return_value = query
-        query.order_by.return_value = query
-        query.all.return_value = [vehicle]
-
-        monkeypatch.setattr(
-            ambulance_service.AmbulanceVehicle,
-            "query",
-            query,
-        )
-
-        result = ambulance_service.list_vehicles(
-            10,
-            status=VehicleStatus.AVAILABLE,
-        )
-
-        assert result == [vehicle]
-        query.filter_by.assert_called()
-
-
-# ---------------------------------------------------------------------------
-# Vehicle creation
-# ---------------------------------------------------------------------------
-
-def test_create_vehicle_normalizes_plate(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    query = Mock()
+def install_query_chain(query):
     query.filter_by.return_value = query
-    query.first.return_value = None
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.with_for_update.return_value = query
+    return query
 
-    vehicle = make_vehicle(
-        plate_number="AB-123",
-        capacity=2,
-    )
 
-    vehicle_cls = Mock(return_value=vehicle)
-    vehicle_cls.query = query
+def install_fake_trip_model(monkeypatch):
+    def fake_trip(**kwargs):
+        trip = SimpleNamespace(**kwargs)
+        trip.id = getattr(trip, "id", 1) or 1
+
+        if not hasattr(trip, "patient"):
+            trip.patient = None
+        if not hasattr(trip, "patient_id"):
+            trip.patient_id = (
+                trip.patient.id
+                if trip.patient is not None
+                else None
+            )
+
+        if not hasattr(trip, "admission"):
+            trip.admission = None
+        if not hasattr(trip, "admission_id"):
+            trip.admission_id = (
+                trip.admission.id
+                if trip.admission is not None
+                else None
+            )
+
+        return trip
 
     monkeypatch.setattr(
         ambulance_service,
-        "AmbulanceVehicle",
-        vehicle_cls,
+        "AmbulanceTrip",
+        fake_trip,
     )
-
     monkeypatch.setattr(
         ambulance_service.db.session,
         "add",
@@ -519,7 +227,166 @@ def test_create_vehicle_normalizes_plate(
         Mock(),
     )
 
+
+@pytest.fixture
+def request_context(app, user):
     with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
+        yield
+
+
+@pytest.fixture
+def audit_mock(monkeypatch):
+    mock = Mock()
+    monkeypatch.setattr(
+        ambulance_service,
+        "create_audit_log",
+        mock,
+    )
+    return mock
+
+
+@pytest.fixture
+def clinic_active_mock(monkeypatch):
+    mock = Mock()
+    monkeypatch.setattr(
+        ambulance_service,
+        "ensure_clinic_active",
+        mock,
+    )
+    return mock
+
+
+# Validation helpers
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, False, 0, -1, 1.5, "1", None],
+)
+def test_validate_positive_id_rejects_invalid(value):
+    with pytest.raises(ValidationError):
+        ambulance_service._validate_positive_id(
+            value,
+            "Vehicle ID",
+        )
+
+
+def test_validate_positive_id_accepts_positive_integer():
+    ambulance_service._validate_positive_id(1, "Vehicle ID")
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, 501),
+    ],
+)
+def test_validate_pagination_rejects_invalid(page, per_page):
+    with pytest.raises(ValidationError):
+        ambulance_service._validate_pagination(
+            page,
+            per_page,
+        )
+
+
+def test_validate_pagination_accepts_valid_values():
+    ambulance_service._validate_pagination(1, 50)
+    ambulance_service._validate_pagination(2, 500)
+
+
+def test_normalize_enum_accepts_enum():
+    result = ambulance_service._normalize_enum(
+        VehicleStatus.AVAILABLE,
+        VehicleStatus,
+        "vehicle status",
+    )
+
+    assert result is VehicleStatus.AVAILABLE
+
+
+def test_normalize_enum_accepts_value():
+    result = ambulance_service._normalize_enum(
+        "available",
+        VehicleStatus,
+        "vehicle status",
+    )
+
+    assert result is VehicleStatus.AVAILABLE
+
+
+def test_normalize_enum_rejects_invalid():
+    with pytest.raises(ValidationError, match="Invalid vehicle status"):
+        ambulance_service._normalize_enum(
+            "invalid",
+            VehicleStatus,
+            "vehicle status",
+        )
+
+
+# Authentication / clinic helpers
+
+
+def test_current_user_requires_request_context():
+    with pytest.raises(
+        ValidationError,
+        match="Authenticated request context is required",
+    ):
+        ambulance_service._current_user()
+
+
+def test_current_user_requires_positive_identity(app):
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = 0
+
+        with pytest.raises(
+            ValidationError,
+            match="Authenticated user is required",
+        ):
+            ambulance_service._current_user()
+
+
+def test_current_user_rejects_missing_user(
+    app,
+    monkeypatch,
+):
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = 1
+
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=None),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="Authenticated user was not found",
+        ):
+            ambulance_service._current_user()
+
+
+def test_current_user_rejects_inactive_user(
+    app,
+    monkeypatch,
+):
+    user = make_user(is_active=False)
+
+    with app.test_request_context():
+        from flask import g
+
         g.current_user_id = user.id
 
         monkeypatch.setattr(
@@ -528,79 +395,419 @@ def test_create_vehicle_normalizes_plate(
             Mock(return_value=user),
         )
 
-        result = ambulance_service.create_vehicle(
-            clinic_id=10,
-            plate_number="  ab-123  ",
-            equipment_level="BLS",
-            capacity=2,
+        with pytest.raises(
+            ValidationError,
+            match="User account is inactive",
+        ):
+            ambulance_service._current_user()
+
+
+def test_current_user_returns_active_user(
+    app,
+    monkeypatch,
+):
+    user = make_user()
+
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
+
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=user),
         )
 
+        assert ambulance_service._current_user() is user
+
+
+def test_current_clinic_requires_clinic():
+    user = make_user(clinic_id=None)
+
+    with pytest.raises(
+        ValidationError,
+        match="not associated with a clinic",
+    ):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                ambulance_service,
+                "_current_user",
+                Mock(return_value=user),
+            )
+            ambulance_service._current_clinic_id()
+
+
+def test_authenticated_clinic_rejects_wrong_clinic(
+    app,
+    monkeypatch,
+):
+    user = make_user(clinic_id=1)
+
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
+
+        monkeypatch.setattr(
+            ambulance_service,
+            "_current_user",
+            Mock(return_value=user),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="does not belong",
+        ):
+            ambulance_service._assert_authenticated_clinic(2)
+
+
+def test_authenticated_clinic_allows_same_clinic(
+    app,
+    monkeypatch,
+):
+    user = make_user(clinic_id=1)
+
+    with app.test_request_context():
+        monkeypatch.setattr(
+            ambulance_service,
+            "_current_user",
+            Mock(return_value=user),
+        )
+
+        ambulance_service._assert_authenticated_clinic(1)
+
+
+# Vehicle lookup / listing
+
+
+def test_get_vehicle_returns_vehicle(
+    app,
+    monkeypatch,
+):
+    vehicle = make_vehicle()
+
+    with app.test_request_context():
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=vehicle),
+        )
+        monkeypatch.setattr(
+            ambulance_service,
+            "_assert_authenticated_clinic",
+            Mock(),
+        )
+
+        result = ambulance_service.get_vehicle(vehicle.id)
+
         assert result is vehicle
-        vehicle_cls.assert_called_once()
 
 
-def test_create_vehicle_rejects_non_string_plate(app):
+def test_get_vehicle_not_found(
+    app,
+    monkeypatch,
+):
     with app.test_request_context():
-        g.current_user_id = 1
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=None),
+        )
+
+        with pytest.raises(NotFoundError):
+            ambulance_service.get_vehicle(1)
+
+
+def test_get_vehicle_rejects_other_clinic(
+    app,
+    monkeypatch,
+):
+    vehicle = make_vehicle(clinic_id=2)
+
+    with app.test_request_context():
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=vehicle),
+        )
+        monkeypatch.setattr(
+            ambulance_service,
+            "_assert_authenticated_clinic",
+            Mock(
+                side_effect=ValidationError(
+                    "Resource does not belong to the authenticated user's clinic"
+                )
+            ),
+        )
+
+        with pytest.raises(ValidationError):
+            ambulance_service.get_vehicle(vehicle.id)
+
+
+def test_list_vehicles_uses_pagination(
+    app,
+    monkeypatch,
+):
+    query = install_query_chain(Mock())
+    pagination = Mock()
+    query.paginate.return_value = pagination
+
+    monkeypatch.setattr(
+        ambulance_service.AmbulanceVehicle,
+        "query",
+        query,
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_assert_authenticated_clinic",
+        Mock(),
+    )
+
+    result = ambulance_service.list_vehicles(
+        clinic_id=1,
+        page=2,
+        per_page=25,
+    )
+
+    assert result is pagination
+    query.filter_by.assert_called_once_with(
+        clinic_id=1,
+    )
+    query.order_by.assert_called_once()
+    query.paginate.assert_called_once_with(
+        page=2,
+        per_page=25,
+        error_out=False,
+    )
+
+
+def test_list_vehicles_filters_status(
+    app,
+    monkeypatch,
+):
+    query = install_query_chain(Mock())
+    query.paginate.return_value = Mock()
+
+    monkeypatch.setattr(
+        ambulance_service.AmbulanceVehicle,
+        "query",
+        query,
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_assert_authenticated_clinic",
+        Mock(),
+    )
+
+    ambulance_service.list_vehicles(
+        clinic_id=1,
+        status=VehicleStatus.MAINTENANCE,
+    )
+
+    query.filter.assert_called_once()
+
+
+# Vehicle creation
+
+
+def test_create_vehicle_creates_with_equipment_level(
+    app,
+    user,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
+
+        query = Mock()
+        query.filter_by.return_value = query
+        query.first.return_value = None
+
+        monkeypatch.setattr(
+            ambulance_service.AmbulanceVehicle,
+            "query",
+            query,
+        )
+
+        captured = {}
+
+        def fake_add(vehicle):
+            captured["vehicle"] = vehicle
+            vehicle.id = 1
+
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "add",
+            fake_add,
+        )
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "flush",
+            Mock(),
+        )
+
+        vehicle = ambulance_service.create_vehicle(
+            clinic_id=user.clinic_id,
+            plate_number=" amb-001 ",
+            equipment_level=EquipmentLevel.ALS,
+            capacity=6,
+        )
+
+        assert vehicle is captured["vehicle"]
+        assert vehicle.plate_number == "AMB-001"
+        assert vehicle.equipment_level == EquipmentLevel.ALS
+        assert vehicle.capacity == 6
+        assert vehicle.status == VehicleStatus.AVAILABLE
+
+        audit_mock.assert_called_once()
+        assert (
+            audit_mock.call_args.kwargs["action"]
+            == AuditAction.CREATE
+        )
+
+
+@pytest.mark.parametrize(
+    "equipment_level",
+    [
+        EquipmentLevel.BLS,
+        EquipmentLevel.ALS,
+        EquipmentLevel.CCT,
+    ],
+)
+def test_create_vehicle_supports_all_equipment_levels(
+    app,
+    monkeypatch,
+    equipment_level,
+    audit_mock,
+    clinic_active_mock,
+):
+    with app.test_request_context():
+        query = Mock()
+        query.filter_by.return_value = query
+        query.first.return_value = None
+
+        monkeypatch.setattr(
+            ambulance_service.AmbulanceVehicle,
+            "query",
+            query,
+        )
+
+        vehicle = ambulance_service.AmbulanceVehicle(
+            clinic_id=1,
+            plate_number="AMB-001",
+            equipment_level=equipment_level,
+            capacity=4,
+            status=VehicleStatus.AVAILABLE,
+        )
+
+        assert vehicle.equipment_level == equipment_level
+
+
+@pytest.mark.parametrize(
+    "plate_number",
+    ["", "   ", None, 123],
+)
+def test_create_vehicle_rejects_invalid_plate(
+    app,
+    user,
+    plate_number,
+    monkeypatch,
+    clinic_active_mock,
+):
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number=123,
-                equipment_level="BLS",
-                capacity=2,
+                clinic_id=user.clinic_id,
+                plate_number=plate_number,
+                equipment_level=EquipmentLevel.BLS,
             )
 
 
-def test_create_vehicle_rejects_blank_plate(app):
+def test_create_vehicle_rejects_long_plate(
+    app,
+    user,
+    clinic_active_mock,
+):
     with app.test_request_context():
-        g.current_user_id = 1
+        from flask import g
+
+        g.current_user_id = user.id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number="   ",
-                equipment_level="BLS",
-                capacity=2,
+                clinic_id=user.clinic_id,
+                plate_number="A" * 31,
+                equipment_level=EquipmentLevel.BLS,
             )
 
 
-def test_create_vehicle_rejects_invalid_capacity(app):
+@pytest.mark.parametrize(
+    "capacity",
+    [0, -1, True, False, 1.5, "4"],
+)
+def test_create_vehicle_rejects_invalid_capacity(
+    app,
+    user,
+    capacity,
+    clinic_active_mock,
+):
     with app.test_request_context():
-        g.current_user_id = 1
+        from flask import g
+
+        g.current_user_id = user.id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number="AB-123",
-                equipment_level="BLS",
-                capacity=0,
+                clinic_id=user.clinic_id,
+                plate_number="AMB-001",
+                equipment_level=EquipmentLevel.BLS,
+                capacity=capacity,
             )
 
 
-def test_create_vehicle_rejects_invalid_initial_status(app):
+def test_create_vehicle_rejects_non_available_status(
+    app,
+    user,
+    clinic_active_mock,
+):
     with app.test_request_context():
-        g.current_user_id = 1
+        from flask import g
 
-        with pytest.raises(ValidationError):
+        g.current_user_id = user.id
+
+        with pytest.raises(
+            ValidationError,
+            match="must start",
+        ):
             ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number="AB-123",
-                equipment_level="BLS",
-                capacity=2,
+                clinic_id=user.clinic_id,
+                plate_number="AMB-001",
+                equipment_level=EquipmentLevel.BLS,
                 status=VehicleStatus.ON_TRIP,
             )
 
 
 def test_create_vehicle_rejects_duplicate_plate(
     app,
+    user,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
+    existing = make_vehicle(
+        clinic_id=user.clinic_id,
+    )
 
     query = Mock()
     query.filter_by.return_value = query
-    query.first.return_value = make_vehicle()
+    query.first.return_value = existing
 
     monkeypatch.setattr(
         ambulance_service.AmbulanceVehicle,
@@ -609,593 +816,263 @@ def test_create_vehicle_rejects_duplicate_plate(
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
+        from flask import g
 
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
+        g.current_user_id = user.id
 
         with pytest.raises(ConflictError):
             ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number="AB-123",
-                equipment_level="BLS",
-                capacity=2,
+                clinic_id=user.clinic_id,
+                plate_number="AMB-001",
+                equipment_level=EquipmentLevel.BLS,
             )
 
 
-def test_create_vehicle_rejects_wrong_authenticated_clinic(
+# Vehicle status
+
+
+def test_set_vehicle_status_updates_status(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service.create_vehicle(
-                clinic_id=20,
-                plate_number="AB-123",
-                equipment_level="BLS",
-                capacity=2,
-            )
-
-
-def test_create_vehicle_requires_active_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
+    vehicle = make_vehicle()
 
     monkeypatch.setattr(
         ambulance_service,
-        "ensure_clinic_active",
-        Mock(side_effect=ValidationError("Clinic is inactive")),
+        "get_vehicle",
+        Mock(return_value=vehicle),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
+        result = ambulance_service.set_vehicle_status(
+            vehicle.id,
+            VehicleStatus.MAINTENANCE,
         )
 
-        with pytest.raises(ValidationError):
-            ambulance_service.create_vehicle(
-                clinic_id=10,
-                plate_number="AB-123",
-                equipment_level="BLS",
-                capacity=2,
-            )
+    assert result.status == VehicleStatus.MAINTENANCE
+    audit_mock.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Vehicle status
-# ---------------------------------------------------------------------------
-
-def test_set_vehicle_status_same_status_is_idempotent(
+def test_set_vehicle_status_same_status_is_noop(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(status=VehicleStatus.AVAILABLE)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceVehicle:
-            return vehicle
-        return None
+    vehicle = make_vehicle()
 
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "get_vehicle",
+        Mock(return_value=vehicle),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         result = ambulance_service.set_vehicle_status(
             vehicle.id,
             VehicleStatus.AVAILABLE,
         )
 
-        assert result is vehicle
-        assert vehicle.status == VehicleStatus.AVAILABLE
+    assert result is vehicle
+    audit_mock.assert_not_called()
 
 
 def test_set_vehicle_status_rejects_manual_on_trip(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
     vehicle = make_vehicle(
         status=VehicleStatus.AVAILABLE,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-
-        if model is ambulance_service.AmbulanceVehicle:
-            return vehicle
-
-        return None
-
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "get_vehicle",
+        Mock(return_value=vehicle),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(
-            ValidationError,
-            match="ON_TRIP is managed automatically",
-        ):
+        with pytest.raises(ValidationError):
             ambulance_service.set_vehicle_status(
                 vehicle.id,
                 VehicleStatus.ON_TRIP,
             )
 
 
-def test_set_vehicle_status_cannot_change_vehicle_away_from_on_trip(
+def test_set_vehicle_status_rejects_changing_on_trip_vehicle(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(status=VehicleStatus.ON_TRIP)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceVehicle:
-            return vehicle
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+    vehicle = make_vehicle(
+        status=VehicleStatus.ON_TRIP,
     )
 
-    target_status = next(
-        status
-        for status in VehicleStatus
-        if status != VehicleStatus.ON_TRIP
+    monkeypatch.setattr(
+        ambulance_service,
+        "get_vehicle",
+        Mock(return_value=vehicle),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.set_vehicle_status(
                 vehicle.id,
-                target_status,
+                VehicleStatus.MAINTENANCE,
             )
 
 
-def test_set_vehicle_status_updates_normal_status(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(status=VehicleStatus.AVAILABLE)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceVehicle:
-            return vehicle
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    target_status = next(
-        status
-        for status in VehicleStatus
-        if status not in {
-            VehicleStatus.AVAILABLE,
-            VehicleStatus.ON_TRIP,
-        }
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        result = ambulance_service.set_vehicle_status(
-            vehicle.id,
-            target_status,
-        )
-
-        assert result is vehicle
-        assert vehicle.status == target_status
-
-
-# ---------------------------------------------------------------------------
 # Trip lookup / listing
-# ---------------------------------------------------------------------------
-
-def test_get_trip_returns_trip(app, monkeypatch):
-    user = make_user(clinic_id=10)
-    trip = make_trip(clinic_id=10)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        assert ambulance_service.get_trip(trip.id) is trip
 
 
-def test_get_trip_not_found(app, monkeypatch):
-    user = make_user(clinic_id=10)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(NotFoundError):
-            ambulance_service.get_trip(999)
-
-
-def test_get_trip_rejects_other_clinic(
+def test_get_trip_returns_trip(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    trip = make_trip(clinic_id=20)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    trip = make_trip()
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ValidationError):
-            ambulance_service.get_trip(trip.id)
-
-
-def test_list_trips_rejects_other_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
         monkeypatch.setattr(
             ambulance_service.db.session,
             "get",
-            Mock(return_value=user),
+            Mock(return_value=trip),
+        )
+        monkeypatch.setattr(
+            ambulance_service,
+            "_assert_authenticated_clinic",
+            Mock(),
         )
 
-        with pytest.raises(ValidationError):
-            ambulance_service.list_trips(20)
+        assert ambulance_service.get_trip(1) is trip
 
 
-# ---------------------------------------------------------------------------
-# Patient / admission helpers
-# ---------------------------------------------------------------------------
-
-def test_get_patient_returns_active_same_clinic_patient(
+def test_get_trip_not_found(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        result = ambulance_service._get_patient(
-            patient.id,
-            10,
+        monkeypatch.setattr(
+            ambulance_service.db.session,
+            "get",
+            Mock(return_value=None),
         )
-
-        assert result is patient
-
-
-def test_get_patient_rejects_missing_patient(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
 
         with pytest.raises(NotFoundError):
-            ambulance_service._get_patient(999, 10)
+            ambulance_service.get_trip(1)
 
 
-def test_get_patient_rejects_other_clinic(
+def test_list_trips_uses_pagination(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=20)
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Patient:
-            return patient
-        return None
+    query = install_query_chain(Mock())
+    pagination = Mock()
+    query.paginate.return_value = pagination
 
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service.AmbulanceTrip,
+        "query",
+        query,
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_assert_authenticated_clinic",
+        Mock(),
     )
 
-    with app.test_request_context():
-        g.current_user_id = user.id
+    result = ambulance_service.list_trips(
+        clinic_id=1,
+        page=3,
+        per_page=25,
+    )
 
-        with pytest.raises(ValidationError):
-            ambulance_service._get_patient(
-                patient.id,
-                10,
-            )
+    assert result is pagination
+    query.filter_by.assert_called_once_with(
+        clinic_id=1,
+    )
+    query.paginate.assert_called_once_with(
+        page=3,
+        per_page=25,
+        error_out=False,
+    )
 
 
-def test_get_patient_rejects_inactive_patient(
+def test_list_trips_filters_status(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(
-        clinic_id=10,
-        is_active=False,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Patient:
-            return patient
-        return None
+    query = install_query_chain(Mock())
+    query.paginate.return_value = Mock()
 
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service.AmbulanceTrip,
+        "query",
+        query,
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_assert_authenticated_clinic",
+        Mock(),
     )
 
-    with app.test_request_context():
-        g.current_user_id = user.id
+    ambulance_service.list_trips(
+        clinic_id=1,
+        status=TripStatus.REQUESTED,
+    )
 
-        with pytest.raises(ValidationError):
-            ambulance_service._get_patient(
-                patient.id,
-                10,
-            )
+    query.filter.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Crew validation
-# ---------------------------------------------------------------------------
+# Row locking
 
-def test_get_driver_accepts_driver_role(
+
+def test_lock_trip_uses_row_lock(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    staff = make_staff(
-        clinic_id=10,
-        role=Role.DRIVER,
-    )
+    trip = make_trip()
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Staff:
-            return staff
-        return None
+    query = install_query_chain(Mock())
+    query.first.return_value = trip
 
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service.AmbulanceTrip,
+        "query",
+        query,
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_assert_authenticated_clinic",
+        Mock(),
     )
 
-    with app.test_request_context():
-        g.current_user_id = user.id
+    result = ambulance_service._lock_trip(1)
 
-        result = ambulance_service._get_ambulance_crew_member(
-            staff.id,
-            10,
-            (Role.DRIVER,),
-            "driver",
-        )
-
-        assert result is staff
+    assert result is trip
+    query.filter.assert_called_once()
+    query.with_for_update.assert_called_once_with()
+    query.first.assert_called_once_with()
 
 
-def test_get_paramedic_accepts_paramedic_role(
+def test_lock_trip_not_found(
     app,
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-    staff = make_staff(
-        clinic_id=10,
-        role=Role.PARAMEDIC,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Staff:
-            return staff
-        return None
+    query = install_query_chain(Mock())
+    query.first.return_value = None
 
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service.AmbulanceTrip,
+        "query",
+        query,
     )
 
-    with app.test_request_context():
-        g.current_user_id = user.id
+    with pytest.raises(NotFoundError):
+        ambulance_service._lock_trip(1)
 
-        result = ambulance_service._get_ambulance_crew_member(
-            staff.id,
-            10,
-            (Role.PARAMEDIC, Role.EMT),
-            "paramedic",
-        )
-
-        assert result is staff
-
-
-def test_get_crew_member_rejects_inactive_staff(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    staff = make_staff(
-        clinic_id=10,
-        role=Role.DRIVER,
-        active=False,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Staff:
-            return staff
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ValidationError):
-            ambulance_service._get_ambulance_crew_member(
-                staff.id,
-                10,
-                (Role.DRIVER,),
-                "driver",
-            )
-
-
-def test_get_crew_member_rejects_wrong_role(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    staff = make_staff(
-        clinic_id=10,
-        role=Role.PARAMEDIC,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.Staff:
-            return staff
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ValidationError):
-            ambulance_service._get_ambulance_crew_member(
-                staff.id,
-                10,
-                (Role.DRIVER,),
-                "driver",
-            )
-
-
-# ---------------------------------------------------------------------------
-# Vehicle locking
-# ---------------------------------------------------------------------------
 
 def test_lock_vehicle_uses_row_lock(
     app,
@@ -1203,27 +1080,19 @@ def test_lock_vehicle_uses_row_lock(
 ):
     vehicle = make_vehicle()
 
-    query = Mock()
-    query.filter_by.return_value = query
-    query.with_for_update.return_value = query
+    query = install_query_chain(Mock())
     query.first.return_value = vehicle
 
-    with app.app_context():
-        monkeypatch.setattr(
-            ambulance_service.AmbulanceVehicle,
-            "query",
-            query,
-        )
+    monkeypatch.setattr(
+        ambulance_service.AmbulanceVehicle,
+        "query",
+        query,
+    )
 
-        result = ambulance_service._lock_vehicle(
-            vehicle.id,
-        )
+    result = ambulance_service._lock_vehicle(1)
 
     assert result is vehicle
-
-    query.filter_by.assert_called_once_with(
-        id=vehicle.id,
-    )
+    query.filter.assert_called_once()
     query.with_for_update.assert_called_once_with()
     query.first.assert_called_once_with()
 
@@ -1232,404 +1101,596 @@ def test_lock_vehicle_not_found(
     app,
     monkeypatch,
 ):
-    query = Mock()
-    query.filter_by.return_value = query
-    query.with_for_update.return_value = query
+    query = install_query_chain(Mock())
     query.first.return_value = None
 
-    with app.app_context():
-        monkeypatch.setattr(
-            ambulance_service.AmbulanceVehicle,
-            "query",
-            query,
-        )
-
-        with pytest.raises(NotFoundError):
-            ambulance_service._lock_vehicle(999)
-
-    query.filter_by.assert_called_once_with(
-        id=999,
+    monkeypatch.setattr(
+        ambulance_service.AmbulanceVehicle,
+        "query",
+        query,
     )
-    query.with_for_update.assert_called_once_with()
-    query.first.assert_called_once_with()
+
+    with pytest.raises(NotFoundError):
+        ambulance_service._lock_vehicle(1)
 
 
-# ---------------------------------------------------------------------------
-# Request trip
-# ---------------------------------------------------------------------------
+# Patient / admission / crew helpers
 
-def test_request_trip_creates_requested_trip(
-    app,
+
+def test_get_patient_returns_active_patient(
     monkeypatch,
 ):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-    )
-
-    trip_cls = Mock(return_value=trip)
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "AmbulanceTrip",
-        trip_cls,
-    )
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "add",
-        Mock(),
-    )
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "flush",
-        Mock(),
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        result = ambulance_service.request_trip(
-            clinic_id=10,
-            trip_type=TripType.NON_EMERGENCY,
-        )
-
-        assert result is trip
-        trip_cls.assert_called_once()
-
-
-def test_request_trip_rejects_wrong_clinic(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        with pytest.raises(ValidationError):
-            ambulance_service.request_trip(
-                clinic_id=20,
-                trip_type=TripType.NON_EMERGENCY,
-            )
-
-
-# ---------------------------------------------------------------------------
-# Dispatch
-# ---------------------------------------------------------------------------
-
-def test_dispatch_trip_requires_requested_status(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.DISPATCHED,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
+    patient = make_patient()
 
     monkeypatch.setattr(
         ambulance_service.db.session,
         "get",
-        fake_get,
+        Mock(return_value=patient),
     )
 
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ConflictError):
-            ambulance_service.dispatch_trip(
-                trip.id,
-                1,
-                50,
-            )
+    assert ambulance_service._get_patient(
+        patient.id,
+        patient.clinic_id,
+    ) is patient
 
 
-def test_dispatch_trip_rejects_unavailable_vehicle(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
+def test_get_patient_not_found(monkeypatch):
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=None),
     )
 
-    vehicle = make_vehicle(
-        clinic_id=10,
-        status=next(
-            status
-            for status in VehicleStatus
-            if status not in {
-                VehicleStatus.AVAILABLE,
-                VehicleStatus.ON_TRIP,
-            }
+    with pytest.raises(NotFoundError):
+        ambulance_service._get_patient(1, 1)
+
+
+def test_get_patient_rejects_other_clinic(monkeypatch):
+    patient = make_patient(clinic_id=2)
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=patient),
+    )
+
+    with pytest.raises(ValidationError):
+        ambulance_service._get_patient(1, 1)
+
+
+def test_get_patient_rejects_inactive_patient(monkeypatch):
+    patient = make_patient(is_active=False)
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=patient),
+    )
+
+    with pytest.raises(ValidationError):
+        ambulance_service._get_patient(1, 1)
+
+
+def test_get_admission_returns_admission(monkeypatch):
+    admission = make_admission()
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=admission),
+    )
+
+    assert ambulance_service._get_admission(
+        admission.id,
+        1,
+    ) is admission
+
+
+def test_get_admission_not_found(monkeypatch):
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=None),
+    )
+
+    with pytest.raises(NotFoundError):
+        ambulance_service._get_admission(1, 1)
+
+
+def test_get_crew_member_returns_active_driver(monkeypatch):
+    staff = make_staff(role=Role.DRIVER)
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=staff),
+    )
+
+    result = ambulance_service._get_ambulance_crew_member(
+        staff.id,
+        1,
+        (Role.DRIVER,),
+        "driver",
+    )
+
+    assert result is staff
+
+
+def test_get_crew_member_requires_active_staff(monkeypatch):
+    staff = make_staff(
+        status="inactive",
+        role=Role.DRIVER,
+    )
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=staff),
+    )
+
+    with pytest.raises(ValidationError):
+        ambulance_service._get_ambulance_crew_member(
+            staff.id,
+            1,
+            (Role.DRIVER,),
+            "driver",
+        )
+
+
+def test_get_crew_member_rejects_wrong_role(monkeypatch):
+    staff = make_staff(role=Role.ADMIN)
+
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=staff),
+    )
+
+    with pytest.raises(ValidationError):
+        ambulance_service._get_ambulance_crew_member(
+            staff.id,
+            1,
+            (Role.DRIVER,),
+            "driver",
+        )
+
+
+def test_get_crew_member_rejects_inactive_user(monkeypatch):
+    staff = make_staff(
+        role=Role.DRIVER,
+        user=make_user(
+            role=Role.DRIVER,
+            is_active=False,
         ),
     )
 
-    driver = make_staff(
-        staff_id=50,
-        clinic_id=10,
-        role=Role.DRIVER,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Staff:
-            return driver
-        return None
-
     monkeypatch.setattr(
         ambulance_service.db.session,
         "get",
-        fake_get,
+        Mock(return_value=staff),
     )
+
+    with pytest.raises(ValidationError):
+        ambulance_service._get_ambulance_crew_member(
+            staff.id,
+            1,
+            (Role.DRIVER,),
+            "driver",
+        )
+
+
+# Trip request
+
+
+def test_request_trip_creates_emergency_trip(
+    app,
+    user,
+    clinic,
+    make_patient,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    patient = make_patient(clinic)
 
     monkeypatch.setattr(
         ambulance_service,
-        "_lock_vehicle",
-        Mock(return_value=vehicle),
+        "_get_patient",
+        Mock(return_value=patient),
     )
 
     with app.test_request_context():
+        from flask import g
+
         g.current_user_id = user.id
 
-        with pytest.raises(ConflictError):
-            ambulance_service.dispatch_trip(
-                trip.id,
-                vehicle.id,
-                driver.id,
-            )
+        install_fake_trip_model(monkeypatch)
+
+        trip = ambulance_service.request_trip(
+            clinic_id=user.clinic_id,
+            trip_type=TripType.EMERGENCY_PICKUP,
+            patient_id=patient.id,
+            pickup_address="Pickup",
+            destination_address="Hospital",
+        )
+
+        assert trip.trip_type == TripType.EMERGENCY_PICKUP
+        assert trip.status == TripStatus.REQUESTED
+        assert trip.patient is patient
+        audit_mock.assert_called_once()
 
 
-def test_dispatch_trip_rejects_same_driver_and_paramedic(
+@pytest.mark.parametrize(
+    "trip_type",
+    [
+        TripType.DISCHARGE_TRANSPORT,
+        TripType.INTER_FACILITY_TRANSFER,
+    ],
+)
+def test_request_trip_requires_admission(
     app,
+    user,
+    clinic,
+    make_patient,
+    trip_type,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-    )
-
-    vehicle = make_vehicle(
-        clinic_id=10,
-        status=VehicleStatus.AVAILABLE,
-    )
-
-    driver = make_staff(
-        staff_id=50,
-        clinic_id=10,
-        role=Role.DRIVER,
-    )
-
-    paramedic = make_staff(
-        staff_id=50,
-        clinic_id=10,
-        role=Role.PARAMEDIC,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    patient = make_patient(clinic)
 
     monkeypatch.setattr(
         ambulance_service,
-        "_lock_vehicle",
-        Mock(return_value=vehicle),
-    )
-
-    def fake_crew_member(
-        staff_id,
-        clinic_id,
-        allowed_roles,
-        position,
-    ):
-        if position == "driver":
-            return driver
-
-        return paramedic
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "_get_ambulance_crew_member",
-        fake_crew_member,
+        "_get_patient",
+        Mock(return_value=patient),
     )
 
     with app.test_request_context():
+        from flask import g
+
         g.current_user_id = user.id
 
         with pytest.raises(
             ValidationError,
-            match="Driver and paramedic must be different staff members",
+            match="admission",
         ):
-            ambulance_service.dispatch_trip(
-                trip.id,
-                vehicle.id,
-                driver.id,
-                paramedic.id,
+            ambulance_service.request_trip(
+                clinic_id=user.clinic_id,
+                trip_type=trip_type,
+                patient_id=patient.id,
             )
 
 
-# ---------------------------------------------------------------------------
-# Trip status transitions
-# ---------------------------------------------------------------------------
-
-def test_update_trip_status_dispatch_to_en_route(
+def test_request_trip_rejects_mismatched_admission(
     app,
+    user,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.DISPATCHED,
+    patient = make_patient(
+        patient_id=1,
+        clinic_id=user.clinic_id,
+    )
+    other_patient = make_patient(
+        patient_id=2,
+        clinic_id=user.clinic_id,
+    )
+    admission = make_admission(
+        patient=other_patient,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=patient),
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_get_admission",
+        Mock(return_value=admission),
     )
 
     with app.test_request_context():
+        from flask import g
+
         g.current_user_id = user.id
 
-        result = ambulance_service.update_trip_status(
-            trip.id,
-            TripStatus.EN_ROUTE_TO_PICKUP,
+        with pytest.raises(ValidationError):
+            ambulance_service.request_trip(
+                clinic_id=user.clinic_id,
+                trip_type=TripType.EMERGENCY_PICKUP,
+                patient_id=patient.id,
+                admission_id=admission.id,
+            )
+
+
+def test_request_trip_uses_admission_patient(
+    app,
+    user,
+    clinic,
+    make_patient,
+    make_staff,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    (
+        _,
+        _,
+        patient,
+        _,
+        admission,
+    ) = _create_admission(
+        clinic,
+        make_patient,
+        make_staff,
+    )
+
+    monkeypatch.setattr(
+        ambulance_service,
+        "_get_admission",
+        Mock(return_value=admission),
+    )
+
+    with app.test_request_context():
+        from flask import g
+
+        g.current_user_id = user.id
+
+        trip = ambulance_service.request_trip(
+            clinic_id=user.clinic_id,
+            trip_type=TripType.EMERGENCY_PICKUP,
+            admission_id=admission.id,
         )
 
-        assert result is trip
-        assert trip.status == TripStatus.EN_ROUTE_TO_PICKUP
+        assert trip.patient is patient
+        assert trip.patient_id == patient.id
+        assert trip.admission is admission
+        assert trip.admission_id == admission.id
+
+
+# Dispatch
+
+
+def test_dispatch_trip_assigns_vehicle_and_crew(
+    app,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    vehicle = make_vehicle()
+    driver = make_staff(role=Role.DRIVER)
+    paramedic = make_staff(
+        staff_id=2,
+        role=Role.PARAMEDIC,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+    monkeypatch.setattr(
+        ambulance_service,
+        "_lock_vehicle",
+        Mock(return_value=vehicle),
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_get_ambulance_crew_member",
+        Mock(
+            side_effect=[
+                driver,
+                paramedic,
+            ]
+        ),
+    )
+
+    with app.test_request_context():
+        result = ambulance_service.dispatch_trip(
+            trip.id,
+            vehicle.id,
+            driver.id,
+            paramedic.id,
+        )
+
+    assert result is trip
+    assert trip.status == TripStatus.DISPATCHED
+    assert trip.vehicle is vehicle
+    assert trip.driver is driver
+    assert trip.paramedic is paramedic
+    assert vehicle.status == VehicleStatus.ON_TRIP
+    audit_mock.assert_called_once()
+
+
+def test_dispatch_rejects_non_requested_trip(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip(
+        status=TripStatus.DISPATCHED,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
+        with pytest.raises(ConflictError):
+            ambulance_service.dispatch_trip(
+                trip.id,
+                1,
+                1,
+            )
+
+
+def test_dispatch_rejects_busy_vehicle(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    vehicle = make_vehicle(
+        status=VehicleStatus.ON_TRIP,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+    monkeypatch.setattr(
+        ambulance_service,
+        "_lock_vehicle",
+        Mock(return_value=vehicle),
+    )
+
+    with app.test_request_context():
+        with pytest.raises(ConflictError):
+            ambulance_service.dispatch_trip(
+                trip.id,
+                vehicle.id,
+                1,
+            )
+
+
+def test_dispatch_rejects_vehicle_from_other_clinic(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip(clinic_id=1)
+    vehicle = make_vehicle(clinic_id=2)
+
+    install_locked_trip(monkeypatch, trip)
+    monkeypatch.setattr(
+        ambulance_service,
+        "_lock_vehicle",
+        Mock(return_value=vehicle),
+    )
+
+    with app.test_request_context():
+        with pytest.raises(ValidationError):
+            ambulance_service.dispatch_trip(
+                trip.id,
+                vehicle.id,
+                1,
+            )
+
+
+def test_dispatch_rejects_same_driver_and_paramedic(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    vehicle = make_vehicle()
+    staff = make_staff(role=Role.DRIVER)
+
+    install_locked_trip(monkeypatch, trip)
+    monkeypatch.setattr(
+        ambulance_service,
+        "_lock_vehicle",
+        Mock(return_value=vehicle),
+    )
+    monkeypatch.setattr(
+        ambulance_service,
+        "_get_ambulance_crew_member",
+        Mock(
+            side_effect=[
+                staff,
+                staff,
+            ]
+        ),
+    )
+
+    with app.test_request_context():
+        with pytest.raises(ValidationError):
+            ambulance_service.dispatch_trip(
+                trip.id,
+                vehicle.id,
+                staff.id,
+                staff.id,
+            )
+
+
+# Trip status lifecycle
 
 
 @pytest.mark.parametrize(
-    ("current", "target"),
+    "current,new_status",
     [
         (
             TripStatus.DISPATCHED,
-            TripStatus.AT_PICKUP,
+            TripStatus.EN_ROUTE_TO_PICKUP,
         ),
         (
             TripStatus.EN_ROUTE_TO_PICKUP,
-            TripStatus.PATIENT_ON_BOARD,
+            TripStatus.AT_PICKUP,
         ),
         (
             TripStatus.AT_PICKUP,
+            TripStatus.PATIENT_ON_BOARD,
+        ),
+        (
+            TripStatus.PATIENT_ON_BOARD,
             TripStatus.EN_ROUTE_TO_DESTINATION,
         ),
     ],
 )
-def test_update_trip_status_rejects_invalid_transition(
+def test_update_trip_status_valid_transitions(
     app,
     monkeypatch,
     current,
-    target,
+    new_status,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
+    patient = make_patient()
     trip = make_trip(
-        clinic_id=10,
         status=current,
+        patient=patient,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=patient),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
+        result = ambulance_service.update_trip_status(
+            trip.id,
+            new_status,
+        )
 
+    assert result.status == new_status
+    audit_mock.assert_called_once()
+
+
+def test_update_trip_status_rejects_invalid_transition(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip(
+        status=TripStatus.REQUESTED,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
         with pytest.raises(ConflictError):
             ambulance_service.update_trip_status(
                 trip.id,
-                target,
+                TripStatus.COMPLETED,
             )
 
 
-def test_update_trip_status_requires_patient_before_patient_on_board(
+def test_update_trip_status_patient_on_board_requires_patient(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.AT_PICKUP,
-        patient=None,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ValidationError):
             ambulance_service.update_trip_status(
                 trip.id,
@@ -1637,288 +1698,129 @@ def test_update_trip_status_requires_patient_before_patient_on_board(
             )
 
 
-# ---------------------------------------------------------------------------
 # Link patient
-# ---------------------------------------------------------------------------
 
-def test_link_patient_assigns_patient(
+
+def test_link_patient_links_patient(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
+    trip = make_trip()
+    patient = make_patient()
 
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=patient),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         result = ambulance_service.link_patient(
             trip.id,
             patient.id,
         )
 
-        assert result is trip
-        assert trip.patient is patient
+    assert result.patient is patient
+    audit_mock.assert_called_once()
 
 
-def test_link_patient_is_idempotent_for_same_patient(
+def test_link_patient_is_idempotent(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
+    patient = make_patient()
+    trip = make_trip(patient=patient)
 
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-        patient=patient,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=patient),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         result = ambulance_service.link_patient(
             trip.id,
             patient.id,
         )
 
-        assert result is trip
-        assert trip.patient is patient
+    assert result is trip
+    audit_mock.assert_not_called()
 
 
-def test_link_patient_rejects_different_existing_patient(
+def test_link_patient_rejects_different_patient(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    existing = make_patient(
-        patient_id=100,
-        clinic_id=10,
-    )
-    replacement = make_patient(
-        patient_id=200,
-        clinic_id=10,
-    )
+    existing = make_patient(patient_id=1)
+    other = make_patient(patient_id=2)
+    trip = make_trip(patient=existing)
 
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-        patient=existing,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            if object_id == existing.id:
-                return existing
-            return replacement
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=other),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.link_patient(
                 trip.id,
-                replacement.id,
+                other.id,
             )
 
 
 def test_link_patient_rejects_completed_trip(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.link_patient(
                 trip.id,
-                patient.id,
+                1,
             )
 
 
-# ---------------------------------------------------------------------------
 # Complete trip
-# ---------------------------------------------------------------------------
 
-def test_complete_trip_requires_destination_state(
+
+def test_complete_trip_completes_and_releases_vehicle(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
+    patient = make_patient()
     vehicle = make_vehicle(
-        clinic_id=10,
         status=VehicleStatus.ON_TRIP,
     )
-
     trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.PATIENT_ON_BOARD,
-        patient=patient,
-        vehicle=vehicle,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ConflictError):
-            ambulance_service.complete_trip(trip.id)
-
-
-def test_complete_trip_requires_patient(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    vehicle = make_vehicle(
-        clinic_id=10,
-        status=VehicleStatus.ON_TRIP,
-    )
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.EN_ROUTE_TO_DESTINATION,
-        patient=None,
-        vehicle=vehicle,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        with pytest.raises(ValidationError):
-            ambulance_service.complete_trip(trip.id)
-
-
-def test_complete_trip_releases_vehicle(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
-    vehicle = make_vehicle(
-        clinic_id=10,
-        status=VehicleStatus.ON_TRIP,
-    )
-
-    trip = make_trip(
-        clinic_id=10,
         status=TripStatus.EN_ROUTE_TO_DESTINATION,
         patient=patient,
         vehicle=vehicle,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Patient:
-            return patient
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_get_patient",
+        Mock(return_value=patient),
     )
-
     monkeypatch.setattr(
         ambulance_service,
         "_lock_vehicle",
@@ -1926,127 +1828,143 @@ def test_complete_trip_releases_vehicle(
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         result = ambulance_service.complete_trip(trip.id)
 
-        assert result is trip
-        assert trip.status == TripStatus.COMPLETED
-        assert vehicle.status == VehicleStatus.AVAILABLE
+    assert result.status == TripStatus.COMPLETED
+    assert vehicle.status == VehicleStatus.AVAILABLE
+    audit_mock.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Invoice linking
-# ---------------------------------------------------------------------------
+def test_complete_trip_requires_patient(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip(
+        status=TripStatus.EN_ROUTE_TO_DESTINATION,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
+        with pytest.raises(ValidationError):
+            ambulance_service.complete_trip(trip.id)
+
+
+def test_complete_trip_requires_correct_status(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip(
+        status=TripStatus.DISPATCHED,
+        patient=make_patient(),
+    )
+
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
+        with pytest.raises(ConflictError):
+            ambulance_service.complete_trip(trip.id)
+
+
+# Invoice
+
+
+def test_link_invoice_links_matching_invoice(
+    app,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    patient = make_patient()
+    trip = make_trip(
+        status=TripStatus.COMPLETED,
+        patient=patient,
+    )
+    invoice = make_invoice(
+        clinic_id=1,
+        patient_id=patient.id,
+    )
+
+    install_locked_trip(monkeypatch, trip)
+    monkeypatch.setattr(
+        ambulance_service.db.session,
+        "get",
+        Mock(return_value=invoice),
+    )
+
+    with app.test_request_context():
+        result = ambulance_service.link_invoice(
+            trip.id,
+            invoice.id,
+        )
+
+    assert result.invoice is invoice
+    audit_mock.assert_called_once()
+
 
 def test_link_invoice_requires_completed_trip(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.EN_ROUTE_TO_DESTINATION,
-        patient=patient,
+        status=TripStatus.DISPATCHED,
+        patient=make_patient(),
     )
 
+    install_locked_trip(monkeypatch, trip)
+
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(
-                side_effect=lambda model, object_id: (
-                    user
-                    if model is ambulance_service.User
-                    else trip
-                    if model is ambulance_service.AmbulanceTrip
-                    else None
-                )
-            ),
-        )
-
         with pytest.raises(ConflictError):
             ambulance_service.link_invoice(
                 trip.id,
-                500,
+                1,
             )
 
 
 def test_link_invoice_requires_patient(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
-        patient=None,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ValidationError):
             ambulance_service.link_invoice(
                 trip.id,
-                500,
+                1,
             )
 
 
-def test_link_invoice_rejects_other_clinic_invoice(
+def test_link_invoice_rejects_wrong_clinic(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
-        patient=patient,
+        patient=make_patient(),
     )
-
     invoice = make_invoice(
-        clinic_id=20,
-        patient_id=patient.id,
+        clinic_id=2,
+        patient_id=trip.patient_id,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Invoice:
-            return invoice
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
         ambulance_service.db.session,
         "get",
-        fake_get,
+        Mock(return_value=invoice),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ValidationError):
             ambulance_service.link_invoice(
                 trip.id,
@@ -2057,44 +1975,26 @@ def test_link_invoice_rejects_other_clinic_invoice(
 def test_link_invoice_rejects_wrong_patient(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
-    patient = make_patient(
-        patient_id=100,
-        clinic_id=10,
-    )
-
-    invoice = make_invoice(
-        invoice_id=500,
-        clinic_id=10,
-        patient_id=999,
-    )
-
+    patient = make_patient(patient_id=1)
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
         patient=patient,
     )
+    invoice = make_invoice(
+        clinic_id=1,
+        patient_id=2,
+    )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Invoice:
-            return invoice
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
         ambulance_service.db.session,
         "get",
-        fake_get,
+        Mock(return_value=invoice),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ValidationError):
             ambulance_service.link_invoice(
                 trip.id,
@@ -2102,51 +2002,31 @@ def test_link_invoice_rejects_wrong_patient(
             )
 
 
-def test_link_invoice_rejects_invoice_already_linked(
+def test_link_invoice_rejects_already_linked_invoice(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-    patient = make_patient(clinic_id=10)
-
+    patient = make_patient()
+    other_trip = make_trip(trip_id=99)
     invoice = make_invoice(
-        clinic_id=10,
+        clinic_id=1,
         patient_id=patient.id,
+        ambulance_trip=other_trip,
     )
-
-    another_trip = make_trip(
-        trip_id=99,
-        clinic_id=10,
-        status=TripStatus.COMPLETED,
-        patient=patient,
-    )
-
-    invoice.ambulance_trip = another_trip
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
         patient=patient,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        if model is ambulance_service.Invoice:
-            return invoice
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
         ambulance_service.db.session,
         "get",
-        fake_get,
+        Mock(return_value=invoice),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.link_invoice(
                 trip.id,
@@ -2154,105 +2034,118 @@ def test_link_invoice_rejects_invoice_already_linked(
             )
 
 
-# ---------------------------------------------------------------------------
 # Cancellation
-# ---------------------------------------------------------------------------
 
-def test_cancel_trip_requires_reason(
+
+def test_cancel_trip_cancels_trip(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    trip = make_trip()
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
+        result = ambulance_service.cancel_trip(
+            trip.id,
+            "Patient cancelled transport",
+        )
 
+    assert result.status == TripStatus.CANCELLED
+    assert (
+        result.cancellation_reason
+        == "Patient cancelled transport"
+    )
+    audit_mock.assert_called_once()
+
+
+def test_cancel_trip_strips_reason(
+    app,
+    monkeypatch,
+    audit_mock,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
+        ambulance_service.cancel_trip(
+            trip.id,
+            "  Cancelled by patient  ",
+        )
+
+    assert trip.cancellation_reason == "Cancelled by patient"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["", "   ", None, 123],
+)
+def test_cancel_trip_rejects_invalid_reason(
+    app,
+    monkeypatch,
+    reason,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
         with pytest.raises(ValidationError):
             ambulance_service.cancel_trip(
                 trip.id,
-                "   ",
+                reason,
+            )
+
+
+def test_cancel_trip_rejects_long_reason(
+    app,
+    monkeypatch,
+    clinic_active_mock,
+):
+    trip = make_trip()
+    install_locked_trip(monkeypatch, trip)
+
+    with app.test_request_context():
+        with pytest.raises(ValidationError):
+            ambulance_service.cancel_trip(
+                trip.id,
+                "x" * 256,
             )
 
 
 def test_cancel_trip_rejects_completed_trip(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.COMPLETED,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.cancel_trip(
                 trip.id,
-                "Patient cancelled",
+                "Too late",
             )
 
 
-def test_cancel_trip_is_not_allowed_twice(
+def test_cancel_trip_rejects_already_cancelled_trip(
     app,
     monkeypatch,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
     trip = make_trip(
-        clinic_id=10,
         status=TripStatus.CANCELLED,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
+    install_locked_trip(monkeypatch, trip)
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
         with pytest.raises(ConflictError):
             ambulance_service.cancel_trip(
                 trip.id,
@@ -2263,33 +2156,17 @@ def test_cancel_trip_is_not_allowed_twice(
 def test_cancel_trip_releases_on_trip_vehicle(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
     vehicle = make_vehicle(
-        clinic_id=10,
         status=VehicleStatus.ON_TRIP,
     )
-
     trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.DISPATCHED,
         vehicle=vehicle,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
         ambulance_service,
         "_lock_vehicle",
@@ -2297,159 +2174,38 @@ def test_cancel_trip_releases_on_trip_vehicle(
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        result = ambulance_service.cancel_trip(
+        ambulance_service.cancel_trip(
             trip.id,
             "Transport no longer required",
         )
 
-        assert result is trip
-        assert trip.status == TripStatus.CANCELLED
-        assert trip.cancellation_reason == (
-            "Transport no longer required"
-        )
-        assert vehicle.status == VehicleStatus.AVAILABLE
+    assert trip.status == TripStatus.CANCELLED
+    assert vehicle.status == VehicleStatus.AVAILABLE
 
 
-def test_cancel_trip_strips_reason(
+def test_cancel_trip_does_not_change_available_vehicle(
     app,
     monkeypatch,
+    audit_mock,
+    clinic_active_mock,
 ):
-    user = make_user(clinic_id=10)
-
+    vehicle = make_vehicle(
+        status=VehicleStatus.AVAILABLE,
+    )
     trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
+        vehicle=vehicle,
     )
 
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
+    install_locked_trip(monkeypatch, trip)
     monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
+        ambulance_service,
+        "_lock_vehicle",
+        Mock(return_value=vehicle),
     )
 
     with app.test_request_context():
-        g.current_user_id = user.id
-
-        result = ambulance_service.cancel_trip(
-            trip.id,
-            "   Patient cancelled   ",
-        )
-
-        assert result is trip
-        assert trip.status == TripStatus.CANCELLED
-        assert trip.cancellation_reason == "Patient cancelled"
-
-
-# ---------------------------------------------------------------------------
-# Audit coverage
-# ---------------------------------------------------------------------------
-
-def test_create_vehicle_writes_audit(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    query = Mock()
-    query.filter_by.return_value = query
-    query.first.return_value = None
-
-    vehicle = make_vehicle()
-
-    vehicle_cls = Mock(return_value=vehicle)
-    vehicle_cls.query = query
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "AmbulanceVehicle",
-        vehicle_cls,
-    )
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "add",
-        Mock(),
-    )
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "flush",
-        Mock(),
-    )
-
-    audit = Mock()
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "create_audit_log",
-        audit,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
-        monkeypatch.setattr(
-            ambulance_service.db.session,
-            "get",
-            Mock(return_value=user),
-        )
-
-        ambulance_service.create_vehicle(
-            clinic_id=10,
-            plate_number="AB-123",
-            equipment_level="BLS",
-            capacity=2,
-        )
-
-        audit.assert_called_once()
-
-
-def test_cancel_trip_writes_audit(
-    app,
-    monkeypatch,
-):
-    user = make_user(clinic_id=10)
-
-    trip = make_trip(
-        clinic_id=10,
-        status=TripStatus.REQUESTED,
-    )
-
-    def fake_get(model, object_id):
-        if model is ambulance_service.User:
-            return user
-        if model is ambulance_service.AmbulanceTrip:
-            return trip
-        return None
-
-    monkeypatch.setattr(
-        ambulance_service.db.session,
-        "get",
-        fake_get,
-    )
-
-    audit = Mock()
-
-    monkeypatch.setattr(
-        ambulance_service,
-        "create_audit_log",
-        audit,
-    )
-
-    with app.test_request_context():
-        g.current_user_id = user.id
-
         ambulance_service.cancel_trip(
             trip.id,
-            "Transport cancelled",
+            "Transport no longer required",
         )
-
-        audit.assert_called_once()
+    assert vehicle.status == VehicleStatus.AVAILABLE

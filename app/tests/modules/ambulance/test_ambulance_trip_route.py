@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from flask import g
 
 from app.core.enums.ambulance_enums import (
     TripStatus,
@@ -63,6 +62,32 @@ def make_trip(
     )
 
 
+def make_pagination(
+    items,
+    *,
+    page=1,
+    per_page=50,
+    total=None,
+):
+    total = len(items) if total is None else total
+
+    pages = (
+        (total + per_page - 1) // per_page
+        if total
+        else 0
+    )
+
+    return SimpleNamespace(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
+        has_next=page < pages,
+        has_prev=page > 1,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
@@ -80,15 +105,41 @@ def test_trip_data_serializes_trip():
     assert result["driver_id"] == trip.driver_id
     assert result["paramedic_id"] == trip.paramedic_id
     assert result["admission_id"] == trip.admission_id
+
     assert result["trip_type"] == TripType.NON_EMERGENCY.value
     assert result["status"] == TripStatus.REQUESTED.value
+
+    assert result["pickup_address"] == trip.pickup_address
+    assert result["destination_address"] == (
+        trip.destination_address
+    )
+    assert result["notes"] == trip.notes
+    assert result["invoice_id"] == trip.invoice_id
+
     assert result["pickup_lat"] == float(trip.pickup_lat)
     assert result["pickup_lng"] == float(trip.pickup_lng)
+
     assert result["destination_lat"] == float(
         trip.destination_lat
     )
     assert result["destination_lng"] == float(
         trip.destination_lng
+    )
+
+    assert result["requested_at"] == (
+        trip.requested_at.isoformat()
+    )
+    assert result["dispatched_at"] == (
+        trip.dispatched_at.isoformat()
+    )
+    assert result["pickup_at"] == (
+        trip.pickup_at.isoformat()
+    )
+    assert result["completed_at"] == (
+        trip.completed_at.isoformat()
+    )
+    assert result["cancelled_at"] == (
+        trip.cancelled_at.isoformat()
     )
 
 
@@ -178,13 +229,68 @@ def test_create_ambulance_trip_success(
 
     assert body["success"] is True
     assert body["data"]["id"] == trip.id
+    assert body["data"]["trip_type"] == (
+        TripType.NON_EMERGENCY.value
+    )
 
-    assert service.call_args.kwargs["clinic_id"] == user.clinic_id
+    assert service.call_args.kwargs["clinic_id"] == (
+        user.clinic_id
+    )
     assert service.call_args.kwargs["clinic_id"] != 999
 
 
-def test_create_ambulance_trip_rejects_invalid_payload(
+def test_create_ambulance_trip_passes_payload_to_service(
     app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    trip = make_trip(
+        clinic_id=clinic.id,
+        trip_type=TripType.EMERGENCY_PICKUP,
+    )
+
+    service = Mock(return_value=trip)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "request_trip",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips",
+        json={
+            "trip_type": TripType.EMERGENCY_PICKUP.value,
+            "pickup_address": "Pickup",
+            "destination_address": "Destination",
+            "notes": "Urgent transport",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+
+    body = response.get_json()
+
+    assert body["success"] is True
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["clinic_id"] == clinic.id
+    assert kwargs["trip_type"] == TripType.EMERGENCY_PICKUP
+    assert kwargs["pickup_address"] == "Pickup"
+    assert kwargs["destination_address"] == "Destination"
+    assert kwargs["notes"] == "Urgent transport"
+
+
+def test_create_ambulance_trip_rejects_invalid_payload(
     client,
     clinic,
     make_user,
@@ -206,10 +312,37 @@ def test_create_ambulance_trip_rejects_invalid_payload(
 
     assert body["success"] is False
     assert body["error"] == "Invalid request payload"
+    assert "details" in body
+
+
+def test_create_ambulance_trip_rejects_non_object_json(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips",
+        data="[]",
+        content_type="application/json",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Request body must be a JSON object"
+    )
 
 
 def test_create_ambulance_trip_maps_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -245,7 +378,9 @@ def test_create_ambulance_trip_maps_domain_error(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"] == "Ambulance trip already exists"
+    assert body["error"] == (
+        "Ambulance trip already exists"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +389,6 @@ def test_create_ambulance_trip_maps_domain_error(
 
 
 def test_get_ambulance_trips_success(
-    app,
     client,
     clinic,
     make_user,
@@ -276,7 +410,14 @@ def test_get_ambulance_trips_success(
         ),
     ]
 
-    service = Mock(return_value=trips)
+    pagination = make_pagination(
+        trips,
+        page=1,
+        per_page=50,
+        total=2,
+    )
+
+    service = Mock(return_value=pagination)
 
     monkeypatch.setattr(
         ambulance_trip_routes,
@@ -296,18 +437,90 @@ def test_get_ambulance_trips_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
-    assert body["data"][0]["id"] == 1
-    assert body["data"][1]["id"] == 2
+
+    data = body["data"]
+
+    assert len(data["items"]) == 2
+    assert data["items"][0]["id"] == 1
+    assert data["items"][1]["id"] == 2
+    assert data["total"] == 2
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert data["pages"] == 1
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     service.assert_called_once_with(
         clinic_id=clinic.id,
         status=None,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_get_ambulance_trips_supports_pagination(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    trips = [
+        make_trip(
+            trip_id=51,
+            clinic_id=clinic.id,
+        ),
+    ]
+
+    pagination = make_pagination(
+        trips,
+        page=2,
+        per_page=25,
+        total=51,
+    )
+
+    service = Mock(return_value=pagination)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "list_trips",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
+        query_string={
+            "page": "2",
+            "per_page": "25",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+    data = body["data"]
+
+    assert data["page"] == 2
+    assert data["per_page"] == 25
+    assert data["total"] == 51
+    assert data["pages"] == 3
+    assert data["has_next"] is True
+    assert data["has_prev"] is True
+
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=None,
+        page=2,
+        per_page=25,
     )
 
 
 def test_get_ambulance_trips_supports_status_filter(
-    app,
     client,
     clinic,
     make_user,
@@ -321,7 +534,12 @@ def test_get_ambulance_trips_supports_status_filter(
         status=TripStatus.DISPATCHED,
     )
 
-    service = Mock(return_value=[trip])
+    service = Mock(
+        return_value=make_pagination(
+            [trip],
+            total=1,
+        )
+    )
 
     monkeypatch.setattr(
         ambulance_trip_routes,
@@ -344,11 +562,12 @@ def test_get_ambulance_trips_supports_status_filter(
     service.assert_called_once_with(
         clinic_id=clinic.id,
         status=TripStatus.DISPATCHED,
+        page=1,
+        per_page=50,
     )
 
 
 def test_get_ambulance_trips_rejects_invalid_status(
-    app,
     client,
     clinic,
     make_user,
@@ -374,13 +593,75 @@ def test_get_ambulance_trips_rejects_invalid_status(
     assert "Invalid trip status" in body["error"]
 
 
+def test_get_ambulance_trips_rejects_empty_status(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
+        query_string={"status": "   "},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Trip status cannot be empty"
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        {"page": "0"},
+        {"page": "-1"},
+        {"page": "abc"},
+        {"page": ""},
+        {"per_page": "0"},
+        {"per_page": "-1"},
+        {"per_page": "abc"},
+        {"per_page": ""},
+        {"per_page": "501"},
+    ],
+)
+def test_get_ambulance_trips_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    query_string,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips",
+        query_string=query_string,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert "error" in body
+
+
 # ---------------------------------------------------------------------------
 # Get single trip
 # ---------------------------------------------------------------------------
 
 
 def test_get_ambulance_trip_success(
-    app,
     client,
     clinic,
     make_user,
@@ -394,10 +675,12 @@ def test_get_ambulance_trip_success(
         clinic_id=clinic.id,
     )
 
+    service = Mock(return_value=trip)
+
     monkeypatch.setattr(
         ambulance_trip_routes,
         "get_trip",
-        Mock(return_value=trip),
+        service,
     )
 
     headers = auth_headers_for(user)
@@ -414,9 +697,10 @@ def test_get_ambulance_trip_success(
     assert body["success"] is True
     assert body["data"]["id"] == 123
 
+    service.assert_called_once_with(123)
+
 
 def test_get_ambulance_trip_maps_not_found(
-    app,
     client,
     clinic,
     make_user,
@@ -456,7 +740,6 @@ def test_get_ambulance_trip_maps_not_found(
 
 
 def test_dispatch_ambulance_trip_success(
-    app,
     client,
     clinic,
     make_user,
@@ -498,11 +781,39 @@ def test_dispatch_ambulance_trip_success(
     assert body["success"] is True
     assert body["data"]["id"] == 1
 
-    service.assert_called_once()
+    service.assert_called_once_with(
+        trip_id=1,
+        vehicle_id=20,
+        driver_id=40,
+        paramedic_id=50,
+    )
+
+
+def test_dispatch_ambulance_trip_rejects_invalid_payload(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips/1/dispatch",
+        json={},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
 
 
 def test_dispatch_ambulance_trip_maps_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -546,7 +857,6 @@ def test_dispatch_ambulance_trip_maps_domain_error(
 
 
 def test_update_ambulance_trip_status_success(
-    app,
     client,
     clinic,
     make_user,
@@ -593,7 +903,6 @@ def test_update_ambulance_trip_status_success(
 
 
 def test_update_ambulance_trip_status_rejects_invalid_payload(
-    app,
     client,
     clinic,
     make_user,
@@ -623,7 +932,6 @@ def test_update_ambulance_trip_status_rejects_invalid_payload(
 
 
 def test_link_ambulance_patient_success(
-    app,
     client,
     clinic,
     make_user,
@@ -669,8 +977,31 @@ def test_link_ambulance_patient_success(
     )
 
 
+def test_link_ambulance_patient_rejects_invalid_payload(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips/1/patient",
+        json={},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
+
+
 def test_link_ambulance_patient_maps_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -715,7 +1046,6 @@ def test_link_ambulance_patient_maps_domain_error(
 
 
 def test_complete_ambulance_trip_success(
-    app,
     client,
     clinic,
     make_user,
@@ -756,7 +1086,6 @@ def test_complete_ambulance_trip_success(
 
 
 def test_complete_ambulance_trip_maps_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -798,7 +1127,6 @@ def test_complete_ambulance_trip_maps_domain_error(
 
 
 def test_link_ambulance_invoice_success(
-    app,
     client,
     clinic,
     make_user,
@@ -845,8 +1173,31 @@ def test_link_ambulance_invoice_success(
     )
 
 
+def test_link_ambulance_invoice_rejects_invalid_payload(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips/1/invoice",
+        json={},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
+
+
 def test_link_ambulance_invoice_maps_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -889,7 +1240,6 @@ def test_link_ambulance_invoice_maps_domain_error(
 
 
 def test_cancel_ambulance_trip_success(
-    app,
     client,
     clinic,
     make_user,
@@ -943,22 +1293,22 @@ def test_cancel_ambulance_trip_success(
 
 
 def test_cancel_ambulance_trip_rejects_invalid_payload(
-    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
 ):
-    with app.test_request_context(
+    user = make_user(clinic=clinic)
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
         "/api/ambulance/trips/1/cancel",
-        method="POST",
         json={"reason": 123},
-    ):
-        result = ambulance_trip_routes._payload(
-            AmbulanceTripCancelSchema,
-        )
+        headers=headers,
+    )
 
-    assert isinstance(result, tuple)
-
-    response, status_code = result
-
-    assert status_code == 422
+    assert response.status_code == 422
 
     body = response.get_json()
 
@@ -1006,13 +1356,56 @@ def test_ambulance_trip_routes_require_authentication(
 @pytest.mark.parametrize(
     "role",
     [
+        Role.ADMIN,
+        Role.AMBULANCE_COORDINATOR,
+        Role.AMBULANCE_DISPATCHER,
+    ],
+)
+def test_ambulance_management_roles_can_create_trip(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+    role,
+):
+    user = make_user(
+        clinic=clinic,
+        role=role,
+    )
+
+    trip = make_trip(clinic_id=clinic.id)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "request_trip",
+        Mock(return_value=trip),
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/trips",
+        json={
+            "trip_type": TripType.NON_EMERGENCY.value,
+            "pickup_address": "Pickup",
+            "destination_address": "Destination",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
         Role.DRIVER,
         Role.PARAMEDIC,
         Role.EMT,
     ],
 )
 def test_ambulance_management_routes_reject_crew_roles(
-    app,
     client,
     clinic,
     make_user,
@@ -1042,13 +1435,15 @@ def test_ambulance_management_routes_reject_crew_roles(
 @pytest.mark.parametrize(
     "role",
     [
+        Role.ADMIN,
+        Role.AMBULANCE_COORDINATOR,
+        Role.AMBULANCE_DISPATCHER,
         Role.DRIVER,
         Role.PARAMEDIC,
         Role.EMT,
     ],
 )
-def test_ambulance_view_routes_allow_crew_roles(
-    app,
+def test_ambulance_view_routes_allow_view_roles(
     client,
     clinic,
     make_user,
@@ -1064,7 +1459,12 @@ def test_ambulance_view_routes_allow_crew_roles(
     monkeypatch.setattr(
         ambulance_trip_routes,
         "list_trips",
-        Mock(return_value=[]),
+        Mock(
+            return_value=make_pagination(
+                [],
+                total=0,
+            )
+        ),
     )
 
     headers = auth_headers_for(user)
@@ -1083,7 +1483,6 @@ def test_ambulance_view_routes_allow_crew_roles(
 
 
 def test_ambulance_route_rejects_inactive_authenticated_user(
-    app,
     client,
     clinic,
     make_user,
@@ -1110,7 +1509,6 @@ def test_ambulance_route_rejects_inactive_authenticated_user(
 
 
 def test_ambulance_route_rejects_user_without_clinic(
-    app,
     client,
     make_user,
     auth_headers_for,
@@ -1141,7 +1539,6 @@ def test_ambulance_route_rejects_user_without_clinic(
 
 
 def test_create_ambulance_trip_uses_authenticated_clinic(
-    app,
     client,
     clinic,
     make_user,
@@ -1167,7 +1564,6 @@ def test_create_ambulance_trip_uses_authenticated_clinic(
     response = client.post(
         "/api/ambulance/trips",
         json={
-            "clinic_id": 999,
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup address",
             "destination_address": "Destination address",
@@ -1177,8 +1573,40 @@ def test_create_ambulance_trip_uses_authenticated_clinic(
 
     assert response.status_code == 201
 
-    assert service.call_args.kwargs["clinic_id"] == clinic.id
+    assert service.call_args.kwargs["clinic_id"] == (
+        clinic.id
+    )
     assert service.call_args.kwargs["clinic_id"] != 999
+
+
+def test_get_ambulance_trip_does_not_accept_clinic_parameter(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(clinic=clinic)
+
+    trip = make_trip(clinic_id=clinic.id)
+
+    service = Mock(return_value=trip)
+
+    monkeypatch.setattr(
+        ambulance_trip_routes,
+        "get_trip",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/trips/1?clinic_id=999",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    service.assert_called_once_with(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1204,7 +1632,6 @@ def test_create_ambulance_trip_uses_authenticated_clinic(
     ],
 )
 def test_ambulance_route_maps_domain_errors(
-    app,
     client,
     clinic,
     make_user,
@@ -1234,3 +1661,74 @@ def test_ambulance_route_maps_domain_errors(
 
     assert body["success"] is False
     assert body["error"] == str(exception)
+
+
+# ---------------------------------------------------------------------------
+# Direct helper validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "0",
+        "-1",
+        "abc",
+        "  ",
+    ],
+)
+def test_get_int_query_param_rejects_invalid_values(
+    app,
+    value,
+):
+    with app.test_request_context(
+        "/api/ambulance/trips",
+        query_string={"page": value},
+    ):
+        with pytest.raises(ValidationError):
+            ambulance_trip_routes._get_int_query_param(
+                "page",
+                default=1,
+            )
+
+
+def test_get_int_query_param_uses_default(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/trips",
+    ):
+        result = ambulance_trip_routes._get_int_query_param(
+            "page",
+            default=1,
+        )
+
+    assert result == 1
+
+
+def test_pagination_params_use_defaults(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/trips",
+    ):
+        page, per_page = (
+            ambulance_trip_routes._pagination_params()
+        )
+
+    assert page == ambulance_trip_routes.DEFAULT_PAGE
+    assert per_page == (
+        ambulance_trip_routes.DEFAULT_PER_PAGE
+    )
+
+
+def test_pagination_params_enforce_max_per_page(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/trips",
+        query_string={"per_page": "501"},
+    ):
+        with pytest.raises(ValidationError):
+            ambulance_trip_routes._pagination_params()

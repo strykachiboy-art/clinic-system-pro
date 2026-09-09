@@ -2,18 +2,25 @@ from flask import Blueprint, jsonify, request, g
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
-from app.extensions import db
+from app.extensions import db, limiter
+
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
 from app.core.utils.decorators import role_required
-from app.extensions import limiter
 
 from app.modules.ai.schemas.ai_schema import (
     DrugInteractionCheckSchema,
     LabResultInterpreterSchema,
     TriageAssistantSchema,
 )
+
+from app.modules.ai.schemas.ai_response_schema import (
+    DrugInteractionResponseSchema,
+    LabResultInterpreterResponseSchema,
+    TriageAssistantResponseSchema,
+)
+
 from app.modules.ai.services.ai_service import (
     assist_triage,
     check_drug_interactions,
@@ -40,14 +47,13 @@ AI_ROLES = (
 AI_RATE_LIMIT = "10 per minute"
 
 
-def _pydantic_error_details(exc: PydanticValidationError):
+def _pydantic_error_details(
+    exc: PydanticValidationError,
+):
     """
     Return JSON-serializable Pydantic validation details.
-
-    Pydantic may include exception objects such as ValueError
-    inside the error context. Those objects are not directly
-    JSON serializable by Flask's jsonify().
     """
+
     details = exc.errors()
 
     for error in details:
@@ -62,10 +68,28 @@ def _pydantic_error_details(exc: PydanticValidationError):
     return details
 
 
+def _request_json() -> dict:
+    """
+    Return the request JSON object.
+
+    AI endpoints require a JSON object as their request body.
+    """
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            "Request body must be a JSON object"
+        )
+
+    return payload
+
+
 def _current_user():
     """
-    Return the authenticated user.
+    Return the authenticated active user.
     """
+
     identity = get_jwt_identity()
 
     try:
@@ -75,7 +99,15 @@ def _current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -96,6 +128,7 @@ def _current_clinic_id() -> int:
 
     AI routes must never trust a client-supplied clinic_id.
     """
+
     user = _current_user()
 
     if user.clinic_id is None:
@@ -103,7 +136,41 @@ def _current_clinic_id() -> int:
             "Authenticated user is not associated with a clinic"
         )
 
+    if user.clinic_id <= 0:
+        raise ValidationError(
+            "Authenticated user has an invalid clinic"
+        )
+
     return user.clinic_id
+
+
+def _client_ip_address() -> str | None:
+    """
+    Return the request IP address.
+
+    The service is responsible for final normalization and
+    persistence validation.
+    """
+
+    return request.remote_addr
+
+
+def _serialize_ai_response(
+    schema,
+    result,
+):
+    """
+    Validate and serialize an AI service response.
+
+    This provides a second response boundary at the HTTP layer
+    in addition to service-level provider validation.
+    """
+
+    return (
+        schema
+        .model_validate(result)
+        .model_dump(mode="json")
+    )
 
 
 @ai_bp.post("/drug-interactions")
@@ -112,7 +179,7 @@ def _current_clinic_id() -> int:
 def drug_interactions():
     try:
         payload = DrugInteractionCheckSchema.model_validate(
-            request.get_json(silent=True) or {}
+            _request_json()
         )
 
         result = check_drug_interactions(
@@ -120,12 +187,18 @@ def drug_interactions():
             drug_names=payload.drug_names,
             patient_id=payload.patient_id,
             user_id=g.current_user_id,
+            ip_address=_client_ip_address(),
+        )
+
+        response_data = _serialize_ai_response(
+            DrugInteractionResponseSchema,
+            result,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": result,
+                "data": response_data,
             }
         ), 200
 
@@ -153,7 +226,7 @@ def drug_interactions():
 def triage():
     try:
         payload = TriageAssistantSchema.model_validate(
-            request.get_json(silent=True) or {}
+            _request_json()
         )
 
         result = assist_triage(
@@ -162,12 +235,18 @@ def triage():
             symptoms=payload.symptoms,
             vitals=payload.vitals,
             user_id=g.current_user_id,
+            ip_address=_client_ip_address(),
+        )
+
+        response_data = _serialize_ai_response(
+            TriageAssistantResponseSchema,
+            result,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": result,
+                "data": response_data,
             }
         ), 200
 
@@ -195,7 +274,7 @@ def triage():
 def lab_results():
     try:
         payload = LabResultInterpreterSchema.model_validate(
-            request.get_json(silent=True) or {}
+            _request_json()
         )
 
         result = interpret_lab_results(
@@ -204,12 +283,18 @@ def lab_results():
             lab_order_id=payload.lab_order_id,
             result_data=payload.result_data,
             user_id=g.current_user_id,
+            ip_address=_client_ip_address(),
+        )
+
+        response_data = _serialize_ai_response(
+            LabResultInterpreterResponseSchema,
+            result,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": result,
+                "data": response_data,
             }
         ), 200
 

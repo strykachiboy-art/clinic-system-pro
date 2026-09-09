@@ -1,22 +1,18 @@
 from flask import (
     Blueprint,
-    g,
     jsonify,
     request,
-    session
 )
-from flask_jwt_extended import get_jwt_identity
 
-from app.extensions import db
+from flask_jwt_extended import get_jwt_identity
 
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
+
 from app.core.auth.user.models.user_model import User
 
-from app.core.enums.ambulance_enums import (
-    TripStatus,
-)
-
+from app.core.enums.ambulance_enums import TripStatus
 from app.core.enums.role_enums import Role
 
 from app.core.exceptions import (
@@ -24,9 +20,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 
-from app.core.utils.decorators import (
-    role_required,
-)
+from app.core.utils.decorators import role_required
 
 from app.modules.ambulance.schemas.ambulance_trip_schema import (
     AmbulanceTripCancelSchema,
@@ -63,6 +57,7 @@ TRIP_MANAGEMENT_ROLES = (
     Role.AMBULANCE_DISPATCHER,
 )
 
+
 TRIP_VIEW_ROLES = (
     Role.ADMIN,
     Role.AMBULANCE_COORDINATOR,
@@ -71,6 +66,7 @@ TRIP_VIEW_ROLES = (
     Role.PARAMEDIC,
     Role.EMT,
 )
+
 
 TRIP_CREW_ROLES = (
     Role.ADMIN,
@@ -82,18 +78,28 @@ TRIP_CREW_ROLES = (
 )
 
 
-def _payload(schema):
-    """
-    Validate a JSON request body using the supplied Pydantic
-    schema.
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
-    Returns either the validated model or an HTTP error
-    response.
-    """
-    try:
-        return schema.model_validate(
-            request.get_json(silent=True) or {}
+
+def _payload(schema):
+    # Validate request body.
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Request body must be a JSON object",
+                }
+            ),
+            422,
         )
+
+    try:
+        return schema.model_validate(payload)
 
     except PydanticValidationError as exc:
         return (
@@ -109,14 +115,17 @@ def _payload(schema):
 
 
 def _current_user():
-    """
-    Return the authenticated user.
-    """
+    # Resolve authenticated user.
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
     except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    if user_id <= 0:
         raise ValidationError(
             "Invalid authentication identity"
         )
@@ -137,12 +146,7 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    """
-    Return the authenticated user's clinic.
-
-    The client must never be allowed to choose the clinic
-    for ambulance API operations.
-    """
+    # Resolve authenticated clinic.
     user = _current_user()
 
     if user.clinic_id is None:
@@ -151,13 +155,67 @@ def _current_clinic_id() -> int:
             "with a clinic"
         )
 
+    if user.clinic_id <= 0:
+        raise ValidationError(
+            "Authenticated user has an invalid clinic"
+        )
+
     return user.clinic_id
 
 
+def _get_int_query_param(
+    name: str,
+    *,
+    default: int,
+) -> int:
+    raw_value = request.args.get(name)
+
+    if raw_value is None:
+        return default
+
+    raw_value = raw_value.strip()
+
+    if not raw_value:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    if value <= 0:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    return value
+
+
+def _pagination_params():
+    page = _get_int_query_param(
+        "page",
+        default=DEFAULT_PAGE,
+    )
+
+    per_page = _get_int_query_param(
+        "per_page",
+        default=DEFAULT_PER_PAGE,
+    )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
 def _trip_data(trip):
-    """
-    Serialize an ambulance trip for API responses.
-    """
+    # Serialize trip.
     return {
         "id": trip.id,
         "clinic_id": trip.clinic_id,
@@ -244,10 +302,8 @@ def create_ambulance_trip():
 
         data = payload.model_dump()
 
-        data.pop(
-            "clinic_id",
-            None
-        )
+        # Never accept clinic from client.
+        data.pop("clinic_id", None)
 
         trip = request_trip(
             clinic_id=clinic_id,
@@ -276,35 +332,49 @@ def get_ambulance_trips():
     try:
         clinic_id = _current_clinic_id()
 
-        status_value = request.args.get(
-            "status",
-        )
-
+        status_value = request.args.get("status")
         status = None
 
-        if status_value:
-            try:
-                status = TripStatus(
-                    status_value,
+        if status_value is not None:
+            status_value = status_value.strip()
+
+            if not status_value:
+                raise ValidationError(
+                    "Trip status cannot be empty"
                 )
+
+            try:
+                status = TripStatus(status_value)
             except ValueError:
                 raise ValidationError(
                     f"Invalid trip status: "
                     f"{status_value}"
                 )
 
-        trips = list_trips(
+        page, per_page = _pagination_params()
+
+        pagination = list_trips(
             clinic_id=clinic_id,
             status=status,
+            page=page,
+            per_page=per_page,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": [
-                    _trip_data(trip)
-                    for trip in trips
-                ],
+                "data": {
+                    "items": [
+                        _trip_data(trip)
+                        for trip in pagination.items
+                    ],
+                    "total": pagination.total,
+                    "page": pagination.page,
+                    "per_page": pagination.per_page,
+                    "pages": pagination.pages,
+                    "has_next": pagination.has_next,
+                    "has_prev": pagination.has_prev,
+                },
             }
         ), 200
 

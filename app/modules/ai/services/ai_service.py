@@ -1,30 +1,30 @@
+from __future__ import annotations
+
 import json
 from typing import Any, Callable, Optional, Type
 
 from flask import current_app
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.ai_enums import (
     AIFeature,
     AIApprovalStatus,
     AIRiskLevel,
 )
+from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.utils.decorators import transactional
 from app.extensions import db
 
 from app.modules.ai.models.ai_model import AILog
-
 from app.modules.ai.schemas.ai_response_schema import (
     DrugInteractionResponseSchema,
     LabResultInterpreterResponseSchema,
     TriageAssistantResponseSchema,
 )
-
 from app.modules.clinic.models.clinic_model import Clinic
-from app.modules.clinic.services.clinic_service import (
-    consume_ai_credit,
-)
+from app.modules.clinic.services.clinic_service import _consume_ai_credit
 from app.modules.lab.models.lab_model import LabOrder
 from app.modules.patient.models.patient_model import Patient
 
@@ -34,13 +34,72 @@ AIProvider = Callable[
     dict[str, Any],
 ]
 
-
-# ============================================================================
-# HELPERS
-# ============================================================================
+MAX_IP_ADDRESS_LENGTH = 45
+MAX_DRUG_NAME_LENGTH = 255
 
 
-def _get_clinic(clinic_id: int) -> Clinic:
+def _validate_positive_id(
+    value: Any,
+    field_name: str,
+) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value <= 0
+    ):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+
+def _normalize_optional_id(
+    value: Optional[int],
+    field_name: str,
+) -> Optional[int]:
+    if value is None:
+        return None
+
+    _validate_positive_id(
+        value,
+        field_name,
+    )
+
+    return value
+
+
+def _normalize_optional_ip_address(
+    ip_address: Optional[str],
+) -> Optional[str]:
+    if ip_address is None:
+        return None
+
+    if not isinstance(ip_address, str):
+        raise ValidationError(
+            "IP address must be a string"
+        )
+
+    ip_address = ip_address.strip()
+
+    if not ip_address:
+        return None
+
+    if len(ip_address) > MAX_IP_ADDRESS_LENGTH:
+        raise ValidationError(
+            f"IP address cannot exceed "
+            f"{MAX_IP_ADDRESS_LENGTH} characters"
+        )
+
+    return ip_address
+
+
+def _get_clinic(
+    clinic_id: int,
+) -> Clinic:
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     clinic = db.session.get(
         Clinic,
         clinic_id,
@@ -60,6 +119,11 @@ def _get_patient(
 ) -> Optional[Patient]:
     if patient_id is None:
         return None
+
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
 
     patient = db.session.get(
         Patient,
@@ -83,6 +147,11 @@ def _get_lab_order(
     clinic_id: int,
     lab_order_id: int,
 ) -> LabOrder:
+    _validate_positive_id(
+        lab_order_id,
+        "Lab order ID",
+    )
+
     lab_order = db.session.get(
         LabOrder,
         lab_order_id,
@@ -103,9 +172,11 @@ def _get_lab_order(
 
 def _get_model_name() -> str:
     model = current_app.config.get(
-        "OPENAI_MODEL",
-        "gpt-4o-mini",
+        "OPENAI_MODEL"
     )
+
+    if model is None:
+        return "gpt-4o-mini"
 
     if not isinstance(model, str) or not model.strip():
         raise ValidationError(
@@ -151,18 +222,6 @@ def _determine_risk_level(
     feature: AIFeature,
     result: dict[str, Any],
 ) -> AIRiskLevel:
-    """
-    Determine the safety risk attached to an AI result.
-
-    Triage already returns an AIRiskLevel through the existing
-    response schema, so that value is authoritative for the
-    AI-generated triage result.
-
-    Other features do not currently expose a risk field in their
-    response schemas. They therefore remain MEDIUM rather than
-    inventing a numerical confidence or clinical risk score.
-    """
-
     if feature is AIFeature.TRIAGE_ASSISTANT:
         risk_value = result.get("risk_score")
 
@@ -189,13 +248,6 @@ def _build_provider_payload(
     feature: AIFeature,
     payload: dict[str, Any],
 ) -> str:
-    """
-    Serialize application data as untrusted data.
-
-    Clinical/user-controlled fields are explicitly represented as
-    data and must never be interpreted as provider instructions.
-    """
-
     return json.dumps(
         {
             "feature": feature.value,
@@ -208,12 +260,6 @@ def _build_provider_payload(
 def _extract_usage(
     response: Any,
 ) -> tuple[Optional[int], Optional[int], Optional[int]]:
-    """
-    Extract provider token usage when available.
-
-    Custom test providers do not need to provide usage data.
-    """
-
     usage = getattr(
         response,
         "usage",
@@ -347,14 +393,6 @@ def _development_provider(
     feature: AIFeature,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Deterministic local provider for development/load testing.
-
-    This provider never contacts an external AI service.
-    Its output is still passed through the normal AI response
-    schema validation and persistence workflow.
-    """
-
     if feature is AIFeature.DRUG_INTERACTION_CHECK:
         return {
             "summary": "No clinically significant interaction found.",
@@ -389,13 +427,6 @@ def _development_provider(
 
 
 def _get_configured_provider() -> AIProvider:
-    """
-    Resolve the configured AI provider.
-
-    Explicitly supplied providers from tests continue to take
-    precedence in _run_feature().
-    """
-
     provider_name = current_app.config.get(
         "AI_PROVIDER",
         "openai",
@@ -423,21 +454,14 @@ def _validate_provider_result(
     feature: AIFeature,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Validate the raw AI provider response against
-    the response schema for the selected AI feature.
-    """
-
     schema_map: dict[
         AIFeature,
         Type[Any],
     ] = {
         AIFeature.DRUG_INTERACTION_CHECK:
             DrugInteractionResponseSchema,
-
         AIFeature.TRIAGE_ASSISTANT:
             TriageAssistantResponseSchema,
-
         AIFeature.LAB_RESULT_INTERPRETER:
             LabResultInterpreterResponseSchema,
     }
@@ -464,9 +488,30 @@ def _validate_provider_result(
     )
 
 
-# ============================================================================
-# CORE FEATURE EXECUTION
-# ============================================================================
+def _audit_ai_generation(
+    *,
+    log: AILog,
+    feature: AIFeature,
+    user_id: Optional[int],
+    ip_address: Optional[str],
+) -> None:
+    create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="AILog",
+        entity_id=log.id,
+        description=(
+            f"AI feature '{feature.value}' generated successfully"
+        ),
+        user_id=user_id,
+        ip_address=ip_address,
+        new_value={
+            "feature": feature.value,
+            "risk_level": log.risk_level.value,
+            "approval_status": log.approval_status.value,
+            "credits_used": log.credits_used,
+            "generated_by_system": log.generated_by_system,
+        },
+    )
 
 
 @transactional
@@ -477,40 +522,45 @@ def _run_feature(
     patient_id: Optional[int] = None,
     user_id: Optional[int] = None,
     provider: Optional[AIProvider] = None,
+    ip_address: Optional[str] = None,
 ) -> dict[str, Any]:
+    # Validate identifiers.
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
-    # ------------------------------------------------------------------------
-    # Clinic isolation
-    # ------------------------------------------------------------------------
+    patient_id = _normalize_optional_id(
+        patient_id,
+        "Patient ID",
+    )
 
+    user_id = _normalize_optional_id(
+        user_id,
+        "User ID",
+    )
+
+    ip_address = _normalize_optional_ip_address(
+        ip_address
+    )
+
+    # Check clinic.
     _get_clinic(
         clinic_id
     )
 
-    # ------------------------------------------------------------------------
-    # Patient isolation
-    # ------------------------------------------------------------------------
-
+    # Check patient.
     patient = _get_patient(
         clinic_id=clinic_id,
         patient_id=patient_id,
     )
 
-    # ------------------------------------------------------------------------
-    # Consume one AI credit.
-    #
-    # Because this function is transactional, a provider failure or
-    # validation failure will roll this change back.
-    # ------------------------------------------------------------------------
-
-    consume_ai_credit(
+    # Consume credit inside this transaction.
+    _consume_ai_credit(
         clinic_id
     )
 
-    # ------------------------------------------------------------------------
-    # Execute AI provider
-    # ------------------------------------------------------------------------
-
+    # Run provider.
     ai_provider = (
         provider
         or _get_configured_provider()
@@ -526,37 +576,21 @@ def _run_feature(
             "AI provider must return a JSON object"
         )
 
-    # ------------------------------------------------------------------------
-    # Validate AI output before storing it.
-    # ------------------------------------------------------------------------
-
+    # Validate output.
     result = _validate_provider_result(
         feature=feature,
         result=result,
     )
 
-    # ------------------------------------------------------------------------
-    # Determine AI safety risk.
-    # ------------------------------------------------------------------------
-
+    # Determine risk.
     risk_level = _determine_risk_level(
         feature=feature,
         result=result,
     )
 
-    # ------------------------------------------------------------------------
-    # New AI generations begin as PENDING.
-    #
-    # Approval must be performed by a human reviewer through the review
-    # workflow. The client cannot manufacture approval.
-    # ------------------------------------------------------------------------
-
     approval_status = AIApprovalStatus.PENDING
 
-    # ------------------------------------------------------------------------
-    # Persist AI provenance and audit record.
-    # ------------------------------------------------------------------------
-
+    # Persist AI log.
     log = AILog(
         clinic_id=clinic_id,
         patient_id=patient.id if patient else None,
@@ -574,22 +608,17 @@ def _run_feature(
     )
 
     db.session.add(log)
+    db.session.flush()
 
-    # ------------------------------------------------------------------------
-    # IMPORTANT:
-    #
-    # AI output is intentionally NOT written into the Patient record here.
-    #
-    # The AI result remains an AI-generated suggestion until a clinician
-    # explicitly reviews it and performs the appropriate clinical action.
-    # ------------------------------------------------------------------------
+    # Record audit.
+    _audit_ai_generation(
+        log=log,
+        feature=feature,
+        user_id=user_id,
+        ip_address=ip_address,
+    )
 
     return result
-
-
-# ============================================================================
-# DRUG INTERACTION CHECK
-# ============================================================================
 
 
 def check_drug_interactions(
@@ -598,7 +627,12 @@ def check_drug_interactions(
     patient_id: Optional[int] = None,
     user_id: Optional[int] = None,
     provider: Optional[AIProvider] = None,
+    ip_address: Optional[str] = None,
 ) -> dict[str, Any]:
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
     if (
         not isinstance(drug_names, list)
@@ -608,16 +642,39 @@ def check_drug_interactions(
             "At least two drug names are required"
         )
 
-    cleaned_drugs = [
-        drug.strip()
-        for drug in drug_names
-        if isinstance(drug, str)
-        and drug.strip()
-    ]
+    cleaned_drugs: list[str] = []
+
+    for drug in drug_names:
+        if not isinstance(drug, str):
+            continue
+
+        drug = drug.strip()
+
+        if not drug:
+            continue
+
+        if len(drug) > MAX_DRUG_NAME_LENGTH:
+            raise ValidationError(
+                f"Drug name cannot exceed "
+                f"{MAX_DRUG_NAME_LENGTH} characters"
+            )
+
+        cleaned_drugs.append(drug)
 
     if len(cleaned_drugs) < 2:
         raise ValidationError(
             "At least two valid drug names are required"
+        )
+
+    # Block duplicates.
+    normalized_drugs = {
+        drug.casefold()
+        for drug in cleaned_drugs
+    }
+
+    if len(normalized_drugs) != len(cleaned_drugs):
+        raise ValidationError(
+            "Duplicate drug names are not allowed"
         )
 
     payload = {
@@ -631,12 +688,8 @@ def check_drug_interactions(
         patient_id=patient_id,
         user_id=user_id,
         provider=provider,
+        ip_address=ip_address,
     )
-
-
-# ============================================================================
-# TRIAGE ASSISTANT
-# ============================================================================
 
 
 def assist_triage(
@@ -646,7 +699,17 @@ def assist_triage(
     vitals: Optional[dict[str, Any]] = None,
     user_id: Optional[int] = None,
     provider: Optional[AIProvider] = None,
+    ip_address: Optional[str] = None,
 ) -> dict[str, Any]:
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
 
     if (
         not isinstance(symptoms, str)
@@ -676,12 +739,8 @@ def assist_triage(
         patient_id=patient_id,
         user_id=user_id,
         provider=provider,
+        ip_address=ip_address,
     )
-
-
-# ============================================================================
-# LAB RESULT INTERPRETER
-# ============================================================================
 
 
 def interpret_lab_results(
@@ -691,7 +750,12 @@ def interpret_lab_results(
     lab_order_id: Optional[int] = None,
     user_id: Optional[int] = None,
     provider: Optional[AIProvider] = None,
+    ip_address: Optional[str] = None,
 ) -> dict[str, Any]:
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
     if (
         not isinstance(result_data, dict)
@@ -702,6 +766,11 @@ def interpret_lab_results(
         )
 
     if lab_order_id is not None:
+        _validate_positive_id(
+            lab_order_id,
+            "Lab order ID",
+        )
+
         lab_order = _get_lab_order(
             clinic_id=clinic_id,
             lab_order_id=lab_order_id,
@@ -715,7 +784,6 @@ def interpret_lab_results(
                 "Lab order does not belong to the supplied patient"
             )
 
-        # The lab order is authoritative for the patient.
         patient_id = lab_order.patient_id
 
     payload = {
@@ -730,4 +798,5 @@ def interpret_lab_results(
         patient_id=patient_id,
         user_id=user_id,
         provider=provider,
+        ip_address=ip_address,
     )

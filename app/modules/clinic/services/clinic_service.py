@@ -2,8 +2,6 @@ import secrets
 from datetime import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
-
 from app.extensions import celery, db
 from app.core.utils.decorators import transactional
 from app.core.exceptions import (
@@ -842,16 +840,9 @@ def regenerate_api_token(
 # CONSUME AI CREDIT
 # =====================================================================
 
-@transactional
-def consume_ai_credit(
+def _consume_ai_credit(
     clinic_id: int,
 ) -> Clinic:
-    """
-    Atomically consume one AI credit.
-
-    The clinic row is locked before checking the balance. This prevents
-    concurrent requests from consuming the same available credit.
-    """
     clinic = get_clinic(
         clinic_id,
         for_update=True,
@@ -893,33 +884,11 @@ def consume_ai_credit(
     return clinic
 
 
-# =====================================================================
-# RESET MONTHLY AI USAGE
-# =====================================================================
-
-@celery.task(name="reset_monthly_ai_usage")
-def reset_monthly_ai_usage():
-    """
-    Reset monthly AI request counters for every clinic.
-
-    This operation is intentionally global because the Celery task
-    operates independently of an authenticated clinic.
-    """
-    try:
-        updated = Clinic.query.update(
-            {
-                Clinic.ai_requests_this_month: 0,
-            },
-            synchronize_session=False,
-        )
-
-        db.session.commit()
-
-        return updated
-
-    except Exception:
-        db.session.rollback()
-        raise
+@transactional
+def consume_ai_credit(
+    clinic_id: int,
+) -> Clinic:
+    return _consume_ai_credit(clinic_id)
 
 
 # =====================================================================

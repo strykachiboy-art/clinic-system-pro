@@ -1,24 +1,22 @@
-﻿import pytest
+﻿# app/tests/modules/ambulance/test_ambulance_vehicle_routes.py
 
 from datetime import date, datetime
+from unittest.mock import Mock
+import pytest
 
 from app.core.enums.ambulance_enums import (
     EquipmentLevel,
     VehicleStatus,
 )
-
 from app.core.enums.role_enums import Role
-
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
-
 from app.modules.ambulance.routes import (
     ambulance_vehicle_routes,
 )
-
 from app.modules.ambulance.schemas.ambulance_vehicle_schema import (
     AmbulanceVehicleCreateSchema,
     AmbulanceVehicleStatusSchema,
@@ -59,6 +57,36 @@ def make_vehicle(
     return vehicle
 
 
+def make_pagination(
+    items,
+    *,
+    page=1,
+    per_page=50,
+    total=None,
+):
+    total = len(items) if total is None else total
+
+    pages = (
+        (total + per_page - 1) // per_page
+        if total
+        else 0
+    )
+
+    return type(
+        "Pagination",
+        (),
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1,
+        },
+    )()
+
+
 # ============================================================
 # _payload
 # ============================================================
@@ -90,6 +118,38 @@ def test_payload_accepts_valid_vehicle_create_payload(
     assert result.capacity == 2
 
 
+@pytest.mark.parametrize(
+    "equipment_level",
+    [
+        EquipmentLevel.BLS,
+        EquipmentLevel.ALS,
+        EquipmentLevel.CCT,
+    ],
+)
+def test_payload_accepts_all_equipment_levels(
+    app,
+    equipment_level,
+):
+    with app.test_request_context(
+        "/api/ambulance/vehicles",
+        method="POST",
+        json={
+            "plate_number": "AMB-001",
+            "equipment_level": equipment_level.value,
+            "capacity": 2,
+        },
+    ):
+        result = ambulance_vehicle_routes._payload(
+            AmbulanceVehicleCreateSchema,
+        )
+
+    assert isinstance(
+        result,
+        AmbulanceVehicleCreateSchema,
+    )
+    assert result.equipment_level == equipment_level
+
+
 def test_payload_rejects_invalid_vehicle_create_payload(
     app,
 ):
@@ -98,6 +158,33 @@ def test_payload_rejects_invalid_vehicle_create_payload(
         method="POST",
         json={
             "plate_number": "",
+        },
+    ):
+        result = ambulance_vehicle_routes._payload(
+            AmbulanceVehicleCreateSchema,
+        )
+
+    assert isinstance(result, tuple)
+
+    response, status_code = result
+
+    assert status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
+
+
+def test_payload_rejects_unknown_create_fields(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/vehicles",
+        method="POST",
+        json={
+            "plate_number": "AMB-001",
+            "clinic_id": 999,
         },
     ):
         result = ambulance_vehicle_routes._payload(
@@ -162,6 +249,33 @@ def test_payload_rejects_invalid_vehicle_status_payload(
 
     assert body["success"] is False
     assert body["error"] == "Invalid request payload"
+
+
+def test_payload_rejects_non_object_json(
+    app,
+):
+    with app.test_request_context(
+        "/api/ambulance/vehicles",
+        method="POST",
+        data="[]",
+        content_type="application/json",
+    ):
+        result = ambulance_vehicle_routes._payload(
+            AmbulanceVehicleCreateSchema,
+        )
+
+    assert isinstance(result, tuple)
+
+    response, status_code = result
+
+    assert status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Request body must be a JSON object"
+    )
 
 
 # ============================================================
@@ -249,7 +363,6 @@ def test_vehicle_data_handles_nullable_fields():
 
 
 def test_create_ambulance_vehicle_success(
-    app,
     client,
     clinic,
     make_user,
@@ -325,23 +438,30 @@ def test_create_ambulance_vehicle_success(
     assert captured["kwargs"]["capacity"] == 2
 
 
-def test_create_ambulance_vehicle_does_not_use_client_clinic_id(
-    app,
+@pytest.mark.parametrize(
+    "equipment_level",
+    [
+        EquipmentLevel.BLS,
+        EquipmentLevel.ALS,
+        EquipmentLevel.CCT,
+    ],
+)
+def test_create_ambulance_vehicle_passes_equipment_level(
     client,
     clinic,
     make_user,
     auth_headers_for,
     monkeypatch,
+    equipment_level,
 ):
     user = make_user(
         clinic=clinic,
         role=Role.ADMIN,
     )
 
-    headers = auth_headers_for(user)
-
     vehicle = make_vehicle(
         clinic_id=clinic.id,
+        equipment_level=equipment_level,
     )
 
     captured = {}
@@ -360,6 +480,61 @@ def test_create_ambulance_vehicle_does_not_use_client_clinic_id(
         fake_create_vehicle,
     )
 
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/vehicles",
+        json={
+            "plate_number": "AMB-001",
+            "equipment_level": equipment_level.value,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    assert captured["kwargs"]["equipment_level"] == (
+        equipment_level
+    )
+
+
+def test_create_ambulance_vehicle_does_not_use_client_clinic_id(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+
+    vehicle = make_vehicle(
+        clinic_id=clinic.id,
+    )
+
+    called = False
+
+    def fake_create_vehicle(
+        clinic_id,
+        **kwargs,
+    ):
+        nonlocal called
+        called = True
+
+        assert clinic_id == clinic.id
+        assert "clinic_id" not in kwargs
+
+        return vehicle
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "create_vehicle",
+        fake_create_vehicle,
+    )
+
     response = client.post(
         "/api/ambulance/vehicles",
         json={
@@ -369,14 +544,11 @@ def test_create_ambulance_vehicle_does_not_use_client_clinic_id(
         headers=headers,
     )
 
-    assert response.status_code == 201
-
-    assert captured["clinic_id"] == clinic.id
-    assert "clinic_id" not in captured["kwargs"]
+    assert response.status_code == 422
+    assert called is False
 
 
 def test_create_ambulance_vehicle_invalid_payload(
-    app,
     client,
     clinic,
     make_user,
@@ -422,7 +594,6 @@ def test_create_ambulance_vehicle_invalid_payload(
 
 
 def test_create_ambulance_vehicle_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -466,7 +637,6 @@ def test_create_ambulance_vehicle_domain_error(
 
 
 def test_create_ambulance_vehicle_requires_management_role(
-    app,
     client,
     clinic,
     make_user,
@@ -487,10 +657,7 @@ def test_create_ambulance_vehicle_requires_management_role(
         headers=headers,
     )
 
-    assert response.status_code in (
-        401,
-        403,
-    )
+    assert response.status_code == 403
 
 
 # ============================================================
@@ -499,7 +666,6 @@ def test_create_ambulance_vehicle_requires_management_role(
 
 
 def test_get_ambulance_vehicles_success(
-    app,
     client,
     clinic,
     make_user,
@@ -526,15 +692,26 @@ def test_get_ambulance_vehicles_success(
         ),
     ]
 
+    pagination = make_pagination(
+        vehicles,
+        page=1,
+        per_page=50,
+        total=2,
+    )
+
     captured = {}
 
     def fake_list_vehicles(
         clinic_id,
         status=None,
+        page=1,
+        per_page=50,
     ):
         captured["clinic_id"] = clinic_id
         captured["status"] = status
-        return vehicles
+        captured["page"] = page
+        captured["per_page"] = per_page
+        return pagination
 
     monkeypatch.setattr(
         ambulance_vehicle_routes,
@@ -552,16 +729,26 @@ def test_get_ambulance_vehicles_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
-    assert body["data"][0]["id"] == 1
-    assert body["data"][1]["id"] == 2
+
+    data = body["data"]
+
+    assert len(data["items"]) == 2
+    assert data["items"][0]["id"] == 1
+    assert data["items"][1]["id"] == 2
+    assert data["total"] == 2
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert data["pages"] == 1
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     assert captured["clinic_id"] == clinic.id
     assert captured["status"] is None
+    assert captured["page"] == 1
+    assert captured["per_page"] == 50
 
 
-def test_get_ambulance_vehicles_filters_by_status(
-    app,
+def test_get_ambulance_vehicles_supports_pagination(
     client,
     clinic,
     make_user,
@@ -575,28 +762,136 @@ def test_get_ambulance_vehicles_filters_by_status(
 
     headers = auth_headers_for(user)
 
-    vehicles = [
-        make_vehicle(
-            vehicle_id=1,
-            clinic_id=clinic.id,
-            status=VehicleStatus.AVAILABLE,
-        ),
-    ]
+    vehicle = make_vehicle(
+        vehicle_id=51,
+        clinic_id=clinic.id,
+        plate_number="AMB-051",
+    )
 
-    captured = {}
+    pagination = make_pagination(
+        [vehicle],
+        page=2,
+        per_page=25,
+        total=51,
+    )
 
-    def fake_list_vehicles(
-        clinic_id,
-        status=None,
-    ):
-        captured["clinic_id"] = clinic_id
-        captured["status"] = status
-        return vehicles
+    service = Mock(return_value=pagination)
 
     monkeypatch.setattr(
         ambulance_vehicle_routes,
         "list_vehicles",
-        fake_list_vehicles,
+        service,
+    )
+
+    response = client.get(
+        "/api/ambulance/vehicles",
+        query_string={
+            "page": "2",
+            "per_page": "25",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+    data = body["data"]
+
+    assert data["page"] == 2
+    assert data["per_page"] == 25
+    assert data["total"] == 51
+    assert data["pages"] == 3
+    assert data["has_next"] is True
+    assert data["has_prev"] is True
+
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=None,
+        page=2,
+        per_page=25,
+    )
+
+
+def test_get_ambulance_vehicles_empty_page(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.AMBULANCE_DISPATCHER,
+    )
+
+    pagination = make_pagination(
+        [],
+        page=3,
+        per_page=50,
+        total=100,
+    )
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "list_vehicles",
+        Mock(return_value=pagination),
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/vehicles",
+        query_string={
+            "page": "3",
+            "per_page": "50",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.get_json()["data"]
+
+    assert data["items"] == []
+    assert data["total"] == 100
+    assert data["page"] == 3
+    assert data["per_page"] == 50
+    assert data["pages"] == 2
+    assert data["has_next"] is False
+    assert data["has_prev"] is True
+
+
+def test_get_ambulance_vehicles_filters_by_status(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.AMBULANCE_DISPATCHER,
+    )
+
+    headers = auth_headers_for(user)
+
+    vehicle = make_vehicle(
+        vehicle_id=1,
+        clinic_id=clinic.id,
+        status=VehicleStatus.AVAILABLE,
+    )
+
+    pagination = make_pagination(
+        [vehicle],
+        total=1,
+    )
+
+    service = Mock(return_value=pagination)
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "list_vehicles",
+        service,
     )
 
     response = client.get(
@@ -609,15 +904,50 @@ def test_get_ambulance_vehicles_filters_by_status(
 
     assert response.status_code == 200
 
+    data = response.get_json()["data"]
+
+    assert data["items"][0]["id"] == 1
+
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=VehicleStatus.AVAILABLE,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_get_ambulance_vehicles_rejects_empty_status(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.AMBULANCE_DISPATCHER,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/vehicles",
+        query_string={
+            "status": "   ",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
     body = response.get_json()
 
-    assert body["success"] is True
-    assert captured["clinic_id"] == clinic.id
-    assert captured["status"] == VehicleStatus.AVAILABLE
+    assert body["success"] is False
+    assert body["error"] == (
+        "Vehicle status cannot be empty"
+    )
 
 
 def test_get_ambulance_vehicles_rejects_invalid_status(
-    app,
     client,
     clinic,
     make_user,
@@ -644,12 +974,54 @@ def test_get_ambulance_vehicles_rejects_invalid_status(
 
     assert body["success"] is False
     assert body["error"] == (
-        "Invalid vehicle status: NOT_A_REAL_STATUS"
+        "Invalid vehicle status: "
+        "NOT_A_REAL_STATUS"
     )
 
 
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        {"page": "0"},
+        {"page": "-1"},
+        {"page": "abc"},
+        {"page": ""},
+        {"per_page": "0"},
+        {"per_page": "-1"},
+        {"per_page": "abc"},
+        {"per_page": ""},
+        {"per_page": "501"},
+    ],
+)
+def test_get_ambulance_vehicles_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    query_string,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.AMBULANCE_DISPATCHER,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.get(
+        "/api/ambulance/vehicles",
+        query_string=query_string,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert "error" in body
+
+
 def test_get_ambulance_vehicles_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -688,7 +1060,6 @@ def test_get_ambulance_vehicles_domain_error(
 
 
 def test_get_ambulance_vehicles_requires_view_role(
-    app,
     client,
     clinic,
     make_user,
@@ -706,10 +1077,7 @@ def test_get_ambulance_vehicles_requires_view_role(
         headers=headers,
     )
 
-    assert response.status_code in (
-        401,
-        403,
-    )
+    assert response.status_code == 403
 
 
 # ============================================================
@@ -718,7 +1086,6 @@ def test_get_ambulance_vehicles_requires_view_role(
 
 
 def test_get_ambulance_vehicle_success(
-    app,
     client,
     clinic,
     make_user,
@@ -740,10 +1107,12 @@ def test_get_ambulance_vehicle_success(
         capacity=4,
     )
 
+    service = Mock(return_value=vehicle)
+
     monkeypatch.setattr(
         ambulance_vehicle_routes,
         "get_vehicle",
-        lambda vehicle_id: vehicle,
+        service,
     )
 
     response = client.get(
@@ -765,9 +1134,10 @@ def test_get_ambulance_vehicle_success(
     )
     assert body["data"]["capacity"] == 4
 
+    service.assert_called_once_with(vehicle.id)
+
 
 def test_get_ambulance_vehicle_not_found(
-    app,
     client,
     clinic,
     make_user,
@@ -808,7 +1178,6 @@ def test_get_ambulance_vehicle_not_found(
 
 
 def test_get_ambulance_vehicle_requires_view_role(
-    app,
     client,
     clinic,
     make_user,
@@ -826,10 +1195,7 @@ def test_get_ambulance_vehicle_requires_view_role(
         headers=headers,
     )
 
-    assert response.status_code in (
-        401,
-        403,
-    )
+    assert response.status_code == 403
 
 
 # ============================================================
@@ -838,7 +1204,6 @@ def test_get_ambulance_vehicle_requires_view_role(
 
 
 def test_update_ambulance_vehicle_status_success(
-    app,
     client,
     clinic,
     make_user,
@@ -859,11 +1224,7 @@ def test_update_ambulance_vehicle_status_success(
         status=VehicleStatus.AVAILABLE,
     )
 
-    target_status = next(
-        status
-        for status in VehicleStatus
-        if status != VehicleStatus.AVAILABLE
-    )
+    target_status = VehicleStatus.MAINTENANCE
 
     captured = {}
 
@@ -905,7 +1266,6 @@ def test_update_ambulance_vehicle_status_success(
 
 
 def test_update_ambulance_vehicle_status_invalid_payload(
-    app,
     client,
     clinic,
     make_user,
@@ -948,8 +1308,37 @@ def test_update_ambulance_vehicle_status_invalid_payload(
     assert called is False
 
 
+def test_update_ambulance_vehicle_status_rejects_unknown_fields(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.patch(
+        "/api/ambulance/vehicles/1/status",
+        json={
+            "status": VehicleStatus.AVAILABLE.value,
+            "clinic_id": 999,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid request payload"
+
+
 def test_update_ambulance_vehicle_status_domain_error(
-    app,
     client,
     clinic,
     make_user,
@@ -993,7 +1382,6 @@ def test_update_ambulance_vehicle_status_domain_error(
 
 
 def test_update_ambulance_vehicle_status_requires_management_role(
-    app,
     client,
     clinic,
     make_user,
@@ -1014,19 +1402,37 @@ def test_update_ambulance_vehicle_status_requires_management_role(
         headers=headers,
     )
 
-    assert response.status_code in (
-        401,
-        403,
+    assert response.status_code == 403
+
+
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("POST", "/api/ambulance/vehicles"),
+        ("GET", "/api/ambulance/vehicles"),
+        ("GET", "/api/ambulance/vehicles/1"),
+        ("PATCH", "/api/ambulance/vehicles/1/status"),
+    ],
+)
+def test_ambulance_vehicle_routes_require_authentication(
+    client,
+    method,
+    path,
+):
+    response = client.open(
+        path,
+        method=method,
     )
 
-
-# ============================================================
-# AUTHENTICATION / CURRENT CLINIC
-# ============================================================
+    assert response.status_code in (401, 403)
 
 
 def test_create_ambulance_vehicle_rejects_inactive_user(
-    app,
     client,
     clinic,
     make_user,
@@ -1056,8 +1462,54 @@ def test_create_ambulance_vehicle_rejects_inactive_user(
     assert body["error"] == "User account is inactive"
 
 
+def test_update_ambulance_vehicle_status_rejects_inactive_user(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+        is_active=False,
+    )
+
+    vehicle = make_vehicle(
+        vehicle_id=1,
+        clinic_id=clinic.id,
+        status=VehicleStatus.AVAILABLE,
+    )
+
+    service = Mock(return_value=vehicle)
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "set_vehicle_status",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.patch(
+        "/api/ambulance/vehicles/1/status",
+        json={
+            "status": VehicleStatus.AVAILABLE.value,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "User account is inactive"
+
+    service.assert_not_called()
+    
+
 def test_create_ambulance_vehicle_rejects_user_without_clinic(
-    app,
     client,
     make_user,
     auth_headers_for,
@@ -1087,32 +1539,90 @@ def test_create_ambulance_vehicle_rejects_user_without_clinic(
     )
 
 
-def test_get_ambulance_vehicles_rejects_inactive_user(
-    app,
+# ============================================================
+# CLINIC ISOLATION
+# ============================================================
+
+
+def test_create_ambulance_vehicle_uses_authenticated_clinic(
     client,
     clinic,
     make_user,
     auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    vehicle = make_vehicle(
+        clinic_id=clinic.id,
+    )
+
+    service = Mock(return_value=vehicle)
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "create_vehicle",
+        service,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/ambulance/vehicles",
+        json={
+            "plate_number": "AMB-001",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+
+    assert service.call_args.kwargs["clinic_id"] == (
+        clinic.id
+    )
+    assert service.call_args.kwargs["clinic_id"] != 999
+
+
+def test_get_ambulance_vehicles_uses_authenticated_clinic(
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
 ):
     user = make_user(
         clinic=clinic,
         role=Role.AMBULANCE_DISPATCHER,
-        is_active=False,
+    )
+
+    pagination = make_pagination([])
+
+    service = Mock(return_value=pagination)
+
+    monkeypatch.setattr(
+        ambulance_vehicle_routes,
+        "list_vehicles",
+        service,
     )
 
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/ambulance/vehicles?clinic_id=999",
         headers=headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
 
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert body["error"] == "User account is inactive"
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        status=None,
+        page=1,
+        per_page=50,
+    )
 
 
 # ============================================================

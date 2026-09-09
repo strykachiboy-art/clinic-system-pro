@@ -1,21 +1,18 @@
 from flask import (
     Blueprint,
-    g,
     jsonify,
     request,
-    session
 )
+
 from flask_jwt_extended import get_jwt_identity
 
-from app.extensions import db
 from pydantic import ValidationError as PydanticValidationError
+
+from app.extensions import db
 
 from app.core.auth.user.models.user_model import User
 
-from app.core.enums.ambulance_enums import (
-    VehicleStatus,
-)
-
+from app.core.enums.ambulance_enums import VehicleStatus
 from app.core.enums.role_enums import Role
 
 from app.core.exceptions import (
@@ -23,9 +20,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 
-from app.core.utils.decorators import (
-    role_required,
-)
+from app.core.utils.decorators import role_required
 
 from app.modules.ambulance.schemas.ambulance_vehicle_schema import (
     AmbulanceVehicleCreateSchema,
@@ -40,21 +35,11 @@ from app.modules.ambulance.services.ambulance_service import (
 )
 
 
-# ============================================================
-# BLUEPRINT
-# ============================================================
-
-
 vehicle_bp = Blueprint(
     "ambulance_vehicles",
     __name__,
     url_prefix="/api/ambulance/vehicles",
 )
-
-
-# ============================================================
-# ROLE GROUPS
-# ============================================================
 
 
 VEHICLE_MANAGEMENT_ROLES = (
@@ -73,20 +58,28 @@ VEHICLE_VIEW_ROLES = (
 )
 
 
-# ============================================================
-# HELPERS
-# ============================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 
 def _payload(schema):
-    """
-    Validate a JSON request body using the supplied Pydantic
-    schema.
-    """
-    try:
-        return schema.model_validate(
-            request.get_json(silent=True) or {}
+    # Validate request body.
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Request body must be a JSON object",
+                }
+            ),
+            422,
         )
+
+    try:
+        return schema.model_validate(payload)
 
     except PydanticValidationError as exc:
         return (
@@ -102,14 +95,17 @@ def _payload(schema):
 
 
 def _current_user():
-    """
-    Return the authenticated user.
-    """
+    # Resolve authenticated user.
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
     except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    if user_id <= 0:
         raise ValidationError(
             "Invalid authentication identity"
         )
@@ -130,9 +126,7 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    """
-    Return the authenticated user's clinic.
-    """
+    # Resolve authenticated clinic.
     user = _current_user()
 
     if user.clinic_id is None:
@@ -141,13 +135,67 @@ def _current_clinic_id() -> int:
             "with a clinic"
         )
 
+    if user.clinic_id <= 0:
+        raise ValidationError(
+            "Authenticated user has an invalid clinic"
+        )
+
     return user.clinic_id
 
 
+def _get_int_query_param(
+    name: str,
+    *,
+    default: int,
+) -> int:
+    raw_value = request.args.get(name)
+
+    if raw_value is None:
+        return default
+
+    raw_value = raw_value.strip()
+
+    if not raw_value:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    if value <= 0:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    return value
+
+
+def _pagination_params():
+    page = _get_int_query_param(
+        "page",
+        default=DEFAULT_PAGE,
+    )
+
+    per_page = _get_int_query_param(
+        "per_page",
+        default=DEFAULT_PER_PAGE,
+    )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
 def _vehicle_data(vehicle):
-    """
-    Serialize an ambulance vehicle for API responses.
-    """
+    # Serialize vehicle.
     return {
         "id": vehicle.id,
         "clinic_id": vehicle.clinic_id,
@@ -181,11 +229,6 @@ def _vehicle_data(vehicle):
     }
 
 
-# ============================================================
-# CREATE VEHICLE
-# ============================================================
-
-
 @vehicle_bp.post("")
 @role_required(*VEHICLE_MANAGEMENT_ROLES)
 def create_ambulance_vehicle():
@@ -201,12 +244,8 @@ def create_ambulance_vehicle():
 
         data = payload.model_dump()
 
-        # The client must not choose which clinic receives
-        # the vehicle.
-        data.pop(
-            "clinic_id",
-            None,
-        )
+        # Never accept clinic from client.
+        data.pop("clinic_id", None)
 
         vehicle = create_vehicle(
             clinic_id=clinic_id,
@@ -229,46 +268,55 @@ def create_ambulance_vehicle():
         ), exc.status_code
 
 
-# ============================================================
-# LIST VEHICLES
-# ============================================================
-
-
 @vehicle_bp.get("")
 @role_required(*VEHICLE_VIEW_ROLES)
 def get_ambulance_vehicles():
     try:
         clinic_id = _current_clinic_id()
 
-        status_value = request.args.get(
-            "status",
-        )
-
+        status_value = request.args.get("status")
         status = None
 
-        if status_value:
-            try:
-                status = VehicleStatus(
-                    status_value,
+        if status_value is not None:
+            status_value = status_value.strip()
+
+            if not status_value:
+                raise ValidationError(
+                    "Vehicle status cannot be empty"
                 )
+
+            try:
+                status = VehicleStatus(status_value)
             except ValueError:
                 raise ValidationError(
                     f"Invalid vehicle status: "
                     f"{status_value}"
                 )
 
-        vehicles = list_vehicles(
+        page, per_page = _pagination_params()
+
+        pagination = list_vehicles(
             clinic_id=clinic_id,
             status=status,
+            page=page,
+            per_page=per_page,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": [
-                    _vehicle_data(vehicle)
-                    for vehicle in vehicles
-                ],
+                "data": {
+                    "items": [
+                        _vehicle_data(vehicle)
+                        for vehicle in pagination.items
+                    ],
+                    "total": pagination.total,
+                    "page": pagination.page,
+                    "per_page": pagination.per_page,
+                    "pages": pagination.pages,
+                    "has_next": pagination.has_next,
+                    "has_prev": pagination.has_prev,
+                },
             }
         ), 200
 
@@ -279,11 +327,6 @@ def get_ambulance_vehicles():
                 "error": str(exc),
             }
         ), exc.status_code
-
-
-# ============================================================
-# GET VEHICLE
-# ============================================================
 
 
 @vehicle_bp.get("/<int:vehicle_id>")
@@ -312,11 +355,6 @@ def get_ambulance_vehicle(
         ), exc.status_code
 
 
-# ============================================================
-# UPDATE VEHICLE STATUS
-# ============================================================
-
-
 @vehicle_bp.patch("/<int:vehicle_id>/status")
 @role_required(*VEHICLE_MANAGEMENT_ROLES)
 def update_ambulance_vehicle_status(
@@ -330,6 +368,8 @@ def update_ambulance_vehicle_status(
         return payload
 
     try:
+        _current_clinic_id()
+
         vehicle = set_vehicle_status(
             vehicle_id=vehicle_id,
             new_status=payload.status,
