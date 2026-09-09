@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.enums.ward_enums import ReservationStatus
 
@@ -17,7 +19,24 @@ class BedReservationCreateSchema(BaseModel):
         default=None,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 class BedReservationCancelSchema(BaseModel):
@@ -26,19 +45,39 @@ class BedReservationCancelSchema(BaseModel):
         max_length=255,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 class BedReservationResponseSchema(BaseModel):
-    id: int
-    patient_id: int
-    bed_id: int
-    reserved_by_id: int
+    id: int = Field(..., gt=0)
+    patient_id: int = Field(..., gt=0)
+    bed_id: int = Field(..., gt=0)
+    reserved_by_id: int = Field(..., gt=0)
     status: ReservationStatus
-    reason: Optional[str]
+    reason: Optional[str] = None
     reserved_at: datetime
-    expires_at: Optional[datetime]
-    cancelled_at: Optional[datetime]
-    fulfilled_at: Optional[datetime]
+    expires_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    fulfilled_at: Optional[datetime] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+    )

@@ -1,9 +1,25 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    model_validator,
+)
 
-from app.core.enums.reports_enums import ReportFormat, ReportType
+from app.core.enums.reports_enums import (
+    ReportFormat,
+    ReportType,
+)
+
+
+# ---------------------------------------------------------------------------
+# Report filters
+# ---------------------------------------------------------------------------
 
 
 class ReportFiltersSchema(BaseModel):
@@ -17,7 +33,7 @@ class ReportFiltersSchema(BaseModel):
         description="End date for the report data range",
     )
 
-    active_only: bool = Field(
+    active_only: StrictBool = Field(
         default=True,
         description=(
             "Whether inactive records should be excluded "
@@ -25,26 +41,27 @@ class ReportFiltersSchema(BaseModel):
         ),
     )
 
-    @field_validator("date_to")
-    @classmethod
-    def validate_date_range(
-        cls,
-        value: Optional[date],
-        info,
-    ) -> Optional[date]:
-        if value is None:
-            return value
-
-        date_from = info.data.get("date_from")
-
-        if date_from is not None and value < date_from:
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if (
+            self.date_from is not None
+            and self.date_to is not None
+            and self.date_to < self.date_from
+        ):
             raise ValueError(
                 "date_to must be greater than or equal to date_from"
             )
 
-        return value
+        return self
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
 
 
 class ReportGenerateSchema(BaseModel):
@@ -64,9 +81,13 @@ class ReportGenerateSchema(BaseModel):
     )
 
     model_config = ConfigDict(
-        from_attributes=True,
         extra="forbid",
     )
+
+
+# ---------------------------------------------------------------------------
+# Report query
+# ---------------------------------------------------------------------------
 
 
 class ReportQuerySchema(BaseModel):
@@ -102,29 +123,27 @@ class ReportQuerySchema(BaseModel):
         le=100,
     )
 
-    @field_validator("date_to")
-    @classmethod
-    def validate_date_range(
-        cls,
-        value: Optional[date],
-        info,
-    ) -> Optional[date]:
-        if value is None:
-            return value
-
-        date_from = info.data.get("date_from")
-
-        if date_from is not None and value < date_from:
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if (
+            self.date_from is not None
+            and self.date_to is not None
+            and self.date_to < self.date_from
+        ):
             raise ValueError(
                 "date_to must be greater than or equal to date_from"
             )
 
-        return value
+        return self
 
     model_config = ConfigDict(
-        from_attributes=True,
         extra="forbid",
     )
+
+
+# ---------------------------------------------------------------------------
+# Generated report response
+# ---------------------------------------------------------------------------
 
 
 class GeneratedReportResponseSchema(BaseModel):
@@ -138,7 +157,14 @@ class GeneratedReportResponseSchema(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Generated report list response
+# ---------------------------------------------------------------------------
 
 
 class GeneratedReportListResponseSchema(BaseModel):
@@ -147,4 +173,6 @@ class GeneratedReportListResponseSchema(BaseModel):
     page: int
     per_page: int
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+    )

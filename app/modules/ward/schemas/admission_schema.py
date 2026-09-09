@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AdmissionCreateSchema(BaseModel):
@@ -11,7 +13,24 @@ class AdmissionCreateSchema(BaseModel):
         max_length=255,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 class AdmissionFromReservationSchema(BaseModel):
@@ -20,7 +39,24 @@ class AdmissionFromReservationSchema(BaseModel):
         max_length=255,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 class AdmissionDischargeSchema(BaseModel):
@@ -29,7 +65,24 @@ class AdmissionDischargeSchema(BaseModel):
         max_length=255,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
 
 
 class AdmissionTransferSchema(BaseModel):
@@ -39,4 +92,21 @@ class AdmissionTransferSchema(BaseModel):
         max_length=255,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None

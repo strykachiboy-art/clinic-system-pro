@@ -16,10 +16,7 @@ from app.core.enums.audit_enums import AuditAction
 from app.core.enums.reports_enums import ReportFormat, ReportType
 from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import StaffStatus
-from app.core.exceptions import (
-    NotFoundError,
-    ValidationError,
-)
+from app.core.exceptions import DomainError, NotFoundError, ValidationError
 from app.core.utils.decorators import transactional
 
 from app.modules.appointment.models.appointment_model import Appointment
@@ -83,10 +80,12 @@ _UNSUPPORTED_TYPES = {
 
 
 def _utcnow() -> datetime:
+    """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
 
 def _iso(value: Any) -> str | None:
+    """Serialize date/datetime values to ISO format."""
     if value is None:
         return None
 
@@ -100,31 +99,29 @@ def _iso(value: Any) -> str | None:
 
 
 def _enum_value(value: Any) -> Any:
-    if value is None:
-        return None
-
+    """Return the underlying enum value when applicable."""
     return getattr(value, "value", value)
 
 
-def _decimal_value(value: Any) -> Decimal | None:
+def _decimal_value(value: Any) -> Decimal:
     """
-    Preserve monetary precision.
-
-    Reports should not convert database Decimal values to float because
-    binary floating-point can introduce rounding errors in financial data.
+    Preserve monetary precision using Decimal.
     """
-    if value is None:
-        return None
-
     if isinstance(value, Decimal):
         return value
 
     return Decimal(str(value))
 
 
+# ---------------------------------------------------------------------------
+# Report type / format coercion
+# ---------------------------------------------------------------------------
+
+
 def _coerce_report_type(
     value: ReportType | str,
 ) -> ReportType:
+    """Coerce a report type into ReportType."""
     if isinstance(value, ReportType):
         return value
 
@@ -139,6 +136,7 @@ def _coerce_report_type(
 def _coerce_report_format(
     value: ReportFormat | str,
 ) -> ReportFormat:
+    """Coerce a report format into ReportFormat."""
     if isinstance(value, ReportFormat):
         return value
 
@@ -150,131 +148,208 @@ def _coerce_report_format(
         ) from exc
 
 
+# ---------------------------------------------------------------------------
+# Filter normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_filter_date(
+    field: str,
+    value: Any,
+) -> date | datetime:
+    """
+    Normalize a report filter date.
+
+    ISO date strings become date objects.
+    ISO datetime strings become datetime objects.
+    Existing date/datetime values are preserved.
+    """
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, str):
+        try:
+            if len(value) == 10:
+                return date.fromisoformat(value)
+
+            return datetime.fromisoformat(value)
+
+        except ValueError as exc:
+            raise ValidationError(
+                f"Invalid {field} value"
+            ) from exc
+
+    raise ValidationError(
+        f"Invalid {field} value"
+    )
+
+
+def _compare_filter_dates(
+    date_from: date | datetime,
+    date_to: date | datetime,
+) -> bool:
+    """
+    Compare date/datetime filter values safely.
+
+    Date-only values are treated as calendar dates.
+    Datetime values are compared as datetimes.
+    Mixed date/datetime values are normalized to midnight
+    for the date-only side.
+    """
+    if isinstance(date_from, datetime):
+        normalized_from = date_from
+    else:
+        normalized_from = datetime.combine(
+            date_from,
+            time.min,
+        )
+
+    if isinstance(date_to, datetime):
+        normalized_to = date_to
+    else:
+        normalized_to = datetime.combine(
+            date_to,
+            time.min,
+        )
+
+    return normalized_to < normalized_from
+
+
 def _normalize_filters(
     filters: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not filters:
+    """
+    Validate and normalize report filters.
+    """
+    if filters is None:
         return {}
 
     if not isinstance(filters, dict):
         raise ValidationError(
-            "Report filters must be an object"
+            "Report filters must be a dictionary"
         )
 
     unknown_fields = set(filters) - ALLOWED_FILTER_FIELDS
 
     if unknown_fields:
-        unknown = ", ".join(
-            sorted(str(field) for field in unknown_fields)
-        )
         raise ValidationError(
-            f"Unsupported report filter(s): {unknown}"
+            "Unsupported report filter(s): "
+            + ", ".join(
+                sorted(
+                    str(field)
+                    for field in unknown_fields
+                )
+            )
         )
 
     normalized: dict[str, Any] = {}
 
-    for key, value in filters.items():
-        if value is None:
-            continue
+    if "active_only" in filters:
+        active_only = filters["active_only"]
 
-        if key == "active_only":
-            if not isinstance(value, bool):
-                raise ValidationError(
-                    "active_only must be a boolean"
-                )
-
-            normalized[key] = value
-            continue
-
-        if key in DATE_FIELDS:
-            if isinstance(value, datetime):
-                normalized[key] = value
-                continue
-
-            if isinstance(value, date):
-                normalized[key] = value
-                continue
-
-            if isinstance(value, str):
-                if len(value) == 10:
-                    try:
-                        normalized[key] = date.fromisoformat(
-                            value
-                        )
-                        continue
-                    except ValueError:
-                        pass
-
-                try:
-                    normalized[key] = datetime.fromisoformat(
-                        value
-                    )
-                    continue
-                except ValueError as exc:
-                    raise ValidationError(
-                        f"Invalid {key} value: {value}"
-                    ) from exc
-
+        if isinstance(active_only, bool):
+            normalized["active_only"] = active_only
+        else:
             raise ValidationError(
-                f"Invalid {key} value"
+                "active_only must be a boolean"
             )
+
+    for field in DATE_FIELDS:
+        if field not in filters:
+            continue
+
+        normalized[field] = _normalize_filter_date(
+            field,
+            filters[field],
+        )
 
     date_from = normalized.get("date_from")
     date_to = normalized.get("date_to")
 
-    if (
-        date_from is not None
-        and date_to is not None
-        and date_to < date_from
-    ):
-        raise ValidationError(
-            "date_to must be greater than or equal to date_from"
-        )
+    if date_from is not None and date_to is not None:
+        if _compare_filter_dates(
+            date_from,
+            date_to,
+        ):
+            raise ValidationError(
+                "date_to must be greater than or equal to date_from"
+            )
 
     return normalized
 
 
 def _serialize_filters(
-    filters: dict[str, Any] | None,
+    filters: dict[str, Any],
 ) -> dict[str, Any]:
-    if not filters:
-        return {}
-
+    """
+    Serialize filters into JSON-safe values.
+    """
     serialized: dict[str, Any] = {}
 
     for key, value in filters.items():
         if isinstance(value, datetime):
             serialized[key] = value.isoformat()
+
         elif isinstance(value, date):
             serialized[key] = value.isoformat()
+
         elif isinstance(value, Decimal):
             serialized[key] = str(value)
+
         elif hasattr(value, "value"):
             serialized[key] = value.value
+
         else:
             serialized[key] = value
 
     return serialized
 
 
+# ---------------------------------------------------------------------------
+# Datetime filtering
+# ---------------------------------------------------------------------------
+
+
 def _apply_datetime_range(
     query,
     column,
-    *,
     date_from: date | datetime | None = None,
     date_to: date | datetime | None = None,
 ):
+    """
+    Apply an inclusive date-range request using a half-open DB interval.
+
+    date_from:
+        inclusive
+
+    date_to:
+        inclusive when supplied as a date or midnight datetime.
+
+    Examples:
+
+        date_from=2026-09-01
+        becomes:
+            column >= 2026-09-01 00:00:00
+
+        date_to=2026-09-08
+        becomes:
+            column < 2026-09-09 00:00:00
+
+        date_to=2026-09-08T14:30:00
+        becomes:
+            column < 2026-09-08 14:30:00
+    """
     if date_from is not None:
-        if isinstance(date_from, date) and not isinstance(
-            date_from,
-            datetime,
-        ):
+        if isinstance(date_from, datetime):
+            start_datetime = date_from
+        else:
             start_datetime = datetime.combine(
                 date_from,
                 time.min,
             )
-        else:
-            start_datetime = date_from
 
         query = query.filter(
             column >= start_datetime
@@ -282,15 +357,14 @@ def _apply_datetime_range(
 
     if date_to is not None:
         if isinstance(date_to, datetime):
-            if (
-                date_to.hour == 0
-                and date_to.minute == 0
-                and date_to.second == 0
-                and date_to.microsecond == 0
-            ):
-                end_datetime = date_to + timedelta(days=1)
-            else:
-                end_datetime = date_to
+            end_datetime = date_to
+
+            if date_to.time() == time.min:
+                end_datetime = (
+                    date_to
+                    + timedelta(days=1)
+                )
+
         else:
             end_datetime = datetime.combine(
                 date_to + timedelta(days=1),
@@ -305,7 +379,7 @@ def _apply_datetime_range(
 
 
 # ---------------------------------------------------------------------------
-# Authentication / authorization helpers
+# Authentication / authorization
 # ---------------------------------------------------------------------------
 
 
@@ -313,22 +387,24 @@ def _get_requester(
     requester_user_id: int,
 ) -> Staff:
     """
-    Resolve the authenticated actor:
+    Resolve and validate the authenticated requester.
 
-        JWT identity
-            -> User
-            -> Staff
+    The requester must:
 
-    The authenticated User.id is the only trusted actor identity.
+    - have a valid positive integer ID
+    - exist
+    - have an active account
+    - have an associated Staff record
+    - have active staff status
+    - have matching clinic assignments when both are present
     """
-    if not isinstance(requester_user_id, int):
+    if (
+        isinstance(requester_user_id, bool)
+        or not isinstance(requester_user_id, int)
+        or requester_user_id <= 0
+    ):
         raise ValidationError(
-            "Invalid authenticated user identity"
-        )
-
-    if requester_user_id <= 0:
-        raise ValidationError(
-            "Invalid authenticated user identity"
+            "requester_user_id must be a positive integer"
         )
 
     user = db.session.get(
@@ -341,19 +417,31 @@ def _get_requester(
             "Authenticated user not found"
         )
 
-    if not user.is_active:
+    if not getattr(
+        user,
+        "is_active",
+        True,
+    ):
         raise ValidationError(
             "Authenticated user account is inactive"
         )
 
-    staff = user.staff
+    staff = getattr(
+        user,
+        "staff",
+        None,
+    )
 
     if staff is None:
         raise ValidationError(
-            "Authenticated user is not linked to a staff record"
+            "Authenticated user is not associated with staff"
         )
 
-    if staff.status != StaffStatus.ACTIVE:
+    if _enum_value(
+        staff.status
+    ) != _enum_value(
+        StaffStatus.ACTIVE
+    ):
         raise ValidationError(
             f"Staff {staff.id} is inactive"
         )
@@ -376,7 +464,8 @@ def _get_requester(
         and user_clinic_id != staff_clinic_id
     ):
         raise ValidationError(
-            "Authenticated user and staff clinic assignments do not match"
+            "Authenticated user and staff clinic assignments "
+            "do not match"
         )
 
     return staff
@@ -386,17 +475,23 @@ def _get_requester_clinic_id(
     requester: Staff,
 ) -> int | None:
     """
-    Resolve the authenticated staff member's clinic.
-
-    The User and Staff assignments must agree whenever both exist.
+    Resolve the requester's effective clinic.
     """
-    user = requester.user
-
-    user_clinic_id = getattr(
-        user,
-        "clinic_id",
+    user = getattr(
+        requester,
+        "user",
         None,
-    ) if user is not None else None
+    )
+
+    user_clinic_id = (
+        getattr(
+            user,
+            "clinic_id",
+            None,
+        )
+        if user is not None
+        else None
+    )
 
     staff_clinic_id = getattr(
         requester,
@@ -410,7 +505,8 @@ def _get_requester_clinic_id(
         and user_clinic_id != staff_clinic_id
     ):
         raise ValidationError(
-            "Authenticated user and staff clinic assignments do not match"
+            "Authenticated user and staff clinic assignments "
+            "do not match"
         )
 
     clinic_id = (
@@ -422,16 +518,24 @@ def _get_requester_clinic_id(
     if clinic_id is None:
         return None
 
+    if isinstance(
+        clinic_id,
+        bool,
+    ):
+        raise ValidationError(
+            "Invalid authenticated clinic assignment"
+        )
+
     try:
         clinic_id = int(clinic_id)
     except (TypeError, ValueError) as exc:
         raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
+            "Invalid authenticated clinic assignment"
         ) from exc
 
     if clinic_id <= 0:
         raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
+            "Invalid authenticated clinic assignment"
         )
 
     return clinic_id
@@ -440,7 +544,14 @@ def _get_requester_clinic_id(
 def _get_clinic(
     clinic_id: int,
 ) -> Clinic:
-    if not isinstance(clinic_id, int) or clinic_id <= 0:
+    """
+    Resolve a clinic by primary key.
+    """
+    if (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
         raise ValidationError(
             "clinic_id must be greater than zero"
         )
@@ -461,17 +572,34 @@ def _get_clinic(
 def _clinic_is_active(
     clinic: Clinic,
 ) -> bool:
-    return _enum_value(
-        getattr(clinic, "status", None)
-    ) == "active"
+    """
+    Return whether the clinic is active.
+    """
+    return (
+        _enum_value(
+            getattr(
+                clinic,
+                "status",
+                None,
+            )
+        )
+        == "active"
+    )
 
 
 def _require_active_clinic(
     clinic_id: int,
 ) -> Clinic:
-    clinic = _get_clinic(clinic_id)
+    """
+    Require an existing active clinic.
+    """
+    clinic = _get_clinic(
+        clinic_id
+    )
 
-    if not _clinic_is_active(clinic):
+    if not _clinic_is_active(
+        clinic
+    ):
         raise ValidationError(
             f"Clinic {clinic.id} is inactive"
         )
@@ -480,96 +608,157 @@ def _require_active_clinic(
 
 
 def _resolve_clinic_scope(
-    *,
     requester: Staff,
     requested_clinic_id: int | None,
 ) -> int | None:
     """
-    Determine the clinic scope available to the requester.
+    Resolve the clinic scope available to the requester.
 
     Admin:
-        - may explicitly select a clinic;
-        - may omit clinic_id for system-wide report access.
+        - may explicitly select a clinic
+        - may omit clinic_id for system-wide access
 
     Non-admin:
-        - must belong to a clinic;
-        - omitted clinic_id means their own clinic;
-        - another clinic is rejected.
+        - is always restricted to their own clinic
     """
-    user = requester.user
+    user = getattr(
+        requester,
+        "user",
+        None,
+    )
 
-    if user is not None and user.role == Role.ADMIN:
-        if requested_clinic_id is not None:
-            _get_clinic(requested_clinic_id)
+    role = getattr(
+        user,
+        "role",
+        None,
+    )
+
+    is_admin = (
+        _enum_value(role)
+        == _enum_value(Role.ADMIN)
+    )
+
+    if is_admin:
+        if requested_clinic_id is None:
+            return None
+
+        if (
+            isinstance(
+                requested_clinic_id,
+                bool,
+            )
+            or not isinstance(
+                requested_clinic_id,
+                int,
+            )
+            or requested_clinic_id <= 0
+        ):
+            raise ValidationError(
+                "clinic_id must be greater than zero"
+            )
+
+        _get_clinic(
+            requested_clinic_id
+        )
 
         return requested_clinic_id
 
-    requester_clinic_id = _get_requester_clinic_id(
-        requester
+    requester_clinic_id = (
+        _get_requester_clinic_id(
+            requester
+        )
     )
 
     if requester_clinic_id is None:
         raise ValidationError(
-            f"Staff {requester.id} is not assigned to a clinic"
+            "Authenticated staff is not assigned to a clinic"
         )
 
     if requested_clinic_id is None:
         return requester_clinic_id
 
-    if requested_clinic_id != requester_clinic_id:
+    if (
+        isinstance(
+            requested_clinic_id,
+            bool,
+        )
+        or not isinstance(
+            requested_clinic_id,
+            int,
+        )
+        or requested_clinic_id <= 0
+    ):
         raise ValidationError(
-            "You are not authorized to access reports for "
-            f"clinic {requested_clinic_id}"
+            "clinic_id must be greater than zero"
+        )
+
+    if (
+        requested_clinic_id
+        != requester_clinic_id
+    ):
+        raise ValidationError(
+            "Unauthorized clinic access"
         )
 
     return requester_clinic_id
 
 
 def _validate_report_generator(
-    *,
     requester: Staff,
     clinic_id: int,
 ) -> Staff:
     """
-    The authenticated staff member is always the generator.
-
-    generated_by_id is never accepted from the client.
+    Validate that the authenticated requester may generate
+    a report for the requested clinic.
     """
-    if not isinstance(clinic_id, int):
-        raise ValidationError(
-            "clinic_id must be an integer"
-        )
-
-    if clinic_id <= 0:
+    if (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
         raise ValidationError(
             "clinic_id must be greater than zero"
         )
 
-    user = requester.user
+    user = getattr(
+        requester,
+        "user",
+        None,
+    )
 
-    if user is not None and user.role == Role.ADMIN:
+    role = getattr(
+        user,
+        "role",
+        None,
+    )
+
+    if (
+        _enum_value(role)
+        == _enum_value(Role.ADMIN)
+    ):
         return requester
 
-    requester_clinic_id = _get_requester_clinic_id(
-        requester
+    requester_clinic_id = (
+        _get_requester_clinic_id(
+            requester
+        )
     )
 
     if requester_clinic_id is None:
         raise ValidationError(
-            f"Staff {requester.id} is not assigned to a clinic"
+            "Authenticated staff is not assigned to a clinic"
         )
 
     if requester_clinic_id != clinic_id:
         raise ValidationError(
-            f"Staff {requester.id} is not authorized to generate "
-            f"reports for clinic {clinic_id}"
+            "Unauthorized clinic access"
         )
 
     return requester
 
 
 # ---------------------------------------------------------------------------
-# Report gathering
+# Report gatherers
 # ---------------------------------------------------------------------------
 
 
@@ -581,38 +770,54 @@ def _gather_patients(
         Patient.clinic_id == clinic_id
     )
 
-    if filters.get("active_only") is True:
-        if hasattr(Patient, "is_active"):
-            query = query.filter(
-                Patient.is_active.is_(True)
-            )
+    if (
+        filters.get("active_only") is True
+        and hasattr(
+            Patient,
+            "is_active",
+        )
+    ):
+        query = query.filter(
+            Patient.is_active.is_(True)
+        )
 
-    if hasattr(Patient, "created_at"):
+    if hasattr(
+        Patient,
+        "created_at",
+    ):
         query = _apply_datetime_range(
             query,
             Patient.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    patients = query.order_by(
+    query = query.order_by(
         Patient.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": patient.id,
-            "clinic_id": patient.clinic_id,
-            "first_name": patient.first_name,
-            "last_name": patient.last_name,
-            "email": patient.email,
-            "phone": patient.phone,
-            "created_at": _iso(
-                getattr(patient, "created_at", None)
-            ),
-        }
-        for patient in patients
-    ]
+    rows: list[dict[str, Any]] = []
+
+    for patient in query.all():
+        rows.append(
+            {
+                "id": patient.id,
+                "clinic_id": patient.clinic_id,
+                "first_name": patient.first_name,
+                "last_name": patient.last_name,
+                "email": patient.email,
+                "phone": patient.phone,
+                "created_at": _iso(
+                    getattr(
+                        patient,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_staff(
@@ -623,39 +828,91 @@ def _gather_staff(
         Staff.clinic_id == clinic_id
     )
 
-    if filters.get("active_only") is True:
+    if filters.get(
+        "active_only"
+    ) is True:
         query = query.filter(
-            Staff.status == StaffStatus.ACTIVE
+            Staff.status
+            == StaffStatus.ACTIVE
         )
 
-    if hasattr(Staff, "created_at"):
+    if hasattr(
+        Staff,
+        "created_at",
+    ):
         query = _apply_datetime_range(
             query,
             Staff.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    staff_members = query.order_by(
+    query = query.order_by(
         Staff.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": staff.id,
-            "clinic_id": staff.clinic_id,
-            "user_id": staff.user_id,
-            "first_name": staff.first_name,
-            "last_name": staff.last_name,
-            "specialty": staff.specialty,
-            "phone": staff.phone,
-            "email": staff.email,
-            "status": _enum_value(staff.status),
-            "hired_at": _iso(staff.hired_at),
-            "created_at": _iso(staff.created_at),
-        }
-        for staff in staff_members
-    ]
+    rows: list[dict[str, Any]] = []
+
+    for staff in query.all():
+        rows.append(
+            {
+                "id": staff.id,
+                "clinic_id": staff.clinic_id,
+                "user_id": getattr(
+                    staff,
+                    "user_id",
+                    None,
+                ),
+                "first_name": getattr(
+                    staff,
+                    "first_name",
+                    None,
+                ),
+                "last_name": getattr(
+                    staff,
+                    "last_name",
+                    None,
+                ),
+                "specialty": getattr(
+                    staff,
+                    "specialty",
+                    None,
+                ),
+                "phone": getattr(
+                    staff,
+                    "phone",
+                    None,
+                ),
+                "email": getattr(
+                    staff,
+                    "email",
+                    None,
+                ),
+                "status": _enum_value(
+                    getattr(
+                        staff,
+                        "status",
+                        None,
+                    )
+                ),
+                "hired_at": _iso(
+                    getattr(
+                        staff,
+                        "hired_at",
+                        None,
+                    )
+                ),
+                "created_at": _iso(
+                    getattr(
+                        staff,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_appointments(
@@ -666,51 +923,70 @@ def _gather_appointments(
         Appointment.clinic_id == clinic_id
     )
 
-    if hasattr(Appointment, "scheduled_start"):
+    if hasattr(
+        Appointment,
+        "scheduled_start",
+    ):
         query = _apply_datetime_range(
             query,
             Appointment.scheduled_start,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    appointments = query.order_by(
+    query = query.order_by(
         Appointment.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": appointment.id,
-            "clinic_id": appointment.clinic_id,
-            "patient_id": appointment.patient_id,
-            "staff_id": appointment.staff_id,
-            "status": _enum_value(
-                getattr(appointment, "status", None)
-            ),
-            "scheduled_start": _iso(
-                getattr(
+    rows: list[dict[str, Any]] = []
+
+    for appointment in query.all():
+        rows.append(
+            {
+                "id": appointment.id,
+                "clinic_id": appointment.clinic_id,
+                "patient_id": getattr(
                     appointment,
-                    "scheduled_start",
+                    "patient_id",
                     None,
-                )
-            ),
-            "scheduled_end": _iso(
-                getattr(
+                ),
+                "staff_id": getattr(
                     appointment,
-                    "scheduled_end",
+                    "staff_id",
                     None,
-                )
-            ),
-            "created_at": _iso(
-                getattr(
-                    appointment,
-                    "created_at",
-                    None,
-                )
-            ),
-        }
-        for appointment in appointments
-    ]
+                ),
+                "status": _enum_value(
+                    getattr(
+                        appointment,
+                        "status",
+                        None,
+                    )
+                ),
+                "scheduled_start": _iso(
+                    getattr(
+                        appointment,
+                        "scheduled_start",
+                        None,
+                    )
+                ),
+                "scheduled_end": _iso(
+                    getattr(
+                        appointment,
+                        "scheduled_end",
+                        None,
+                    )
+                ),
+                "created_at": _iso(
+                    getattr(
+                        appointment,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_billing(
@@ -721,50 +997,80 @@ def _gather_billing(
         Invoice.clinic_id == clinic_id
     )
 
-    if hasattr(Invoice, "created_at"):
+    if hasattr(
+        Invoice,
+        "created_at",
+    ):
         query = _apply_datetime_range(
             query,
             Invoice.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    invoices = query.order_by(
+    query = query.order_by(
         Invoice.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": invoice.id,
-            "clinic_id": invoice.clinic_id,
-            "patient_id": getattr(
+    rows: list[dict[str, Any]] = []
+
+    for invoice in query.all():
+        total_amount = _decimal_value(
+            getattr(
                 invoice,
-                "patient_id",
-                None,
-            ),
-            "invoice_number": getattr(
+                "total_amount",
+                0,
+            )
+        )
+
+        amount_paid = _decimal_value(
+            getattr(
                 invoice,
-                "invoice_number",
-                None,
-            ),
-            "status": _enum_value(
-                getattr(invoice, "status", None)
-            ),
-            "total_amount": _decimal_value(
-                getattr(invoice, "total_amount", None)
-            ),
-            "amount_paid": _decimal_value(
-                getattr(invoice, "amount_paid", None)
-            ),
-            "balance": _decimal_value(
-                getattr(invoice, "balance", None)
-            ),
-            "created_at": _iso(
-                getattr(invoice, "created_at", None)
-            ),
-        }
-        for invoice in invoices
-    ]
+                "amount_paid",
+                0,
+            )
+        )
+
+        balance = (
+            total_amount
+            - amount_paid
+        )
+
+        rows.append(
+            {
+                "id": invoice.id,
+                "clinic_id": invoice.clinic_id,
+                "patient_id": getattr(
+                    invoice,
+                    "patient_id",
+                    None,
+                ),
+                "invoice_number": getattr(
+                    invoice,
+                    "invoice_number",
+                    None,
+                ),
+                "status": _enum_value(
+                    getattr(
+                        invoice,
+                        "status",
+                        None,
+                    )
+                ),
+                "total_amount": total_amount,
+                "amount_paid": amount_paid,
+                "balance": balance,
+                "created_at": _iso(
+                    getattr(
+                        invoice,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_lab(
@@ -775,57 +1081,68 @@ def _gather_lab(
         LabOrder.clinic_id == clinic_id
     )
 
-    if hasattr(LabOrder, "created_at"):
+    if hasattr(
+        LabOrder,
+        "created_at",
+    ):
         query = _apply_datetime_range(
             query,
             LabOrder.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    orders = query.order_by(
+    query = query.order_by(
         LabOrder.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": order.id,
-            "clinic_id": order.clinic_id,
-            "patient_id": getattr(
-                order,
-                "patient_id",
-                None,
-            ),
-            "ordered_by_id": getattr(
-                order,
-                "ordered_by_id",
-                None,
-            ),
-            "status": _enum_value(
-                getattr(order, "status", None)
-            ),
-            "test_name": getattr(
-                order,
-                "test_name",
-                None,
-            ),
-            "completed_at": _iso(
-                getattr(
+    rows: list[dict[str, Any]] = []
+
+    for order in query.all():
+        rows.append(
+            {
+                "id": order.id,
+                "clinic_id": order.clinic_id,
+                "patient_id": getattr(
                     order,
-                    "completed_at",
+                    "patient_id",
                     None,
-                )
-            ),
-            "created_at": _iso(
-                getattr(
+                ),
+                "ordered_by_id": getattr(
                     order,
-                    "created_at",
+                    "ordered_by_id",
                     None,
-                )
-            ),
-        }
-        for order in orders
-    ]
+                ),
+                "status": _enum_value(
+                    getattr(
+                        order,
+                        "status",
+                        None,
+                    )
+                ),
+                "test_name": getattr(
+                    order,
+                    "test_name",
+                    None,
+                ),
+                "completed_at": _iso(
+                    getattr(
+                        order,
+                        "completed_at",
+                        None,
+                    )
+                ),
+                "created_at": _iso(
+                    getattr(
+                        order,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_pharmacy(
@@ -836,67 +1153,79 @@ def _gather_pharmacy(
         Drug.clinic_id == clinic_id
     )
 
-    if filters.get("active_only") is True:
-        if hasattr(Drug, "is_active"):
-            query = query.filter(
-                Drug.is_active.is_(True)
-            )
+    if (
+        filters.get("active_only") is True
+        and hasattr(
+            Drug,
+            "is_active",
+        )
+    ):
+        query = query.filter(
+            Drug.is_active.is_(True)
+        )
 
-    if hasattr(Drug, "created_at"):
+    if hasattr(
+        Drug,
+        "created_at",
+    ):
         query = _apply_datetime_range(
             query,
             Drug.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    drugs = query.order_by(
+    query = query.order_by(
         Drug.id.asc()
-    ).all()
+    )
 
-    return [
-        {
-            "id": drug.id,
-            "clinic_id": drug.clinic_id,
-            "name": getattr(
-                drug,
-                "name",
-                None,
-            ),
-            "generic_name": getattr(
-                drug,
-                "generic_name",
-                None,
-            ),
-            "quantity": getattr(
-                drug,
-                "quantity",
-                None,
-            ),
-            "unit_price": _decimal_value(
-                getattr(
+    rows: list[dict[str, Any]] = []
+
+    for drug in query.all():
+        rows.append(
+            {
+                "id": drug.id,
+                "clinic_id": drug.clinic_id,
+                "name": getattr(
                     drug,
-                    "unit_price",
+                    "name",
                     None,
-                )
-            ),
-            "expiry_date": _iso(
-                getattr(
+                ),
+                "generic_name": getattr(
                     drug,
-                    "expiry_date",
+                    "generic_name",
                     None,
-                )
-            ),
-            "created_at": _iso(
-                getattr(
+                ),
+                "quantity": getattr(
                     drug,
-                    "created_at",
+                    "quantity",
                     None,
-                )
-            ),
-        }
-        for drug in drugs
-    ]
+                ),
+                "unit_price": _decimal_value(
+                    getattr(
+                        drug,
+                        "unit_price",
+                        0,
+                    )
+                ),
+                "expiry_date": _iso(
+                    getattr(
+                        drug,
+                        "expiry_date",
+                        None,
+                    )
+                ),
+                "created_at": _iso(
+                    getattr(
+                        drug,
+                        "created_at",
+                        None,
+                    )
+                ),
+            }
+        )
+
+    return rows
 
 
 def _gather_ward(
@@ -907,39 +1236,47 @@ def _gather_ward(
         Ward.clinic_id == clinic_id
     )
 
-    if filters.get("active_only") is True:
-        if hasattr(Ward, "is_active"):
-            ward_query = ward_query.filter(
-                Ward.is_active.is_(True)
-            )
+    if (
+        filters.get("active_only") is True
+        and hasattr(
+            Ward,
+            "is_active",
+        )
+    ):
+        ward_query = ward_query.filter(
+            Ward.is_active.is_(True)
+        )
 
-    if hasattr(Ward, "created_at"):
+    if hasattr(
+        Ward,
+        "created_at",
+    ):
         ward_query = _apply_datetime_range(
             ward_query,
             Ward.created_at,
-            date_from=filters.get("date_from"),
-            date_to=filters.get("date_to"),
+            filters.get("date_from"),
+            filters.get("date_to"),
         )
 
-    wards = (
-        ward_query
-        .order_by(Ward.id.asc())
-        .all()
+    ward_query = ward_query.order_by(
+        Ward.id.asc()
     )
 
     rows: list[dict[str, Any]] = []
 
-    for ward in wards:
+    for ward in ward_query.all():
         beds = (
             Bed.query
             .filter(
                 Bed.ward_id == ward.id
             )
-            .order_by(Bed.id.asc())
+            .order_by(
+                Bed.id.asc()
+            )
             .all()
         )
 
-        admission_query = (
+        admissions_query = (
             Admission.query
             .join(
                 Bed,
@@ -950,17 +1287,24 @@ def _gather_ward(
             )
         )
 
-        if hasattr(Admission, "created_at"):
-            admission_query = _apply_datetime_range(
-                admission_query,
-                Admission.created_at,
-                date_from=filters.get("date_from"),
-                date_to=filters.get("date_to"),
+        if hasattr(
+            Admission,
+            "created_at",
+        ):
+            admissions_query = (
+                _apply_datetime_range(
+                    admissions_query,
+                    Admission.created_at,
+                    filters.get("date_from"),
+                    filters.get("date_to"),
+                )
             )
 
-        admissions = admission_query.all()
+        admissions = (
+            admissions_query.all()
+        )
 
-        reservation_query = (
+        reservations_query = (
             BedReservation.query
             .join(
                 Bed,
@@ -971,54 +1315,75 @@ def _gather_ward(
             )
         )
 
-        if hasattr(BedReservation, "created_at"):
-            reservation_query = _apply_datetime_range(
-                reservation_query,
-                BedReservation.created_at,
-                date_from=filters.get("date_from"),
-                date_to=filters.get("date_to"),
+        if hasattr(
+            BedReservation,
+            "created_at",
+        ):
+            reservations_query = (
+                _apply_datetime_range(
+                    reservations_query,
+                    BedReservation.created_at,
+                    filters.get("date_from"),
+                    filters.get("date_to"),
+                )
             )
 
-        reservations = reservation_query.all()
+        reservations = (
+            reservations_query.all()
+        )
+
+        available_count = 0
+        occupied_count = 0
+        reserved_count = 0
+        maintenance_count = 0
+
+        for bed in beds:
+            status = _enum_value(
+                getattr(
+                    bed,
+                    "status",
+                    None,
+                )
+            )
+
+            if status == "available":
+                available_count += 1
+
+            elif status == "occupied":
+                occupied_count += 1
+
+            elif status == "reserved":
+                reserved_count += 1
+
+            elif status == "maintenance":
+                maintenance_count += 1
 
         rows.append(
             {
                 "ward_id": ward.id,
                 "clinic_id": ward.clinic_id,
-                "ward_name": ward.name,
+                "ward_name": getattr(
+                    ward,
+                    "name",
+                    None,
+                ),
                 "ward_type": _enum_value(
-                    ward.ward_type
+                    getattr(
+                        ward,
+                        "ward_type",
+                        None,
+                    )
                 ),
-                "capacity": ward.capacity,
+                "capacity": getattr(
+                    ward,
+                    "capacity",
+                    None,
+                ),
                 "total_beds": len(beds),
-                "beds_available": sum(
-                    1
-                    for bed in beds
-                    if _enum_value(
-                        bed.status
-                    ) == "available"
-                ),
-                "beds_occupied": sum(
-                    1
-                    for bed in beds
-                    if _enum_value(
-                        bed.status
-                    ) == "occupied"
-                ),
-                "beds_reserved": sum(
-                    1
-                    for bed in beds
-                    if _enum_value(
-                        bed.status
-                    ) == "reserved"
-                ),
-                "beds_maintenance": sum(
-                    1
-                    for bed in beds
-                    if _enum_value(
-                        bed.status
-                    ) == "maintenance"
-                ),
+                "available_beds": available_count,
+                "occupied_beds": occupied_count,
+                "reserved_beds": reserved_count,
+                "maintenance_beds": maintenance_count,
                 "admissions": len(admissions),
                 "reservations": len(reservations),
                 "created_at": _iso(
@@ -1053,12 +1418,12 @@ def _gather_overview(
         filters,
     )
 
-    invoices = _gather_billing(
+    billing = _gather_billing(
         clinic_id,
         filters,
     )
 
-    lab_orders = _gather_lab(
+    lab = _gather_lab(
         clinic_id,
         filters,
     )
@@ -1068,23 +1433,31 @@ def _gather_overview(
         filters,
     )
 
-    wards = _gather_ward(
+    ward = _gather_ward(
         clinic_id,
         filters,
     )
 
     total_billed = sum(
         (
-            row["total_amount"] or Decimal("0")
-            for row in invoices
+            row["total_amount"]
+            for row in billing
         ),
         Decimal("0"),
     )
 
     total_paid = sum(
         (
-            row["amount_paid"] or Decimal("0")
-            for row in invoices
+            row["amount_paid"]
+            for row in billing
+        ),
+        Decimal("0"),
+    )
+
+    outstanding_balance = sum(
+        (
+            row["balance"]
+            for row in billing
         ),
         Decimal("0"),
     )
@@ -1095,15 +1468,13 @@ def _gather_overview(
             "patients": len(patients),
             "staff": len(staff),
             "appointments": len(appointments),
-            "invoices": len(invoices),
-            "lab_orders": len(lab_orders),
-            "drugs": len(pharmacy),
-            "wards": len(wards),
+            "billing_records": len(billing),
+            "lab_orders": len(lab),
+            "pharmacy_items": len(pharmacy),
+            "wards": len(ward),
             "total_billed": total_billed,
             "total_paid": total_paid,
-            "outstanding_balance": (
-                total_billed - total_paid
-            ),
+            "outstanding_balance": outstanding_balance,
         }
     ]
 
@@ -1127,21 +1498,42 @@ _GATHERERS: dict[
 
 
 # ---------------------------------------------------------------------------
-# Writers
+# Report writers
 # ---------------------------------------------------------------------------
 
 
-def _writer_value(value: Any) -> Any:
-    value = _enum_value(value)
-
-    if isinstance(value, Decimal):
-        return str(value)
-
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-
+def _writer_value(
+    value: Any,
+) -> Any:
+    """
+    Convert values into writer-safe representations.
+    """
     if value is None:
         return ""
+
+    if hasattr(
+        value,
+        "value",
+    ):
+        return value.value
+
+    if isinstance(
+        value,
+        Decimal,
+    ):
+        return str(value)
+
+    if isinstance(
+        value,
+        datetime,
+    ):
+        return value.isoformat()
+
+    if isinstance(
+        value,
+        date,
+    ):
+        return value.isoformat()
 
     return value
 
@@ -1149,22 +1541,23 @@ def _writer_value(value: Any) -> Any:
 def _write_csv(
     rows: list[dict[str, Any]],
 ) -> bytes:
+    """
+    Generate CSV report content.
+    """
+    if not rows:
+        return b"No data\n"
+
     output = io.StringIO(
-        newline="",
+        newline=""
     )
 
-    if not rows:
-        output.write("No data\n")
-        return output.getvalue().encode(
-            "utf-8"
-        )
-
-    fieldnames = list(rows[0].keys())
+    fieldnames = list(
+        rows[0].keys()
+    )
 
     writer = csv.DictWriter(
         output,
         fieldnames=fieldnames,
-        extrasaction="ignore",
     )
 
     writer.writeheader()
@@ -1172,7 +1565,9 @@ def _write_csv(
     for row in rows:
         writer.writerow(
             {
-                key: _writer_value(value)
+                key: _writer_value(
+                    value
+                )
                 for key, value in row.items()
             }
         )
@@ -1185,6 +1580,9 @@ def _write_csv(
 def _write_xlsx(
     rows: list[dict[str, Any]],
 ) -> bytes:
+    """
+    Generate XLSX report content.
+    """
     try:
         from openpyxl import Workbook
     except ImportError as exc:
@@ -1194,14 +1592,22 @@ def _write_xlsx(
 
     workbook = Workbook()
     worksheet = workbook.active
+
     worksheet.title = "Report"
 
     if not rows:
-        worksheet.append(["No data"])
-    else:
-        fieldnames = list(rows[0].keys())
+        worksheet.append(
+            ["No data"]
+        )
 
-        worksheet.append(fieldnames)
+    else:
+        fieldnames = list(
+            rows[0].keys()
+        )
+
+        worksheet.append(
+            fieldnames
+        )
 
         for row in rows:
             worksheet.append(
@@ -1215,7 +1621,9 @@ def _write_xlsx(
 
     output = io.BytesIO()
 
-    workbook.save(output)
+    workbook.save(
+        output
+    )
 
     return output.getvalue()
 
@@ -1223,15 +1631,22 @@ def _write_xlsx(
 def _write_pdf(
     rows: list[dict[str, Any]],
 ) -> bytes:
+    """
+    Generate PDF report content.
+    """
     try:
         from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.pagesizes import (
+            A4,
+            landscape,
+        )
+        from reportlab.lib.styles import (
+            getSampleStyleSheet,
+        )
         from reportlab.lib.units import mm
         from reportlab.platypus import (
             Paragraph,
             SimpleDocTemplate,
-            Spacer,
             Table,
             TableStyle,
         )
@@ -1253,32 +1668,31 @@ def _write_pdf(
 
     styles = getSampleStyleSheet()
 
-    title_style = styles["Heading1"]
-    body_style = styles["BodyText"]
-
-    story = [
+    elements = [
         Paragraph(
             "Generated Report",
-            title_style,
-        ),
-        Spacer(1, 5 * mm),
+            styles["Title"],
+        )
     ]
 
     if not rows:
-        story.append(
+        elements.append(
             Paragraph(
                 "No data",
-                body_style,
+                styles["BodyText"],
             )
         )
+
     else:
-        fieldnames = list(rows[0].keys())
+        fieldnames = list(
+            rows[0].keys()
+        )
 
         table_data = [
             [
                 Paragraph(
                     str(field),
-                    body_style,
+                    styles["BodyText"],
                 )
                 for field in fieldnames
             ]
@@ -1293,7 +1707,7 @@ def _write_pdf(
                                 row.get(field)
                             )
                         ),
-                        body_style,
+                        styles["BodyText"],
                     )
                     for field in fieldnames
                 ]
@@ -1311,7 +1725,13 @@ def _write_pdf(
                         "BACKGROUND",
                         (0, 0),
                         (-1, 0),
-                        colors.lightgrey,
+                        colors.grey,
+                    ),
+                    (
+                        "TEXTCOLOR",
+                        (0, 0),
+                        (-1, 0),
+                        colors.whitesmoke,
                     ),
                     (
                         "GRID",
@@ -1326,31 +1746,17 @@ def _write_pdf(
                         (-1, -1),
                         "TOP",
                     ),
-                    (
-                        "FONTSIZE",
-                        (0, 0),
-                        (-1, -1),
-                        7,
-                    ),
-                    (
-                        "LEFTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        3,
-                    ),
-                    (
-                        "RIGHTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        3,
-                    ),
                 ]
             )
         )
 
-        story.append(table)
+        elements.append(
+            table
+        )
 
-    document.build(story)
+    document.build(
+        elements
+    )
 
     return output.getvalue()
 
@@ -1369,17 +1775,22 @@ _WRITERS: dict[
 
 
 # ---------------------------------------------------------------------------
-# Report storage
+# File storage
 # ---------------------------------------------------------------------------
 
 
 def _save_report_file(
-    *,
     clinic_id: int,
     report_type: ReportType,
     report_format: ReportFormat,
     content: bytes,
 ) -> str:
+    """
+    Persist a generated report atomically.
+
+    A temporary file is written first and then atomically replaced
+    into the final path.
+    """
     extension = report_format.value
 
     unique_id = uuid4().hex
@@ -1387,8 +1798,7 @@ def _save_report_file(
     filename = (
         f"clinic_{clinic_id}_"
         f"{report_type.value}_"
-        f"{unique_id}."
-        f"{extension}"
+        f"{unique_id}.{extension}"
     )
 
     os.makedirs(
@@ -1396,51 +1806,59 @@ def _save_report_file(
         exist_ok=True,
     )
 
-    file_path = os.path.join(
+    final_path = os.path.join(
         DEFAULT_STORAGE_DIR,
         filename,
     )
 
-    temporary_path = (
-        f"{file_path}.tmp"
+    temp_path = (
+        f"{final_path}.tmp"
     )
 
     try:
         with open(
-            temporary_path,
+            temp_path,
             "wb",
         ) as file:
             file.write(content)
 
         os.replace(
-            temporary_path,
-            file_path,
+            temp_path,
+            final_path,
         )
+
     except Exception:
-        if os.path.exists(
-            temporary_path
-        ):
-            try:
+        try:
+            if os.path.exists(
+                temp_path
+            ):
                 os.remove(
-                    temporary_path
+                    temp_path
                 )
-            except OSError:
-                pass
+        except OSError:
+            pass
 
         raise
 
-    return file_path
+    return final_path
 
 
 def _delete_report_file(
     file_path: str | None,
 ) -> None:
+    """
+    Safely delete a generated report file.
+    """
     if not file_path:
         return
 
     try:
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+        if os.path.exists(
+            file_path
+        ):
+            os.remove(
+                file_path
+            )
     except OSError:
         pass
 
@@ -1451,11 +1869,17 @@ def _delete_report_file(
 
 
 def get_report(
-    *,
     report_id: int,
     requester_user_id: int,
 ) -> GeneratedReport:
-    if report_id <= 0:
+    """
+    Retrieve a single report subject to authorization.
+    """
+    if (
+        isinstance(report_id, bool)
+        or not isinstance(report_id, int)
+        or report_id <= 0
+    ):
         raise ValidationError(
             "report_id must be greater than zero"
         )
@@ -1470,13 +1894,13 @@ def get_report(
     )
 
     if report is None:
-        raise NotFoundError(
+        raise DomainError(
             f"Report {report_id} not found"
         )
 
     clinic_scope = _resolve_clinic_scope(
-        requester=requester,
-        requested_clinic_id=report.clinic_id,
+        requester,
+        report.clinic_id,
     )
 
     if (
@@ -1484,51 +1908,106 @@ def get_report(
         and report.clinic_id != clinic_scope
     ):
         raise ValidationError(
-            "You are not authorized to access this report"
+            "Unauthorized report access"
         )
 
     return report
 
 
 def list_reports(
-    *,
     requester_user_id: int,
     clinic_id: int | None = None,
     generated_by_id: int | None = None,
-    report_type: ReportType | None = None,
-    report_format: ReportFormat | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
+    report_type: ReportType | str | None = None,
+    report_format: ReportFormat | str | None = None,
+    date_from: date | datetime | None = None,
+    date_to: date | datetime | None = None,
     page: int = 1,
     per_page: int = 20,
-) -> dict[str, Any]:
-    if page <= 0:
+):
+    """
+    List generated reports subject to clinic authorization and filters.
+    """
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page <= 0
+    ):
         raise ValidationError(
             "page must be greater than zero"
         )
 
-    if per_page <= 0 or per_page > 100:
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page < 1
+        or per_page > 100
+    ):
         raise ValidationError(
             "per_page must be between 1 and 100"
         )
 
-    if clinic_id is not None and clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be greater than zero"
-        )
+    if clinic_id is not None:
+        if (
+            isinstance(
+                clinic_id,
+                bool,
+            )
+            or not isinstance(
+                clinic_id,
+                int,
+            )
+            or clinic_id <= 0
+        ):
+            raise ValidationError(
+                "clinic_id must be greater than zero"
+            )
 
-    if (
-        generated_by_id is not None
-        and generated_by_id <= 0
+    if generated_by_id is not None:
+        if (
+            isinstance(
+                generated_by_id,
+                bool,
+            )
+            or not isinstance(
+                generated_by_id,
+                int,
+            )
+            or generated_by_id <= 0
+        ):
+            raise ValidationError(
+                "generated_by_id must be greater than zero"
+            )
+
+    if date_from is not None and not isinstance(
+        date_from,
+        (
+            datetime,
+            date,
+        ),
     ):
         raise ValidationError(
-            "generated_by_id must be greater than zero"
+            "Invalid date_from value"
+        )
+
+    if date_to is not None and not isinstance(
+        date_to,
+        (
+            datetime,
+            date,
+        ),
+    ):
+        raise ValidationError(
+            "Invalid date_to value"
         )
 
     if (
         date_from is not None
         and date_to is not None
-        and date_to < date_from
+        and _compare_filter_dates(
+            date_from,
+            date_to,
+        )
     ):
         raise ValidationError(
             "date_to must be greater than or equal to date_from"
@@ -1539,8 +2018,8 @@ def list_reports(
     )
 
     clinic_scope = _resolve_clinic_scope(
-        requester=requester,
-        requested_clinic_id=clinic_id,
+        requester,
+        clinic_id,
     )
 
     if report_type is not None:
@@ -1567,15 +2046,18 @@ def list_reports(
             == generated_by_id
         )
 
-        if clinic_scope is not None:
-            query = query.join(
+    if clinic_scope is not None:
+        query = (
+            query.join(
                 Staff,
-                Staff.id
-                == GeneratedReport.generated_by_id,
-            ).filter(
+                GeneratedReport.generated_by_id
+                == Staff.id,
+            )
+            .filter(
                 Staff.clinic_id
                 == clinic_scope
             )
+        )
 
     if report_type is not None:
         query = query.filter(
@@ -1589,17 +2071,26 @@ def list_reports(
             == report_format
         )
 
-    query = _apply_datetime_range(
-        query,
-        GeneratedReport.created_at,
-        date_from=date_from,
-        date_to=date_to,
-    )
+    if hasattr(
+        GeneratedReport,
+        "created_at",
+    ):
+        query = _apply_datetime_range(
+            query,
+            GeneratedReport.created_at,
+            date_from,
+            date_to,
+        )
 
-    query = query.order_by(
-        GeneratedReport.created_at.desc(),
-        GeneratedReport.id.desc(),
-    )
+        query = query.order_by(
+            GeneratedReport.created_at.desc(),
+            GeneratedReport.id.desc(),
+        )
+
+    else:
+        query = query.order_by(
+            GeneratedReport.id.desc()
+        )
 
     pagination = query.paginate(
         page=page,
@@ -1622,30 +2113,23 @@ def list_reports(
 
 @transactional
 def generate_report(
-    *,
-    report_type: ReportType,
-    report_format: ReportFormat,
-    clinic_id: int,
     requester_user_id: int,
+    clinic_id: int,
+    report_type: ReportType | str,
+    report_format: ReportFormat | str,
     filters: dict[str, Any] | None = None,
 ) -> GeneratedReport:
     """
-    Generate and persist a report.
+    Generate, persist, and audit a report.
 
-    requester_user_id is the authenticated User.id from JWT.
-
-    generated_by_id is always derived from the authenticated Staff record.
-
-    The service deliberately accepts clinic_id because it must remain safe
-    when called outside an HTTP route. Authorization is enforced here
-    rather than trusting the caller.
+    The authenticated staff member is always used as generated_by_id.
+    Client input cannot impersonate another staff member.
     """
-    if not isinstance(clinic_id, int):
-        raise ValidationError(
-            "clinic_id must be an integer"
-        )
-
-    if clinic_id <= 0:
+    if (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
         raise ValidationError(
             "clinic_id must be greater than zero"
         )
@@ -1663,8 +2147,8 @@ def generate_report(
     )
 
     generator = _validate_report_generator(
-        requester=requester,
-        clinic_id=clinic_id,
+        requester,
+        clinic_id,
     )
 
     _require_active_clinic(
@@ -1677,40 +2161,46 @@ def generate_report(
             "is not yet supported"
         )
 
-    if report_type not in _GATHERERS:
+    gatherer = _GATHERERS.get(
+        report_type
+    )
+
+    if gatherer is None:
         raise ValidationError(
-            f"Report type '{report_type.value}' "
-            "does not have a configured data gatherer"
+            f"No gatherer configured for "
+            f"report type '{report_type.value}'"
         )
 
-    if report_format == ReportFormat.CSV:
-        if report_type not in SUPPORTED_CSV_TYPES:
-            raise ValidationError(
-                "CSV generation is not supported for "
-                f"report type '{report_type.value}'"
-            )
+    if (
+        report_format == ReportFormat.CSV
+        and report_type not in SUPPORTED_CSV_TYPES
+    ):
+        raise ValidationError(
+            f"Report type '{report_type.value}' "
+            "is not supported for CSV"
+        )
 
-    elif report_format == ReportFormat.XLSX:
-        if report_type not in SUPPORTED_XLSX_TYPES:
-            raise ValidationError(
-                "XLSX generation is not supported for "
-                f"report type '{report_type.value}'"
-            )
+    if (
+        report_format == ReportFormat.XLSX
+        and report_type not in SUPPORTED_XLSX_TYPES
+    ):
+        raise ValidationError(
+            f"Report type '{report_type.value}' "
+            "is not supported for XLSX"
+        )
 
-    elif report_format == ReportFormat.PDF:
-        if report_type not in _SUPPORTED_PDF_TYPES:
-            raise ValidationError(
-                "PDF generation is not supported for "
-                f"report type '{report_type.value}'"
-            )
+    if (
+        report_format == ReportFormat.PDF
+        and report_type not in _SUPPORTED_PDF_TYPES
+    ):
+        raise ValidationError(
+            f"Report type '{report_type.value}' "
+            "is not supported for PDF"
+        )
 
     normalized_filters = _normalize_filters(
         filters
     )
-
-    gatherer = _GATHERERS[
-        report_type
-    ]
 
     rows = gatherer(
         clinic_id,
@@ -1723,15 +2213,17 @@ def generate_report(
 
     if writer is None:
         raise ValidationError(
-            f"Report format '{report_format.value}' "
-            "is not supported"
+            "Unsupported report format: "
+            f"{report_format.value}"
         )
-
-    content = writer(rows)
 
     file_url: str | None = None
 
     try:
+        content = writer(
+            rows
+        )
+
         file_url = _save_report_file(
             clinic_id=clinic_id,
             report_type=report_type,
@@ -1750,7 +2242,10 @@ def generate_report(
             file_url=file_url,
         )
 
-        db.session.add(report)
+        db.session.add(
+            report
+        )
+
         db.session.flush()
 
         create_audit_log(
@@ -1758,7 +2253,7 @@ def generate_report(
             entity_type="GeneratedReport",
             entity_id=report.id,
             description=(
-                f"Report generated: "
+                "Report generated: "
                 f"{report_type.value} / "
                 f"{report_format.value} "
                 f"for clinic {clinic_id}"

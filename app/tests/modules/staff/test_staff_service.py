@@ -1,278 +1,2018 @@
-﻿from datetime import date, timedelta
+﻿from __future__ import annotations
 
+from datetime import date, timedelta
+from decimal import Decimal
+from unittest.mock import Mock
+
+import pytest
+
+from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_enums import (
+    LeaveStatus,
+    LeaveType,
+    StaffStatus,
+)
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from app.extensions import db
+from app.modules.staff.models.staff_model import (
+    LeaveRequest,
+    PayrollRecord,
+    Staff,
+)
+from app.modules.staff.services import staff_service
 
 
-def _auth(make_authenticated_staff, clinic, role=Role.PHARMACIST):
-    _, headers = make_authenticated_staff(clinic, role)
-    return headers
+# ============================================================================
+# HELPERS
+# ============================================================================
 
 
-class TestDrugRoutes:
-    def test_create_drug_requires_auth(self, client, assert_unauthorized):
-        resp = client.post("/pharmacy/drugs", json={"name": "X"})
-        assert_unauthorized(resp)
+def _make_leave(
+    staff_id: int,
+    *,
+    leave_type: LeaveType = LeaveType.ANNUAL,
+    status: LeaveStatus = LeaveStatus.PENDING,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    reason: str | None = "Annual leave",
+    reviewed_by_user_id: int | None = None,
+    reviewed_at=None,
+):
+    start_date = start_date or date.today() + timedelta(days=5)
+    end_date = end_date or start_date + timedelta(days=2)
 
-    def test_create_drug_rejects_wrong_role(self, client, clinic, make_authenticated_staff, assert_forbidden):
-        _, headers = make_authenticated_staff(clinic, Role.NURSE)
-        resp = client.post("/pharmacy/drugs", json={"name": "X"}, headers=headers)
-        assert_forbidden(resp)
+    leave = LeaveRequest(
+        staff_id=staff_id,
+        leave_type=leave_type,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        reason=reason,
+        reviewed_by_user_id=reviewed_by_user_id,
+        reviewed_at=reviewed_at,
+    )
 
-    def test_create_drug_happy_path(self, client, clinic, make_authenticated_staff):
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.post(
-            "/pharmacy/drugs",
-            json={"name": "Amoxicillin", "clinic_id": clinic.id, "unit_price": "5.50"},
-            headers=headers,
-        )
-        assert resp.status_code == 201
-        body = resp.get_json()
-        assert body["success"] is True
-        assert body["data"]["name"] == "Amoxicillin"
-        assert body["data"]["unit_price"] == "5.50"
+    db.session.add(leave)
+    db.session.flush()
 
-    def test_create_drug_rejects_blank_name(self, client, clinic, make_authenticated_staff, assert_domain_error):
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.post("/pharmacy/drugs", json={"name": ""}, headers=headers)
-        # Pydantic min_length=1 rejects blank at the schema layer -> 422 with
-        # a "details" key rather than the plain domain-error shape, since
-        # this never reaches the service layer at all.
-        assert resp.status_code == 422
-
-    def test_get_drug_not_found(self, client, clinic, make_authenticated_staff, assert_domain_error):
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.get("/pharmacy/drugs/999999", headers=headers)
-        assert_domain_error(resp, 404)
-
-    def test_list_drugs_scoped_to_clinic(self, client, clinic, make_clinic, make_drug, make_authenticated_staff):
-        other = make_clinic(name="Other")
-        make_drug(clinic, name="Mine")
-        make_drug(other, name="Theirs")
-        make_drug(None, name="Global")
-
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.get(f"/pharmacy/drugs?clinic_id={clinic.id}", headers=headers)
-
-        assert resp.status_code == 200
-        names = {d["name"] for d in resp.get_json()["data"]}
-        assert names == {"Mine", "Global"}
-
-    def test_update_drug(self, client, clinic, make_drug, make_authenticated_staff):
-        drug = make_drug(clinic)
-        headers = _auth(make_authenticated_staff, clinic)
-
-        resp = client.patch(
-            f"/pharmacy/drugs/{drug.id}", json={"name": "Renamed"}, headers=headers
-        )
-        assert resp.status_code == 200
-        assert resp.get_json()["data"]["name"] == "Renamed"
-
-    def test_activate_deactivate_drug_requires_admin(self, client, clinic, make_drug, make_authenticated_staff, assert_forbidden):
-        drug = make_drug(clinic)
-        pharmacist_headers = _auth(make_authenticated_staff, clinic, Role.PHARMACIST)
-
-        # Pharmacist is allowed to read/create/update drugs, but not
-        # activate/deactivate — that route is Role.ADMIN only.
-        resp = client.post(f"/pharmacy/drugs/{drug.id}/deactivate", headers=pharmacist_headers)
-        assert_forbidden(resp)
-
-        admin_headers = _auth(make_authenticated_staff, clinic, Role.ADMIN)
-        resp2 = client.post(f"/pharmacy/drugs/{drug.id}/deactivate", headers=admin_headers)
-        assert resp2.status_code == 200
-        assert resp2.get_json()["data"]["is_active"] is False
+    return leave
 
 
-class TestBatchRoutes:
-    def test_create_batch_and_list(self, client, clinic, make_drug, make_authenticated_staff):
-        drug = make_drug(clinic)
-        headers = _auth(make_authenticated_staff, clinic)
+def _make_payroll(
+    staff_id: int,
+    *,
+    pay_period_start=date(2026, 9, 1),
+    pay_period_end=date(2026, 9, 30),
+    base_salary=Decimal("100000.00"),
+    bonuses=Decimal("0"),
+    deductions=Decimal("0"),
+):
+    record = PayrollRecord(
+        staff_id=staff_id,
+        pay_period_start=pay_period_start,
+        pay_period_end=pay_period_end,
+        base_salary=base_salary,
+        bonuses=bonuses,
+        deductions=deductions,
+        net_pay=(
+            base_salary
+            + bonuses
+            - deductions
+        ),
+    )
 
-        resp = client.post(
-            "/pharmacy/batches",
-            json={
-                "clinic_id": clinic.id,
-                "drug_id": drug.id,
-                "batch_number": "B1",
-                "quantity_on_hand": 50,
-                "expiry_date": str(date.today() + timedelta(days=60)),
-            },
-            headers=headers,
-        )
-        assert resp.status_code == 201
+    db.session.add(record)
+    db.session.flush()
 
-        list_resp = client.get(
-            f"/pharmacy/drugs/{drug.id}/batches?clinic_id={clinic.id}", headers=headers
-        )
-        assert list_resp.status_code == 200
-        assert len(list_resp.get_json()["data"]) == 1
+    return record
 
-    def test_create_batch_rejects_past_expiry(self, client, clinic, make_drug, make_authenticated_staff, assert_domain_error):
-        drug = make_drug(clinic)
-        headers = _auth(make_authenticated_staff, clinic)
 
-        resp = client.post(
-            "/pharmacy/batches",
-            json={
-                "clinic_id": clinic.id,
-                "drug_id": drug.id,
-                "batch_number": "B1",
-                "quantity_on_hand": 50,
-                "expiry_date": str(date.today() - timedelta(days=1)),
-            },
-            headers=headers,
-        )
-        assert_domain_error(resp, 422)
+# ============================================================================
+# STAFF LOOKUP
+# ============================================================================
 
-    def test_expiring_batches_requires_clinic_id_query_param(self, client, clinic, make_authenticated_staff, assert_domain_error):
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.get("/pharmacy/batches/expiring", headers=headers)
-        assert_domain_error(resp, 422)
 
-    def test_stock_summary(self, client, clinic, make_drug, make_drug_batch, make_authenticated_staff):
-        drug = make_drug(clinic)
-        make_drug_batch(clinic, drug, quantity_on_hand=30)
-        make_drug_batch(clinic, drug, quantity_on_hand=15)
+def test_get_staff_returns_staff(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
 
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.get(
-            f"/pharmacy/drugs/{drug.id}/stock-summary?clinic_id={clinic.id}", headers=headers
+    result = staff_service.get_staff(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+    )
+
+    assert result.id == staff.id
+
+
+def test_get_staff_enforces_clinic_isolation(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(NotFoundError):
+        staff_service.get_staff(
+            staff_id=staff.id,
+            clinic_id=clinic.id,
         )
 
-        assert resp.status_code == 200
-        data = resp.get_json()["data"]
-        assert data["quantity_on_hand"] == 45
-        assert data["batch_count"] == 2
+
+def test_get_staff_without_clinic_is_not_tenant_scoped(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    result = staff_service.get_staff(
+        staff_id=staff.id,
+    )
+
+    assert result.id == staff.id
 
 
-class TestDispenseRoutes:
-    def _build_prescription(self, clinic, make_staff, make_patient, make_drug, make_drug_batch, make_prescription, make_prescription_item, quantity=10, stock=20):
-        pharmacist = make_staff(clinic, role=Role.PHARMACIST)
-        patient = make_patient(clinic)
-        drug = make_drug(clinic)
-        batch = make_drug_batch(clinic, drug, quantity_on_hand=stock)
-        prescription = make_prescription(clinic, patient, pharmacist)
-        item = make_prescription_item(prescription, drug, quantity=quantity)
-        return pharmacist, patient, drug, batch, prescription, item
+def test_get_staff_missing_raises_not_found(
+    clinic,
+):
+    with pytest.raises(NotFoundError):
+        staff_service.get_staff(
+            staff_id=999999,
+            clinic_id=clinic.id,
+        )
 
-    def test_create_dispense_record_happy_path(
-        self, client, clinic, make_staff, make_patient, make_drug, make_drug_batch,
-        make_prescription, make_prescription_item, make_authenticated_staff,
+
+# ============================================================================
+# LIST STAFF
+# ============================================================================
+
+
+def test_list_staff_returns_only_clinic_staff(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff_a = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    staff_b = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    results = staff_service.list_staff(
+        clinic_id=clinic.id,
+    )
+
+    ids = {staff.id for staff in results}
+
+    assert staff_a.id in ids
+    assert staff_b.id not in ids
+
+
+def test_list_staff_filters_by_status(
+    clinic,
+    make_staff,
+):
+    active = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    suspended = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+        status=StaffStatus.SUSPENDED,
+    )
+
+    results = staff_service.list_staff(
+        clinic_id=clinic.id,
+        status=StaffStatus.SUSPENDED,
+    )
+
+    ids = {staff.id for staff in results}
+
+    assert suspended.id in ids
+    assert active.id not in ids
+
+
+def test_list_staff_searches_first_and_last_name(
+    clinic,
+    make_staff,
+):
+    first = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        first_name="Cardio",
+        last_name="Doctor",
+    )
+
+    second = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+        first_name="Jane",
+        last_name="Cardiology",
+    )
+
+    results = staff_service.list_staff(
+        clinic_id=clinic.id,
+        search="  cardiology  ",
+    )
+
+    ids = {staff.id for staff in results}
+
+    assert second.id in ids
+    assert first.id not in ids
+
+
+def test_list_staff_blank_search_behaves_like_no_search(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    results = staff_service.list_staff(
+        clinic_id=clinic.id,
+        search="   ",
+    )
+
+    ids = {item.id for item in results}
+
+    assert staff.id in ids
+
+
+# ============================================================================
+# CREATE STAFF
+# ============================================================================
+
+
+def test_create_staff_success(
+    clinic,
+    make_user,
+    monkeypatch,
+):
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    user = make_user(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    result = staff_service.create_staff(
+        clinic_id=clinic.id,
+        first_name="  Jane  ",
+        last_name="  Smith  ",
+        user_id=user.id,
+        specialty="Cardiology",
+        phone="08000000000",
+        email="jane@example.com",
+        hired_at=date(2026, 9, 1),
+    )
+
+    assert result.id is not None
+    assert result.clinic_id == clinic.id
+    assert result.user_id == user.id
+    assert result.first_name == "Jane"
+    assert result.last_name == "Smith"
+    assert result.specialty == "Cardiology"
+    assert result.phone == "08000000000"
+    assert result.email == "jane@example.com"
+    assert result.hired_at == date(2026, 9, 1)
+    assert result.status == StaffStatus.ACTIVE
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.CREATE
+    assert kwargs["entity_type"] == "Staff"
+    assert kwargs["entity_id"] == result.id
+
+
+def test_create_staff_without_linked_user_succeeds(
+    clinic,
+):
+    result = staff_service.create_staff(
+        clinic_id=clinic.id,
+        first_name="Jane",
+        last_name="Smith",
+    )
+
+    assert result.clinic_id == clinic.id
+    assert result.user_id is None
+    assert result.status == StaffStatus.ACTIVE
+
+
+def test_create_staff_rejects_blank_first_name(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="First name is required",
     ):
-        pharmacist, patient, drug, batch, prescription, item = self._build_prescription(
-            clinic, make_staff, make_patient, make_drug, make_drug_batch,
-            make_prescription, make_prescription_item,
-        )
-        headers = _auth(make_authenticated_staff, clinic)
-
-        resp = client.post(
-            "/pharmacy/dispense",
-            json={
-                "clinic_id": clinic.id,
-                "prescription_id": prescription.id,
-                "dispensed_by_id": pharmacist.id,
-                "items": [{"prescription_item_id": item.id, "quantity": 10}],
-            },
-            headers=headers,
+        staff_service.create_staff(
+            clinic_id=clinic.id,
+            first_name="   ",
+            last_name="Smith",
         )
 
-        assert resp.status_code == 201
-        body = resp.get_json()["data"]
-        assert body["status"] == "dispensed"
-        assert len(body["items"]) == 1
 
-    def test_create_dispense_record_insufficient_stock_maps_to_409(
-        self, client, clinic, make_staff, make_patient, make_drug, make_drug_batch,
-        make_prescription, make_prescription_item, make_authenticated_staff, assert_domain_error,
+def test_create_staff_rejects_blank_last_name(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Last name is required",
     ):
-        pharmacist, patient, drug, batch, prescription, item = self._build_prescription(
-            clinic, make_staff, make_patient, make_drug, make_drug_batch,
-            make_prescription, make_prescription_item, quantity=999, stock=2,
+        staff_service.create_staff(
+            clinic_id=clinic.id,
+            first_name="Jane",
+            last_name="   ",
         )
-        headers = _auth(make_authenticated_staff, clinic)
 
-        resp = client.post(
-            "/pharmacy/dispense",
-            json={
-                "clinic_id": clinic.id,
-                "prescription_id": prescription.id,
-                "dispensed_by_id": pharmacist.id,
-                "items": [{"prescription_item_id": item.id, "quantity": 5}],
-            },
-            headers=headers,
+
+def test_create_staff_rejects_missing_clinic(
+    app,
+):
+    with pytest.raises(NotFoundError):
+        staff_service.create_staff(
+            clinic_id=999999,
+            first_name="Jane",
+            last_name="Smith",
         )
-        assert_domain_error(resp, 409)
 
-    def test_create_dispense_record_requires_at_least_one_item(
-        self, client, clinic, make_authenticated_staff, assert_domain_error,
+
+def test_create_staff_rejects_inactive_clinic(
+    suspended_clinic,
+):
+    with pytest.raises(
+        ConflictError,
+        match="not active",
     ):
-        headers = _auth(make_authenticated_staff, clinic)
-        resp = client.post(
-            "/pharmacy/dispense",
-            json={
-                "clinic_id": clinic.id,
-                "prescription_id": 1,
-                "dispensed_by_id": 1,
-                "items": [],
-            },
-            headers=headers,
+        staff_service.create_staff(
+            clinic_id=suspended_clinic.id,
+            first_name="Jane",
+            last_name="Smith",
         )
-        # min_length=1 on items -> pydantic 422, never reaches the service
-        assert resp.status_code == 422
 
-    def test_cancel_dispense_record(
-        self, client, clinic, make_staff, make_patient, make_drug, make_drug_batch,
-        make_prescription, make_prescription_item, make_authenticated_staff,
+
+def test_create_staff_rejects_inactive_user(
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        is_active=False,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="User account is inactive",
     ):
-        pharmacist, patient, drug, batch, prescription, item = self._build_prescription(
-            clinic, make_staff, make_patient, make_drug, make_drug_batch,
-            make_prescription, make_prescription_item, quantity=10, stock=20,
-        )
-        headers = _auth(make_authenticated_staff, clinic)
-
-        create_resp = client.post(
-            "/pharmacy/dispense",
-            json={
-                "clinic_id": clinic.id,
-                "prescription_id": prescription.id,
-                "dispensed_by_id": pharmacist.id,
-                "items": [{"prescription_item_id": item.id, "quantity": 4}],
-            },
-            headers=headers,
-        )
-        record_id = create_resp.get_json()["data"]["id"]
-
-        cancel_resp = client.post(
-            f"/pharmacy/dispense/{record_id}/cancel",
-            json={"clinic_id": clinic.id},
-            headers=headers,
+        staff_service.create_staff(
+            clinic_id=clinic.id,
+            first_name="Jane",
+            last_name="Smith",
+            user_id=user.id,
         )
 
-        assert cancel_resp.status_code == 200
-        assert cancel_resp.get_json()["data"]["status"] == "cancelled"
 
-    def test_list_dispense_records_for_prescription(
-        self, client, clinic, make_staff, make_patient, make_drug, make_drug_batch,
-        make_prescription, make_prescription_item, make_authenticated_staff,
+def test_create_staff_rejects_user_from_another_clinic(
+    clinic,
+    make_clinic,
+    make_user,
+):
+    other_clinic = make_clinic()
+
+    user = make_user(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(NotFoundError):
+        staff_service.create_staff(
+            clinic_id=clinic.id,
+            first_name="Jane",
+            last_name="Smith",
+            user_id=user.id,
+        )
+
+
+def test_create_staff_rejects_duplicate_user_link(
+    clinic,
+    make_staff,
+    make_user,
+):
+    existing_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already linked to staff",
     ):
-        pharmacist, patient, drug, batch, prescription, item = self._build_prescription(
-            clinic, make_staff, make_patient, make_drug, make_drug_batch,
-            make_prescription, make_prescription_item,
+        staff_service.create_staff(
+            clinic_id=clinic.id,
+            first_name="Jane",
+            last_name="Smith",
+            user_id=existing_staff.user_id,
         )
-        headers = _auth(make_authenticated_staff, clinic)
 
-        client.post(
-            "/pharmacy/dispense",
-            json={
-                "clinic_id": clinic.id,
-                "prescription_id": prescription.id,
-                "dispensed_by_id": pharmacist.id,
-                "items": [{"prescription_item_id": item.id, "quantity": 3}],
+
+# ============================================================================
+# UPDATE STAFF
+# ============================================================================
+
+
+def test_update_staff_updates_allowed_fields(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        first_name="John",
+        last_name="Doe",
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.update_staff(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        first_name="  Jane  ",
+        last_name="  Smith  ",
+        specialty="Cardiology",
+    )
+
+    assert result.first_name == "Jane"
+    assert result.last_name == "Smith"
+    assert result.specialty == "Cardiology"
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.UPDATE
+    assert kwargs["entity_type"] == "Staff"
+    assert kwargs["old_value"]["first_name"] == "John"
+    assert kwargs["new_value"]["first_name"] == "Jane"
+
+
+def test_update_staff_rejects_unknown_fields(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Unknown staff field",
+    ):
+        staff_service.update_staff(
+            staff_id=staff.id,
+            clinic_id=clinic.id,
+            role="admin",
+        )
+
+
+def test_update_staff_rejects_blank_first_name(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="First Name is required",
+    ):
+        staff_service.update_staff(
+            staff_id=staff.id,
+            clinic_id=clinic.id,
+            first_name="   ",
+        )
+
+
+def test_update_staff_rejects_none_last_name(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Last Name is required",
+    ):
+        staff_service.update_staff(
+            staff_id=staff.id,
+            clinic_id=clinic.id,
+            last_name=None,
+        )
+
+
+def test_update_staff_same_values_produce_no_audit(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        first_name="John",
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.update_staff(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        first_name="John",
+    )
+
+    assert result.first_name == "John"
+    audit.assert_not_called()
+
+
+def test_update_staff_enforces_clinic_isolation(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(NotFoundError):
+        staff_service.update_staff(
+            staff_id=staff.id,
+            clinic_id=clinic.id,
+            first_name="Updated",
+        )
+
+
+def test_update_staff_rejects_inactive_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(ConflictError):
+        staff_service.update_staff(
+            staff_id=staff.id,
+            clinic_id=suspended_clinic.id,
+            first_name="Updated",
+        )
+
+
+# ============================================================================
+# STAFF STATUS
+# ============================================================================
+
+
+def test_change_staff_status_changes_status(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.change_staff_status(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        new_status=StaffStatus.SUSPENDED,
+    )
+
+    assert result.status == StaffStatus.SUSPENDED
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.STATUS_CHANGE
+    assert kwargs["old_value"]["status"] == StaffStatus.ACTIVE.value
+    assert kwargs["new_value"]["status"] == StaffStatus.SUSPENDED.value
+
+
+def test_change_staff_status_same_status_is_noop(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.change_staff_status(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        new_status=StaffStatus.ACTIVE,
+    )
+
+    assert result.status == StaffStatus.ACTIVE
+    audit.assert_not_called()
+
+
+# ============================================================================
+# LEAVE REQUEST CREATION
+# ============================================================================
+
+
+def test_request_leave_success(
+    clinic,
+    make_staff,
+    make_user,
+    monkeypatch,
+):
+    user_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    start = date(2026, 9, 10)
+    end = date(2026, 9, 12)
+
+    result = staff_service.request_leave(
+        clinic_id=clinic.id,
+        staff_id=user_staff.id,
+        actor_user_id=user_staff.user_id,
+        leave_type=LeaveType.ANNUAL,
+        start_date=start,
+        end_date=end,
+        reason="  Annual leave  ",
+    )
+
+    assert result.staff_id == user_staff.id
+    assert result.leave_type == LeaveType.ANNUAL
+    assert result.status == LeaveStatus.PENDING
+    assert result.start_date == start
+    assert result.end_date == end
+    assert result.reason == "Annual leave"
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.CREATE
+    assert kwargs["entity_type"] == "LeaveRequest"
+
+
+def test_request_leave_rejects_wrong_actor(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    other_staff = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="does not belong",
+    ):
+        staff_service.request_leave(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            actor_user_id=other_staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 12),
+        )
+
+
+def test_request_leave_rejects_invalid_date_range(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="cannot be before",
+    ):
+        staff_service.request_leave(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            actor_user_id=staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 20),
+            end_date=date(2026, 9, 10),
+        )
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        StaffStatus.SUSPENDED,
+        StaffStatus.TERMINATED,
+    ],
+)
+def test_request_leave_rejects_inactive_staff(
+    clinic,
+    make_staff,
+    status,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=status,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="cannot request leave",
+    ):
+        staff_service.request_leave(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            actor_user_id=staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 12),
+        )
+
+
+def test_request_leave_rejects_overlapping_pending(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    _make_leave(
+        staff.id,
+        status=LeaveStatus.PENDING,
+        start_date=date(2026, 9, 10),
+        end_date=date(2026, 9, 15),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="pending",
+    ):
+        staff_service.request_leave(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            actor_user_id=staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 12),
+            end_date=date(2026, 9, 18),
+        )
+
+
+def test_request_leave_rejects_overlapping_approved(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    _make_leave(
+        staff.id,
+        status=LeaveStatus.APPROVED,
+        start_date=date(2026, 9, 10),
+        end_date=date(2026, 9, 15),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="approved leave",
+    ):
+        staff_service.request_leave(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            actor_user_id=staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 12),
+            end_date=date(2026, 9, 18),
+        )
+
+
+# ============================================================================
+# LEAVE LOOKUP / LIST
+# ============================================================================
+
+
+def test_get_leave_request_returns_clinic_owned_leave(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    leave = _make_leave(staff.id)
+
+    result = staff_service.get_leave_request(
+        leave_id=leave.id,
+        clinic_id=clinic.id,
+    )
+
+    assert result.id == leave.id
+
+
+def test_get_leave_request_hides_foreign_clinic_leave(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    leave = _make_leave(staff.id)
+
+    with pytest.raises(NotFoundError):
+        staff_service.get_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+        )
+
+
+def test_list_leave_requests_filters_clinic(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    local_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    foreign_staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    local_leave = _make_leave(local_staff.id)
+    foreign_leave = _make_leave(foreign_staff.id)
+
+    results = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+    )
+
+    ids = {leave.id for leave in results}
+
+    assert local_leave.id in ids
+    assert foreign_leave.id not in ids
+
+
+def test_list_leave_requests_filters_staff_and_status(
+    clinic,
+    make_staff,
+):
+    staff_a = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    staff_b = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+    )
+
+    matching = _make_leave(
+        staff_a.id,
+        status=LeaveStatus.PENDING,
+    )
+
+    _make_leave(
+        staff_a.id,
+        status=LeaveStatus.APPROVED,
+    )
+
+    _make_leave(
+        staff_b.id,
+        status=LeaveStatus.PENDING,
+    )
+
+    results = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+        staff_id=staff_a.id,
+        status=LeaveStatus.PENDING,
+    )
+
+    ids = {leave.id for leave in results}
+
+    assert ids == {matching.id}
+
+
+# ============================================================================
+# LEAVE APPROVAL
+# ============================================================================
+
+
+def test_approve_leave_success(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    start = date.today()
+    end = start + timedelta(days=2)
+
+    leave = _make_leave(
+        staff.id,
+        status=LeaveStatus.PENDING,
+        start_date=start,
+        end_date=end,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.approve_leave_request(
+        leave_id=leave.id,
+        clinic_id=clinic.id,
+        reviewer_user_id=admin.user_id,
+    )
+
+    assert result.status == LeaveStatus.APPROVED
+    assert result.reviewed_by_user_id == admin.user_id
+    assert result.reviewed_at is not None
+
+    db.session.refresh(staff)
+
+    assert staff.status == StaffStatus.ON_LEAVE
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.STATUS_CHANGE
+    assert kwargs["entity_type"] == "LeaveRequest"
+
+
+def test_approve_leave_requires_pending_status(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    leave = _make_leave(
+        staff.id,
+        status=LeaveStatus.APPROVED,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already",
+    ):
+        staff_service.approve_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=admin.user_id,
+        )
+
+
+def test_approve_leave_requires_admin(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    reviewer = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+    )
+
+    leave = _make_leave(staff.id)
+
+    with pytest.raises(
+        ValidationError,
+        match="administrator",
+    ):
+        staff_service.approve_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=reviewer.user_id,
+        )
+
+
+def test_approve_leave_rejects_inactive_reviewer(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+        user_is_active=False,
+    )
+
+    leave = _make_leave(staff.id)
+
+    with pytest.raises(
+        ValidationError,
+        match="inactive",
+    ):
+        staff_service.approve_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=admin.user_id,
+        )
+
+
+def test_approve_leave_rejects_overlapping_approved_leave(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    _make_leave(
+        staff.id,
+        status=LeaveStatus.APPROVED,
+        start_date=date(2026, 9, 10),
+        end_date=date(2026, 9, 15),
+    )
+
+    pending = _make_leave(
+        staff.id,
+        status=LeaveStatus.PENDING,
+        start_date=date(2026, 9, 12),
+        end_date=date(2026, 9, 18),
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="approved leave",
+    ):
+        staff_service.approve_leave_request(
+            leave_id=pending.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=admin.user_id,
+        )
+
+
+# ============================================================================
+# LEAVE REJECTION
+# ============================================================================
+
+
+def test_reject_leave_success_with_reason(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    leave = _make_leave(
+        staff.id,
+        reason="Annual leave",
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.reject_leave_request(
+        leave_id=leave.id,
+        clinic_id=clinic.id,
+        reviewer_user_id=admin.user_id,
+        reason="  Staffing shortage  ",
+    )
+
+    assert result.status == LeaveStatus.REJECTED
+    assert result.reviewed_by_user_id == admin.user_id
+    assert result.reviewed_at is not None
+    assert "Annual leave" in result.reason
+    assert "Rejection note: Staffing shortage" in result.reason
+
+    audit.assert_called_once()
+
+
+def test_reject_leave_allows_no_reason(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    leave = _make_leave(
+        staff.id,
+        reason="Annual leave",
+    )
+
+    result = staff_service.reject_leave_request(
+        leave_id=leave.id,
+        clinic_id=clinic.id,
+        reviewer_user_id=admin.user_id,
+        reason=None,
+    )
+
+    assert result.status == LeaveStatus.REJECTED
+    assert result.reason == "Annual leave"
+
+
+def test_reject_leave_rejects_blank_reason(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    admin = make_staff(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    leave = _make_leave(staff.id)
+
+    with pytest.raises(
+        ValidationError,
+        match="Rejection reason cannot be empty",
+    ):
+        staff_service.reject_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=admin.user_id,
+            reason="   ",
+        )
+
+
+def test_reject_leave_requires_admin(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    reviewer = make_staff(
+        clinic=clinic,
+        role=Role.RECEPTIONIST,
+    )
+
+    leave = _make_leave(staff.id)
+
+    with pytest.raises(
+        ValidationError,
+        match="administrator",
+    ):
+        staff_service.reject_leave_request(
+            leave_id=leave.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=reviewer.user_id,
+        )
+
+
+# ============================================================================
+# RESTORE EXPIRED LEAVE
+# ============================================================================
+
+
+def test_restore_staff_from_expired_leave(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ON_LEAVE,
+    )
+
+    _make_leave(
+        staff.id,
+        status=LeaveStatus.APPROVED,
+        start_date=date.today() - timedelta(days=10),
+        end_date=date.today() - timedelta(days=2),
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    restored = staff_service.restore_staff_from_expired_leave()
+
+    db.session.refresh(staff)
+
+    assert restored >= 1
+    assert staff.status == StaffStatus.ACTIVE
+
+    audit.assert_called()
+
+
+def test_restore_staff_keeps_current_leave_staff_on_leave(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ON_LEAVE,
+    )
+
+    _make_leave(
+        staff.id,
+        status=LeaveStatus.APPROVED,
+        start_date=date.today() - timedelta(days=1),
+        end_date=date.today() + timedelta(days=5),
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    restored = staff_service.restore_staff_from_expired_leave()
+
+    db.session.refresh(staff)
+
+    assert restored == 0
+    assert staff.status == StaffStatus.ON_LEAVE
+    audit.assert_not_called()
+
+
+# ============================================================================
+# PAYROLL LOOKUP / LIST
+# ============================================================================
+
+
+def test_get_payroll_record_returns_record(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(
+        staff.id,
+    )
+
+    result = staff_service.get_payroll_record(
+        record_id=record.id,
+        clinic_id=clinic.id,
+    )
+
+    assert result.id == record.id
+
+
+def test_get_payroll_record_enforces_clinic(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(
+        staff.id,
+    )
+
+    with pytest.raises(NotFoundError):
+        staff_service.get_payroll_record(
+            record_id=record.id,
+            clinic_id=clinic.id,
+        )
+
+
+def test_list_payroll_returns_only_clinic_records(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    local_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    foreign_staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    local_record = _make_payroll(local_staff.id)
+    foreign_record = _make_payroll(foreign_staff.id)
+
+    results = staff_service.list_payroll(
+        clinic_id=clinic.id,
+    )
+
+    ids = {record.id for record in results}
+
+    assert local_record.id in ids
+    assert foreign_record.id not in ids
+
+
+def test_list_payroll_for_staff_requires_clinic_owned_staff(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    foreign_staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(NotFoundError):
+        staff_service.list_payroll_for_staff(
+            clinic_id=clinic.id,
+            staff_id=foreign_staff.id,
+        )
+
+
+# ============================================================================
+# CREATE PAYROLL
+# ============================================================================
+
+
+def test_create_payroll_success(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.create_payroll_record(
+        clinic_id=clinic.id,
+        staff_id=staff.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+        base_salary=Decimal("100000"),
+        bonuses=Decimal("5000"),
+        deductions=Decimal("1000"),
+    )
+
+    assert result.staff_id == staff.id
+    assert result.base_salary == Decimal("100000")
+    assert result.bonuses == Decimal("5000")
+    assert result.deductions == Decimal("1000")
+    assert result.net_pay == Decimal("104000")
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.CREATE
+    assert kwargs["entity_type"] == "PayrollRecord"
+
+
+def test_create_payroll_rejects_invalid_period(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="cannot be before",
+    ):
+        staff_service.create_payroll_record(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            pay_period_start=date(2026, 9, 30),
+            pay_period_end=date(2026, 9, 1),
+            base_salary=Decimal("100000"),
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "field",
+        "value",
+        "message",
+    ),
+    [
+        (
+            "base_salary",
+            Decimal("-1"),
+            "Base salary cannot be negative",
+        ),
+        (
+            "bonuses",
+            Decimal("-1"),
+            "Bonuses cannot be negative",
+        ),
+        (
+            "deductions",
+            Decimal("-1"),
+            "Deductions cannot be negative",
+        ),
+    ],
+)
+def test_create_payroll_rejects_negative_values(
+    clinic,
+    make_staff,
+    field,
+    value,
+    message,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    kwargs = {
+        "clinic_id": clinic.id,
+        "staff_id": staff.id,
+        "pay_period_start": date(2026, 9, 1),
+        "pay_period_end": date(2026, 9, 30),
+        "base_salary": Decimal("100000"),
+        "bonuses": Decimal("0"),
+        "deductions": Decimal("0"),
+    }
+
+    kwargs[field] = value
+
+    with pytest.raises(
+        ValidationError,
+        match=message,
+    ):
+        staff_service.create_payroll_record(
+            **kwargs,
+        )
+
+
+def test_create_payroll_rejects_negative_net_pay(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Net pay cannot be negative",
+    ):
+        staff_service.create_payroll_record(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            pay_period_start=date(2026, 9, 1),
+            pay_period_end=date(2026, 9, 30),
+            base_salary=Decimal("100000"),
+            deductions=Decimal("100001"),
+        )
+
+
+def test_create_payroll_rejects_duplicate_period(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    _make_payroll(staff.id)
+
+    with pytest.raises(
+        ConflictError,
+        match="already exists",
+    ):
+        staff_service.create_payroll_record(
+            clinic_id=clinic.id,
+            staff_id=staff.id,
+            pay_period_start=date(2026, 9, 1),
+            pay_period_end=date(2026, 9, 30),
+            base_salary=Decimal("100000"),
+        )
+
+
+# ============================================================================
+# GENERATE PAYROLL
+# ============================================================================
+
+
+def test_generate_payroll_for_active_staff(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    results = staff_service.generate_payroll_for_period(
+        clinic_id=clinic.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+        salary_lookup={
+            staff.id: Decimal("125000"),
+        },
+    )
+
+    assert len(results) == 1
+    assert results[0].staff_id == staff.id
+    assert results[0].base_salary == Decimal("125000")
+    assert results[0].net_pay == Decimal("125000")
+
+    audit.assert_called_once()
+
+
+def test_generate_payroll_skips_staff_without_salary(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    results = staff_service.generate_payroll_for_period(
+        clinic_id=clinic.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+        salary_lookup={},
+    )
+
+    assert results == []
+
+
+def test_generate_payroll_skips_inactive_staff(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.SUSPENDED,
+    )
+
+    results = staff_service.generate_payroll_for_period(
+        clinic_id=clinic.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+        salary_lookup={
+            staff.id: Decimal("100000"),
+        },
+    )
+
+    assert results == []
+
+
+def test_generate_payroll_rejects_invalid_period(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="cannot be before",
+    ):
+        staff_service.generate_payroll_for_period(
+            clinic_id=clinic.id,
+            pay_period_start=date(2026, 9, 30),
+            pay_period_end=date(2026, 9, 1),
+            salary_lookup={},
+        )
+
+
+def test_generate_payroll_rejects_negative_salary(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Base salary cannot be negative",
+    ):
+        staff_service.generate_payroll_for_period(
+            clinic_id=clinic.id,
+            pay_period_start=date(2026, 9, 1),
+            pay_period_end=date(2026, 9, 30),
+            salary_lookup={
+                staff.id: Decimal("-100"),
             },
-            headers=headers,
         )
 
-        resp = client.get(
-            f"/pharmacy/prescriptions/{prescription.id}/dispense-records", headers=headers
+
+def test_generate_payroll_skips_existing_records(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    existing = _make_payroll(
+        staff.id,
+    )
+
+    results = staff_service.generate_payroll_for_period(
+        clinic_id=clinic.id,
+        pay_period_start=existing.pay_period_start,
+        pay_period_end=existing.pay_period_end,
+        salary_lookup={
+            staff.id: Decimal("150000"),
+        },
+    )
+
+    assert results == []
+
+
+def test_generate_payroll_only_generates_for_requested_clinic(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    local_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    foreign_staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+        status=StaffStatus.ACTIVE,
+    )
+
+    results = staff_service.generate_payroll_for_period(
+        clinic_id=clinic.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+        salary_lookup={
+            local_staff.id: Decimal("100000"),
+            foreign_staff.id: Decimal("200000"),
+        },
+    )
+
+    ids = {record.staff_id for record in results}
+
+    assert local_staff.id in ids
+    assert foreign_staff.id not in ids
+
+
+# ============================================================================
+# MARK PAYROLL PAID
+# ============================================================================
+
+
+def test_mark_payroll_paid_success(
+    clinic,
+    make_staff,
+    monkeypatch,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(
+        staff.id,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        staff_service,
+        "create_audit_log",
+        audit,
+    )
+
+    result = staff_service.mark_payroll_paid(
+        record_id=record.id,
+        clinic_id=clinic.id,
+    )
+
+    assert result.paid_at is not None
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.PAYMENT
+    assert kwargs["entity_type"] == "PayrollRecord"
+
+
+def test_mark_payroll_paid_rejects_already_paid(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(staff.id)
+    record.paid_at = staff_service._utcnow()
+    db.session.flush()
+
+    with pytest.raises(
+        ConflictError,
+        match="already marked paid",
+    ):
+        staff_service.mark_payroll_paid(
+            record_id=record.id,
+            clinic_id=clinic.id,
         )
-        assert resp.status_code == 200
-        assert len(resp.get_json()["data"]) == 1
+
+
+def test_mark_payroll_paid_enforces_clinic_isolation(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(staff.id)
+
+    with pytest.raises(NotFoundError):
+        staff_service.mark_payroll_paid(
+            record_id=record.id,
+            clinic_id=clinic.id,
+        )
+
+
+def test_mark_payroll_paid_rejects_inactive_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    record = _make_payroll(staff.id)
+
+    with pytest.raises(ConflictError):
+        staff_service.mark_payroll_paid(
+            record_id=record.id,
+            clinic_id=suspended_clinic.id,
+        )
+
+
+# ============================================================================
+# ACTIVE CLINIC ENFORCEMENT
+# ============================================================================
+
+
+def test_active_clinic_required_for_status_change(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(ConflictError):
+        staff_service.change_staff_status(
+            staff_id=staff.id,
+            clinic_id=suspended_clinic.id,
+            new_status=StaffStatus.SUSPENDED,
+        )
+
+
+def test_active_clinic_required_for_leave_request(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(ConflictError):
+        staff_service.request_leave(
+            clinic_id=suspended_clinic.id,
+            staff_id=staff.id,
+            actor_user_id=staff.user_id,
+            leave_type=LeaveType.ANNUAL,
+            start_date=date(2026, 9, 10),
+            end_date=date(2026, 9, 12),
+        )
+
+
+def test_active_clinic_required_for_payroll_creation(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(ConflictError):
+        staff_service.create_payroll_record(
+            clinic_id=suspended_clinic.id,
+            staff_id=staff.id,
+            pay_period_start=date(2026, 9, 1),
+            pay_period_end=date(2026, 9, 30),
+            base_salary=Decimal("100000"),
+        )

@@ -5,12 +5,11 @@ from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
-from app.core.exceptions import DomainError, ValidationError
+
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.exceptions import DomainError
+from app.core.exceptions import DomainError, ValidationError
 from app.core.utils.decorators import role_required
-from app.extensions import db
 
 from app.modules.reports.schemas.reports_schema import (
     GeneratedReportListResponseSchema,
@@ -60,20 +59,28 @@ REPORT_VIEW_ROLES = (
 # ---------------------------------------------------------------------------
 
 
-def _get_current_user():
+def _get_current_user() -> User:
     """
-    Return the authenticated user.
+    Return the authenticated active database user.
     """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            "Invalid authentication identity"
+        ) from exc
+
+    if user_id <= 0:
         raise ValidationError(
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -90,10 +97,10 @@ def _get_current_user():
 
 def _get_current_clinic_id() -> int:
     """
-    Return the clinic belonging to the authenticated user.
+    Return the clinic assigned to the authenticated user.
 
-    The clinic is derived from the authenticated database User and is
-    never trusted from request JSON or query parameters.
+    Clinic scope is derived exclusively from the authenticated
+    database user and is never trusted from request input.
     """
     user = _get_current_user()
 
@@ -106,6 +113,11 @@ def _get_current_clinic_id() -> int:
     if clinic_id is None:
         raise DomainError(
             "Authenticated user is not assigned to a clinic"
+        )
+
+    if isinstance(clinic_id, bool):
+        raise DomainError(
+            "Authenticated user has an invalid clinic assignment"
         )
 
     try:
@@ -124,9 +136,16 @@ def _get_current_clinic_id() -> int:
 
 
 def _get_current_staff() -> Staff:
+    """
+    Return the staff record linked to the authenticated user.
+    """
     user = _get_current_user()
 
-    staff = user.staff
+    staff = getattr(
+        user,
+        "staff",
+        None,
+    )
 
     if staff is None:
         raise DomainError(
@@ -137,7 +156,34 @@ def _get_current_staff() -> Staff:
 
 
 def _get_current_staff_id() -> int:
+    """
+    Return the authenticated staff ID.
+    """
     return _get_current_staff().id
+
+
+def _get_current_user_id() -> int:
+    """
+    Return the authenticated user ID.
+
+    The value is resolved from the JWT identity only after the
+    authenticated database user has been validated.
+    """
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            "Invalid authentication identity"
+        ) from exc
+
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    return user_id
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +194,12 @@ def _get_current_staff_id() -> int:
 def _handle_route_error(
     exc: Exception,
 ):
+    """
+    Convert domain exceptions into their declared HTTP response.
+
+    Unexpected exceptions intentionally receive a generic response so
+    internal implementation details are not leaked to API clients.
+    """
     if isinstance(exc, DomainError):
         return (
             jsonify(
@@ -173,12 +225,33 @@ def _handle_route_error(
 def _validation_error_response(
     exc: PydanticValidationError,
 ):
+    """
+    Return a JSON-safe Pydantic validation response.
+
+    Pydantic v2 may place the original ValueError object inside
+    error["ctx"]["error"]. Flask's JSON encoder cannot serialize that
+    exception object directly, so normalize it to a string first.
+    """
+    details = []
+
+    for error in exc.errors():
+        item = dict(error)
+
+        ctx = item.get("ctx")
+
+        if isinstance(ctx, dict) and "error" in ctx:
+            ctx = dict(ctx)
+            ctx["error"] = str(ctx["error"])
+            item["ctx"] = ctx
+
+        details.append(item)
+
     return (
         jsonify(
             {
                 "success": False,
                 "error": "Validation failed",
-                "details": exc.errors(),
+                "details": details,
             }
         ),
         422,
@@ -193,6 +266,9 @@ def _validation_error_response(
 def _serialize_report(
     report,
 ) -> dict:
+    """
+    Serialize a GeneratedReport ORM instance through the response schema.
+    """
     return GeneratedReportResponseSchema.model_validate(
         report
     ).model_dump(
@@ -203,6 +279,9 @@ def _serialize_report(
 def _serialize_report_list(
     result: dict,
 ) -> dict:
+    """
+    Serialize a paginated report result through the response schema.
+    """
     payload = GeneratedReportListResponseSchema.model_validate(
         result
     )
@@ -220,12 +299,14 @@ def _serialize_report_list(
 @reports_bp.post("")
 @role_required(*REPORT_GENERATION_ROLES)
 def create_report():
+    """
+    Generate a report for the authenticated user's clinic.
+    """
     try:
-        # Confirm the actual authenticated database user is active.
-        user = _get_current_user()
+        # Resolve and validate the actual authenticated database user.
+        _get_current_user()
 
-        # Clinic ownership comes from authentication, never from the
-        # request body.
+        # Clinic scope is always derived from authentication.
         current_clinic_id = _get_current_clinic_id()
 
         payload = ReportGenerateSchema.model_validate(
@@ -235,15 +316,13 @@ def create_report():
             or {}
         )
 
-        requester_user_id = int(
-            get_jwt_identity()
-        )
+        requester_user_id = _get_current_user_id()
 
         report = generate_report(
+            requester_user_id=requester_user_id,
+            clinic_id=current_clinic_id,
             report_type=payload.report_type,
             report_format=payload.report_format,
-            clinic_id=current_clinic_id,
-            requester_user_id=requester_user_id,
             filters=(
                 payload.filters.model_dump(
                     mode="json"
@@ -280,14 +359,17 @@ def create_report():
 @reports_bp.get("")
 @role_required(*REPORT_VIEW_ROLES)
 def get_reports():
+    """
+    Return paginated reports visible to the authenticated user.
+    """
     try:
-        # Authentication establishes the clinic scope.
+        # Resolve and validate the authenticated user first.
         _get_current_user()
+
+        # Clinic scope is derived from authentication.
         current_clinic_id = _get_current_clinic_id()
 
-        requester_user_id = int(
-            get_jwt_identity()
-        )
+        requester_user_id = _get_current_user_id()
 
         query_payload = {
             "report_type": request.args.get(
@@ -315,6 +397,8 @@ def get_reports():
             ),
         }
 
+        # Remove omitted optional query parameters while preserving
+        # pagination defaults.
         query_payload = {
             key: value
             for key, value in query_payload.items()
@@ -365,13 +449,13 @@ def get_reports():
 def get_single_report(
     report_id: int,
 ):
+    """
+    Return one report after service-layer authorization checks.
+    """
     try:
-        # Authentication is still explicitly verified here.
         _get_current_user()
 
-        requester_user_id = int(
-            get_jwt_identity()
-        )
+        requester_user_id = _get_current_user_id()
 
         report = get_report(
             report_id=report_id,

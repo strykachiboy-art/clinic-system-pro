@@ -201,7 +201,48 @@ def _validate_json(schema):
             }),
             422,
         )
+        
+        
+def _validate_json(schema):
+    payload = request.get_json(silent=True)
 
+    if payload is None:
+        return None, (
+            jsonify({
+                "error": "Invalid or missing JSON body"
+            }),
+            400,
+        )
+
+    try:
+        return schema.model_validate(payload), None
+
+    except ValidationError as exc:
+        details = []
+
+        for error in exc.errors():
+            normalized = {
+                key: (
+                    {
+                        ctx_key: str(ctx_value)
+                        for ctx_key, ctx_value in value.items()
+                    }
+                    if key == "ctx" and isinstance(value, dict)
+                    else value
+                )
+                for key, value in error.items()
+            }
+
+            details.append(normalized)
+
+        return None, (
+            jsonify({
+                "error": "Validation failed",
+                "details": details,
+            }),
+            422,
+        )
+        
 
 def _validate_query(schema):
     try:
