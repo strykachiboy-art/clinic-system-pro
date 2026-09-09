@@ -26,8 +26,6 @@ def test_get_audit_logs_requires_admin_role(
     make_authenticated_staff,
     clinic,
 ):
-    from app.core.enums.role_enums import Role
-
     _, headers = make_authenticated_staff(
         clinic,
         role=Role.DOCTOR,
@@ -88,6 +86,8 @@ def test_get_audit_logs_returns_empty_list_for_no_records(
     assert body["data"]["page"] == 1
     assert body["data"]["per_page"] == 20
     assert body["data"]["pages"] == 0
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is False
 
 
 def test_get_audit_logs_returns_records(
@@ -105,6 +105,7 @@ def test_get_audit_logs_returns_records(
         new_value={
             "status": "active",
         },
+        ip_address="192.168.1.10",
     )
 
     headers = auth_headers_for(
@@ -124,6 +125,8 @@ def test_get_audit_logs_returns_records(
     assert body["success"] is True
     assert body["data"]["total"] == 1
     assert len(body["data"]["items"]) == 1
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is False
 
     item = body["data"]["items"][0]
 
@@ -132,6 +135,7 @@ def test_get_audit_logs_returns_records(
     assert item["entity_type"] == "Patient"
     assert item["entity_id"] == 100
     assert item["description"] == "Patient created"
+    assert item["ip_address"] == "192.168.1.10"
 
 
 # ============================================================================
@@ -163,9 +167,7 @@ def test_get_audit_logs_filters_by_user_id(
     )
 
     response = client.get(
-        "/api/audit-logs?user_id={}".format(
-            user.id
-        ),
+        f"/api/audit-logs?user_id={user.id}",
         headers=headers,
     )
 
@@ -330,10 +332,10 @@ def test_get_audit_logs_combines_filters(
 
     response = client.get(
         "/api/audit-logs"
-        "?user_id={}"
+        f"?user_id={user.id}"
         "&action=update"
         "&entity_type=Patient"
-        "&entity_id=100".format(user.id),
+        "&entity_id=100",
         headers=headers,
     )
 
@@ -387,6 +389,8 @@ def test_get_audit_logs_supports_pagination(
     assert body["data"]["per_page"] == 2
     assert body["data"]["pages"] == 3
     assert len(body["data"]["items"]) == 2
+    assert body["data"]["has_next"] is True
+    assert body["data"]["has_prev"] is False
 
 
 def test_get_audit_logs_returns_second_page(
@@ -418,6 +422,75 @@ def test_get_audit_logs_returns_second_page(
     assert body["data"]["page"] == 2
     assert body["data"]["per_page"] == 2
     assert len(body["data"]["items"]) == 2
+    assert body["data"]["has_next"] is True
+    assert body["data"]["has_prev"] is True
+
+
+def test_get_audit_logs_returns_last_page(
+    client,
+    user,
+    auth_headers_for,
+    make_audit_log,
+):
+    for entity_id in range(100, 105):
+        make_audit_log(
+            user_id=user.id,
+            entity_id=entity_id,
+        )
+
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        "/api/audit-logs?page=3&per_page=2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 2
+    assert len(body["data"]["items"]) == 1
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is True
+
+
+def test_get_audit_logs_returns_empty_page(
+    client,
+    user,
+    auth_headers_for,
+    make_audit_log,
+):
+    make_audit_log(
+        user_id=user.id,
+        entity_id=100,
+    )
+
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        "/api/audit-logs?page=2&per_page=1",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["items"] == []
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 1
+    assert body["data"]["pages"] == 1
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is True
 
 
 # ============================================================================
@@ -631,6 +704,30 @@ def test_get_audit_logs_rejects_invalid_per_page_values(
     )
 
 
+def test_get_audit_logs_rejects_empty_integer_parameter(
+    client,
+    user,
+    auth_headers_for,
+    assert_domain_error,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        "/api/audit-logs?user_id=",
+        headers=headers,
+    )
+
+    body = assert_domain_error(
+        response,
+        422,
+    )
+
+    assert body["error"] == "user_id must be an integer"
+
+
 # ============================================================================
 # DETAIL ROUTE
 # ============================================================================
@@ -653,8 +750,6 @@ def test_get_audit_log_requires_admin_role(
     clinic,
     make_audit_log,
 ):
-    from app.core.enums.role_enums import Role
-
     log = make_audit_log(
         entity_type="Patient",
         entity_id=100,
@@ -695,6 +790,7 @@ def test_get_audit_log_returns_record(
         new_value={
             "status": "active",
         },
+        ip_address="10.0.0.15",
     )
 
     headers = auth_headers_for(
@@ -718,6 +814,7 @@ def test_get_audit_log_returns_record(
     assert body["data"]["entity_type"] == "Patient"
     assert body["data"]["entity_id"] == 100
     assert body["data"]["description"] == "Patient updated"
+    assert body["data"]["ip_address"] == "10.0.0.15"
 
 
 def test_get_audit_log_returns_json_values(
@@ -872,6 +969,8 @@ def test_get_audit_logs_response_has_expected_structure(
         "page",
         "per_page",
         "pages",
+        "has_next",
+        "has_prev",
     }
 
 
@@ -911,6 +1010,36 @@ def test_get_audit_log_response_has_expected_structure(
         body["data"],
         dict,
     )
+
+
+def test_get_audit_log_response_includes_ip_address(
+    client,
+    user,
+    auth_headers_for,
+    make_audit_log,
+):
+    log = make_audit_log(
+        user_id=user.id,
+        entity_type="Patient",
+        entity_id=100,
+        ip_address="203.0.113.25",
+    )
+
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        f"/api/audit-logs/{log.id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["ip_address"] == "203.0.113.25"
 
 
 # ============================================================================

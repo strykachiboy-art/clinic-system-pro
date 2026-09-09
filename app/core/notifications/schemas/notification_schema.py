@@ -191,3 +191,33 @@ class NotificationResponseSchema(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+    
+# ============================================================================
+# NOTIFICATION LIST QUERY
+# ============================================================================
+
+
+class NotificationListQuerySchema(BaseModel):
+    """
+    Query parameters for listing the authenticated user's notifications.
+
+    Pagination is mandatory at the API boundary so notification collections
+    cannot be returned unbounded.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    page: int = Field(
+        default=1,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+    )
+
+    unread_only: bool = False

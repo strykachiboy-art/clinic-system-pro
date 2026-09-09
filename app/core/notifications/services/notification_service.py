@@ -31,6 +31,15 @@ from app.modules.clinic.services.clinic_service import (
 
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
+# ============================================================================
 # UTILITIES
 # ============================================================================
 
@@ -126,6 +135,47 @@ def _normalize_enum(
         raise ValidationError(
             f"Invalid {field_name}"
         )
+
+
+def _validate_pagination(
+    page,
+    per_page,
+):
+    """
+    Validate standard offset pagination parameters.
+
+    Defaults:
+        page=1
+        per_page=50
+
+    Maximum:
+        per_page=500
+    """
+
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page <= 0
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page <= 0
+    ):
+        raise ValidationError(
+            "Per-page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"Per-page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
 
 
 # ============================================================================
@@ -498,9 +548,6 @@ def deliver_notification(
     try:
         # --------------------------------------------------------------------
         # Mark the delivery attempt as SENT.
-        #
-        # SENT means the application has begun an external
-        # provider delivery attempt.
         # --------------------------------------------------------------------
 
         notification.status = NotificationStatus.SENT
@@ -510,9 +557,6 @@ def deliver_notification(
 
         # --------------------------------------------------------------------
         # Provider boundary.
-        #
-        # The provider implementation is responsible for
-        # communicating with EMAIL/SMS/PUSH infrastructure.
         # --------------------------------------------------------------------
 
         provider_success = _deliver_with_provider(
@@ -577,9 +621,20 @@ def get_user_notifications(
     clinic_id,
     *,
     unread_only=False,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
 ):
     """
-    Return notifications belonging to a clinic-owned user.
+    Return paginated notifications belonging to a
+    clinic-owned user.
+
+    Pagination:
+        page=1
+        per_page=50
+        maximum per_page=500
+
+    Results are ordered newest-first using both
+    created_at and id for deterministic ordering.
     """
 
     _validate_positive_id(
@@ -592,6 +647,11 @@ def get_user_notifications(
         clinic_id=clinic_id,
     )
 
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
     query = Notification.query.filter(
         Notification.clinic_id == clinic_id,
         Notification.user_id == user_id,
@@ -602,14 +662,26 @@ def get_user_notifications(
             Notification.is_read.is_(False),
         )
 
-    return (
-        query
-        .order_by(
-            Notification.created_at.desc(),
-            Notification.id.desc(),
-        )
-        .all()
+    query = query.order_by(
+        Notification.created_at.desc(),
+        Notification.id.desc(),
     )
+
+    pagination = query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    return {
+        "items": pagination.items,
+        "page": pagination.page,
+        "per_page": pagination.per_page,
+        "total": pagination.total,
+        "pages": pagination.pages,
+        "has_next": pagination.has_next,
+        "has_prev": pagination.has_prev,
+    }
 
 
 # ============================================================================
@@ -722,6 +794,9 @@ def mark_all_notifications_read(
 ):
     """
     Mark every unread notification for a user as read.
+
+    This remains a bulk mutation rather than a paginated
+    collection endpoint.
     """
 
     _validate_positive_id(

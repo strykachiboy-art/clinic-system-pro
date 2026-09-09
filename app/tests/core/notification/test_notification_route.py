@@ -90,8 +90,16 @@ def notification_obj(
         failed_at=failed_at,
         error_message=error_message,
         retry_count=retry_count,
-        created_at=created_at if created_at is not None else now,
-        updated_at=updated_at if updated_at is not None else now,
+        created_at=(
+            created_at
+            if created_at is not None
+            else now
+        ),
+        updated_at=(
+            updated_at
+            if updated_at is not None
+            else now
+        ),
     )
 
 
@@ -99,12 +107,50 @@ def valid_create_payload(user_id):
     return {
         "user_id": user_id,
         "title": "Appointment Reminder",
-        "message": "Your appointment is scheduled for tomorrow.",
+        "message": (
+            "Your appointment is scheduled for tomorrow."
+        ),
         "notification_type": NotificationType.SYSTEM.value,
         "priority": NotificationPriority.NORMAL.value,
         "channel": NotificationChannel.IN_APP.value,
         "reference_type": "Appointment",
         "reference_id": 123,
+    }
+
+
+def paginated_result(
+    items,
+    *,
+    page=1,
+    per_page=50,
+    total=None,
+    pages=None,
+    has_next=False,
+    has_prev=False,
+):
+    """
+    Build the exact service-layer pagination contract expected
+    by the notification route.
+    """
+
+    if total is None:
+        total = len(items)
+
+    if pages is None:
+        pages = (
+            (total + per_page - 1) // per_page
+            if total
+            else 0
+        )
+
+    return {
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_next": has_next,
+        "has_prev": has_prev,
     }
 
 
@@ -145,7 +191,9 @@ def test_create_notification_success(
         clinic_id=user.clinic_id,
         user_id=user.id,
         title="Appointment Reminder",
-        message="Your appointment is scheduled for tomorrow.",
+        message=(
+            "Your appointment is scheduled for tomorrow."
+        ),
         notification_type=NotificationType.SYSTEM,
         priority=NotificationPriority.NORMAL,
         channel=NotificationChannel.IN_APP,
@@ -179,10 +227,18 @@ def test_create_notification_success(
     assert data["message"] == (
         "Your appointment is scheduled for tomorrow."
     )
-    assert data["notification_type"] == NotificationType.SYSTEM.value
-    assert data["priority"] == NotificationPriority.NORMAL.value
-    assert data["channel"] == NotificationChannel.IN_APP.value
-    assert data["status"] == NotificationStatus.PENDING.value
+    assert data["notification_type"] == (
+        NotificationType.SYSTEM.value
+    )
+    assert data["priority"] == (
+        NotificationPriority.NORMAL.value
+    )
+    assert data["channel"] == (
+        NotificationChannel.IN_APP.value
+    )
+    assert data["status"] == (
+        NotificationStatus.PENDING.value
+    )
     assert data["reference_type"] == "Appointment"
     assert data["reference_id"] == 123
     assert data["is_read"] is False
@@ -192,7 +248,9 @@ def test_create_notification_success(
         clinic_id=user.clinic_id,
         user_id=user.id,
         title="Appointment Reminder",
-        message="Your appointment is scheduled for tomorrow.",
+        message=(
+            "Your appointment is scheduled for tomorrow."
+        ),
         notification_type=NotificationType.SYSTEM.value,
         priority=NotificationPriority.NORMAL.value,
         channel=NotificationChannel.IN_APP.value,
@@ -229,7 +287,10 @@ def test_create_notification_uses_authenticated_clinic(
 
     assert response.status_code == 201
 
-    assert service.call_args.kwargs["clinic_id"] == user.clinic_id
+    assert (
+        service.call_args.kwargs["clinic_id"]
+        == user.clinic_id
+    )
 
 
 def test_create_notification_rejects_client_clinic_id(
@@ -290,59 +351,63 @@ def test_create_notification_rejects_protected_fields(
     "payload",
     [
         {},
-
         {
             "user_id": 1,
         },
-
         {
             "user_id": 1,
             "title": "",
             "message": "Message",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
         },
-
         {
             "user_id": 1,
             "title": "Title",
             "message": "",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
         },
-
         {
             "user_id": 0,
             "title": "Title",
             "message": "Message",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
         },
-
         {
             "user_id": -1,
             "title": "Title",
             "message": "Message",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
         },
-
         {
             "user_id": 1,
             "title": "Title",
             "message": "Message",
             "notification_type": "invalid-type",
         },
-
         {
             "user_id": 1,
             "title": "Title",
             "message": "Message",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
             "priority": "invalid-priority",
         },
-
         {
             "user_id": 1,
             "title": "Title",
             "message": "Message",
-            "notification_type": NotificationType.SYSTEM.value,
+            "notification_type": (
+                NotificationType.SYSTEM.value
+            ),
             "channel": "invalid-channel",
         },
     ],
@@ -456,7 +521,17 @@ def test_list_notifications_success(
         ),
     ]
 
-    service = Mock(return_value=notifications)
+    service = Mock(
+        return_value=paginated_result(
+            notifications,
+            page=1,
+            per_page=50,
+            total=2,
+            pages=1,
+            has_next=False,
+            has_prev=False,
+        )
+    )
 
     monkeypatch.setattr(
         notification_routes,
@@ -471,14 +546,276 @@ def test_list_notifications_success(
 
     body = assert_success_response(response, 200)
 
-    assert len(body["data"]) == 2
-    assert body["data"][0]["id"] == 2
-    assert body["data"][1]["id"] == 1
+    data = body["data"]
+
+    assert len(data["items"]) == 2
+    assert data["items"][0]["id"] == 2
+    assert data["items"][1]["id"] == 1
+
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert data["total"] == 2
+    assert data["pages"] == 1
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     service.assert_called_once_with(
         user_id=user.id,
         clinic_id=user.clinic_id,
+        unread_only=False,
+        page=1,
+        per_page=50,
     )
+
+
+def test_list_notifications_custom_pagination(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    notifications = [
+        notification_obj(
+            id=4,
+            clinic_id=user.clinic_id,
+            user_id=user.id,
+        ),
+        notification_obj(
+            id=3,
+            clinic_id=user.clinic_id,
+            user_id=user.id,
+        ),
+    ]
+
+    service = Mock(
+        return_value=paginated_result(
+            notifications,
+            page=2,
+            per_page=2,
+            total=5,
+            pages=3,
+            has_next=True,
+            has_prev=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?page=2&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    body = assert_success_response(response, 200)
+
+    data = body["data"]
+
+    assert data["page"] == 2
+    assert data["per_page"] == 2
+    assert data["total"] == 5
+    assert data["pages"] == 3
+    assert data["has_next"] is True
+    assert data["has_prev"] is True
+
+    assert [
+        item["id"]
+        for item in data["items"]
+    ] == [4, 3]
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=False,
+        page=2,
+        per_page=2,
+    )
+
+
+def test_list_notifications_first_page(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    notifications = [
+        notification_obj(id=5),
+        notification_obj(id=4),
+    ]
+
+    service = Mock(
+        return_value=paginated_result(
+            notifications,
+            page=1,
+            per_page=2,
+            total=5,
+            pages=3,
+            has_next=True,
+            has_prev=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?page=1&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    data = response.get_json()["data"]
+
+    assert data["page"] == 1
+    assert data["has_next"] is True
+    assert data["has_prev"] is False
+    assert len(data["items"]) == 2
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=False,
+        page=1,
+        per_page=2,
+    )
+
+
+def test_list_notifications_middle_page(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    notifications = [
+        notification_obj(id=3),
+        notification_obj(id=2),
+    ]
+
+    service = Mock(
+        return_value=paginated_result(
+            notifications,
+            page=2,
+            per_page=2,
+            total=5,
+            pages=3,
+            has_next=True,
+            has_prev=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?page=2&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    data = response.get_json()["data"]
+
+    assert data["page"] == 2
+    assert data["has_next"] is True
+    assert data["has_prev"] is True
+
+    assert [
+        item["id"]
+        for item in data["items"]
+    ] == [3, 2]
+
+
+def test_list_notifications_last_page(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    notification = notification_obj(id=1)
+
+    service = Mock(
+        return_value=paginated_result(
+            [notification],
+            page=3,
+            per_page=2,
+            total=5,
+            pages=3,
+            has_next=False,
+            has_prev=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?page=3&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    data = response.get_json()["data"]
+
+    assert data["page"] == 3
+    assert data["has_next"] is False
+    assert data["has_prev"] is True
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == 1
+
+
+def test_list_notifications_empty_page(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=2,
+            per_page=2,
+            total=2,
+            pages=1,
+            has_next=False,
+            has_prev=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?page=2&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    body = assert_success_response(response, 200)
+
+    data = body["data"]
+
+    assert data["items"] == []
+    assert data["page"] == 2
+    assert data["per_page"] == 2
+    assert data["total"] == 2
+    assert data["pages"] == 1
+    assert data["has_next"] is False
+    assert data["has_prev"] is True
 
 
 def test_list_notifications_empty(
@@ -488,7 +825,17 @@ def test_list_notifications_empty(
     monkeypatch,
     notification_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=1,
+            per_page=50,
+            total=0,
+            pages=0,
+            has_next=False,
+            has_prev=False,
+        )
+    )
 
     monkeypatch.setattr(
         notification_routes,
@@ -503,11 +850,22 @@ def test_list_notifications_empty(
 
     body = assert_success_response(response, 200)
 
-    assert body["data"] == []
+    data = body["data"]
+
+    assert data["items"] == []
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert data["total"] == 0
+    assert data["pages"] == 0
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     service.assert_called_once_with(
         user_id=user.id,
         clinic_id=user.clinic_id,
+        unread_only=False,
+        page=1,
+        per_page=50,
     )
 
 
@@ -566,7 +924,80 @@ def test_list_notifications_domain_error(
 
     body = assert_error_response(response, 400)
 
-    assert body["error"] == "Invalid notification scope"
+    assert body["error"] == (
+        "Invalid notification scope"
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "?page=0",
+        "?page=-1",
+        "?page=abc",
+        "?per_page=0",
+        "?per_page=-1",
+        "?per_page=501",
+        "?per_page=abc",
+    ],
+)
+def test_list_notifications_rejects_invalid_pagination(
+    client,
+    user,
+    auth_headers_for,
+    query,
+):
+    response = client.get(
+        f"/api/notifications/{query}",
+        headers=auth_headers_for(user),
+    )
+
+    body = assert_error_response(response, 422)
+
+    assert body["success"] is False
+
+
+def test_list_notifications_allows_max_per_page(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=1,
+            per_page=500,
+            total=0,
+            pages=0,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/?per_page=500",
+        headers=auth_headers_for(user),
+    )
+
+    assert response.status_code == 200
+
+    data = response.get_json()["data"]
+
+    assert data["per_page"] == 500
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=False,
+        page=1,
+        per_page=500,
+    )
 
 
 # ============================================================================
@@ -591,7 +1022,17 @@ def test_list_unread_notifications_success(
         ),
     ]
 
-    service = Mock(return_value=unread)
+    service = Mock(
+        return_value=paginated_result(
+            unread,
+            page=1,
+            per_page=50,
+            total=1,
+            pages=1,
+            has_next=False,
+            has_prev=False,
+        )
+    )
 
     monkeypatch.setattr(
         notification_routes,
@@ -606,14 +1047,95 @@ def test_list_unread_notifications_success(
 
     body = assert_success_response(response, 200)
 
-    assert len(body["data"]) == 1
-    assert body["data"][0]["id"] == 10
-    assert body["data"][0]["is_read"] is False
+    data = body["data"]
+
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == 10
+    assert data["items"][0]["is_read"] is False
+
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert data["total"] == 1
+    assert data["pages"] == 1
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     service.assert_called_once_with(
         user_id=user.id,
         clinic_id=user.clinic_id,
         unread_only=True,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_list_unread_notifications_custom_pagination(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    unread = [
+        notification_obj(
+            id=8,
+            clinic_id=user.clinic_id,
+            user_id=user.id,
+            is_read=False,
+        ),
+        notification_obj(
+            id=7,
+            clinic_id=user.clinic_id,
+            user_id=user.id,
+            is_read=False,
+        ),
+    ]
+
+    service = Mock(
+        return_value=paginated_result(
+            unread,
+            page=2,
+            per_page=2,
+            total=5,
+            pages=3,
+            has_next=True,
+            has_prev=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/unread?page=2&per_page=2",
+        headers=auth_headers_for(user),
+    )
+
+    body = assert_success_response(response, 200)
+
+    data = body["data"]
+
+    assert data["page"] == 2
+    assert data["per_page"] == 2
+    assert data["total"] == 5
+    assert data["pages"] == 3
+    assert data["has_next"] is True
+    assert data["has_prev"] is True
+
+    assert [
+        item["id"]
+        for item in data["items"]
+    ] == [8, 7]
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=True,
+        page=2,
+        per_page=2,
     )
 
 
@@ -624,7 +1146,17 @@ def test_list_unread_notifications_empty(
     monkeypatch,
     notification_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=1,
+            per_page=50,
+            total=0,
+            pages=0,
+            has_next=False,
+            has_prev=False,
+        )
+    )
 
     monkeypatch.setattr(
         notification_routes,
@@ -639,13 +1171,49 @@ def test_list_unread_notifications_empty(
 
     body = assert_success_response(response, 200)
 
-    assert body["data"] == []
+    data = body["data"]
+
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["pages"] == 0
+    assert data["has_next"] is False
+    assert data["has_prev"] is False
 
     service.assert_called_once_with(
         user_id=user.id,
         clinic_id=user.clinic_id,
         unread_only=True,
+        page=1,
+        per_page=50,
     )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "?page=0",
+        "?page=-1",
+        "?page=abc",
+        "?per_page=0",
+        "?per_page=-1",
+        "?per_page=501",
+        "?per_page=abc",
+    ],
+)
+def test_list_unread_notifications_rejects_invalid_pagination(
+    client,
+    user,
+    auth_headers_for,
+    query,
+):
+    response = client.get(
+        f"/api/notifications/unread{query}",
+        headers=auth_headers_for(user),
+    )
+
+    body = assert_error_response(response, 422)
+
+    assert body["success"] is False
 
 
 def test_list_unread_notifications_not_found(
@@ -1147,7 +1715,9 @@ def test_authenticated_user_must_exist(
 
     body = assert_domain_error(response, 404)
 
-    assert body["error"] == "Authenticated user not found"
+    assert body["error"] == (
+        "Authenticated user not found"
+    )
 
 
 def test_authenticated_user_identity_must_be_integer(
@@ -1172,7 +1742,9 @@ def test_authenticated_user_identity_must_be_integer(
 
     body = assert_domain_error(response, 400)
 
-    assert body["error"] == "Invalid authenticated user identity"
+    assert body["error"] == (
+        "Invalid authenticated user identity"
+    )
 
 
 def test_inactive_authenticated_user_is_rejected(
@@ -1194,7 +1766,9 @@ def test_inactive_authenticated_user_is_rejected(
 
     body = assert_domain_error(response, 400)
 
-    assert body["error"] == "Authenticated user is inactive"
+    assert body["error"] == (
+        "Authenticated user is inactive"
+    )
 
 
 def test_authenticated_user_without_clinic_is_rejected(
@@ -1207,7 +1781,9 @@ def test_authenticated_user_without_clinic_is_rejected(
 
     response = client.get(
         "/api/notifications/",
-        headers=auth_headers_for(user_without_clinic),
+        headers=auth_headers_for(
+            user_without_clinic
+        ),
     )
 
     body = assert_domain_error(response, 400)
@@ -1273,6 +1849,82 @@ def test_get_notification_passes_authenticated_user_and_clinic(
         notification_id=15,
         user_id=user.id,
         clinic_id=user.clinic_id,
+    )
+
+
+def test_list_notifications_passes_authenticated_user_and_clinic(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=1,
+            per_page=50,
+            total=0,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/",
+        headers=auth_headers_for(user),
+    )
+
+    assert response.status_code == 200
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=False,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_unread_notifications_pass_authenticated_user_and_clinic(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    notification_routes,
+):
+    service = Mock(
+        return_value=paginated_result(
+            [],
+            page=1,
+            per_page=50,
+            total=0,
+        )
+    )
+
+    monkeypatch.setattr(
+        notification_routes,
+        "get_user_notifications",
+        service,
+    )
+
+    response = client.get(
+        "/api/notifications/unread",
+        headers=auth_headers_for(user),
+    )
+
+    assert response.status_code == 200
+
+    service.assert_called_once_with(
+        user_id=user.id,
+        clinic_id=user.clinic_id,
+        unread_only=True,
+        page=1,
+        per_page=50,
     )
 
 
@@ -1447,9 +2099,15 @@ def test_notification_response_serializes_all_timestamps(
 
     assert data["read_at"] == read_at.isoformat()
     assert data["sent_at"] == sent_at.isoformat()
-    assert data["delivered_at"] == delivered_at.isoformat()
-    assert data["created_at"] == created_at.isoformat()
-    assert data["updated_at"] == updated_at.isoformat()
+    assert data["delivered_at"] == (
+        delivered_at.isoformat()
+    )
+    assert data["created_at"] == (
+        created_at.isoformat()
+    )
+    assert data["updated_at"] == (
+        updated_at.isoformat()
+    )
 
 
 def test_notification_response_serializes_failed_notification(
@@ -1491,11 +2149,19 @@ def test_notification_response_serializes_failed_notification(
 
     data = body["data"]
 
-    assert data["status"] == NotificationStatus.FAILED.value
-    assert data["channel"] == NotificationChannel.EMAIL.value
-    assert data["error_message"] == "Provider unavailable"
+    assert data["status"] == (
+        NotificationStatus.FAILED.value
+    )
+    assert data["channel"] == (
+        NotificationChannel.EMAIL.value
+    )
+    assert data["error_message"] == (
+        "Provider unavailable"
+    )
     assert data["retry_count"] == 3
-    assert data["failed_at"] == failed_at.isoformat()
+    assert data["failed_at"] == (
+        failed_at.isoformat()
+    )
 
 
 def test_notification_response_serializes_read_notification(
@@ -1536,5 +2202,7 @@ def test_notification_response_serializes_read_notification(
     data = body["data"]
 
     assert data["is_read"] is True
-    assert data["status"] == NotificationStatus.READ.value
+    assert data["status"] == (
+        NotificationStatus.READ.value
+    )
     assert data["read_at"] == read_at.isoformat()

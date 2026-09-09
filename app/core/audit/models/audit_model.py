@@ -62,6 +62,7 @@ class AuditLog(db.Model):
     ip_address = db.Column(
         db.String(45),
         nullable=True,
+        index=True,
     )
 
     created_at = db.Column(

@@ -14,6 +14,7 @@ from app.core.exceptions import (
 
 from app.core.notifications.schemas.notification_schema import (
     NotificationCreateSchema,
+    NotificationListQuerySchema,
     NotificationReadSchema,
 )
 
@@ -26,11 +27,6 @@ from app.core.notifications.services.notification_service import (
 )
 
 
-# ============================================================================
-# BLUEPRINT
-# ============================================================================
-
-
 notification_bp = Blueprint(
     "notification",
     __name__,
@@ -38,21 +34,32 @@ notification_bp = Blueprint(
 )
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def _payload(schema):
     """
-    Validate incoming JSON using the supplied Pydantic schema.
+    Validate and parse a JSON request payload.
     """
-
     try:
         return schema.model_validate(
             request.get_json(silent=True) or {}
         )
+    except PydanticValidationError as exc:
+        return (
+            jsonify({
+                "success": False,
+                "error": exc.errors(),
+            }),
+            422,
+        )
 
+
+def _query_payload(schema):
+    """
+    Validate and parse query-string parameters.
+    """
+    try:
+        return schema.model_validate(
+            request.args.to_dict()
+        )
     except PydanticValidationError as exc:
         return (
             jsonify({
@@ -65,17 +72,15 @@ def _payload(schema):
 
 def _get_authenticated_user():
     """
-    Resolve the authenticated JWT identity to an active User.
+    Return the active authenticated user.
 
-    The authenticated user's clinic_id is the tenant boundary
-    for notification operations.
+    Clinic ownership is derived from the authenticated
+    user and is never accepted from the client.
     """
-
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-
     except (TypeError, ValueError):
         raise ValidationError(
             "Invalid authenticated user identity"
@@ -105,9 +110,8 @@ def _get_authenticated_user():
 
 def _serialize_notification(notification):
     """
-    Convert a Notification model into an API-safe response.
+    Serialize a notification model into an API-safe dictionary.
     """
-
     return {
         "id": notification.id,
         "clinic_id": notification.clinic_id,
@@ -158,35 +162,31 @@ def _serialize_notification(notification):
     }
 
 
-# ============================================================================
-# CREATE NOTIFICATION
-# ============================================================================
+def _serialize_notification_page(result):
+    """
+    Serialize a paginated notification service result.
+    """
+    return {
+        "items": [
+            _serialize_notification(notification)
+            for notification in result["items"]
+        ],
+        "page": result["page"],
+        "per_page": result["per_page"],
+        "total": result["total"],
+        "pages": result["pages"],
+        "has_next": result["has_next"],
+        "has_prev": result["has_prev"],
+    }
 
 
 @notification_bp.post("/")
 @jwt_required()
 def create():
     """
-    Create a notification for a user in the authenticated
-    user's clinic.
-
-    POST /api/notifications/
-
-    This endpoint is intended for trusted application-level
-    creation. The clinic is always derived from the
-    authenticated user.
-
-    The request cannot control:
-        - clinic_id
-        - status
-        - is_read
-        - retry_count
-        - delivery timestamps
+    Create a notification for the authenticated user.
     """
-
-    payload = _payload(
-        NotificationCreateSchema
-    )
+    payload = _payload(NotificationCreateSchema)
 
     if isinstance(payload, tuple):
         return payload
@@ -201,9 +201,7 @@ def create():
 
         return jsonify({
             "success": True,
-            "data": _serialize_notification(
-                notification
-            ),
+            "data": _serialize_notification(notification),
         }), 201
 
     except NotFoundError as exc:
@@ -212,46 +210,49 @@ def create():
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
         }), 400
-
-
-# ============================================================================
-# LIST USER NOTIFICATIONS
-# ============================================================================
 
 
 @notification_bp.get("/")
 @jwt_required()
 def list_notifications():
     """
-    Get notifications belonging to the authenticated user.
+    Return paginated notifications for the authenticated user.
 
-    GET /api/notifications/
+    Default:
+        page=1
+        per_page=50
+
+    Maximum:
+        per_page=500
     """
+    query_payload = _query_payload(
+        NotificationListQuerySchema
+    )
+
+    if isinstance(query_payload, tuple):
+        return query_payload
 
     try:
         user = _get_authenticated_user()
 
-        notifications = get_user_notifications(
+        result = get_user_notifications(
             user_id=user.id,
             clinic_id=user.clinic_id,
+            unread_only=False,
+            page=query_payload.page,
+            per_page=query_payload.per_page,
         )
 
         return jsonify({
             "success": True,
-            "data": [
-                _serialize_notification(
-                    notification
-                )
-                for notification in notifications
-            ],
+            "data": _serialize_notification_page(
+                result
+            ),
         }), 200
 
     except NotFoundError as exc:
@@ -260,48 +261,43 @@ def list_notifications():
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
         }), 400
-
-
-# ============================================================================
-# LIST UNREAD NOTIFICATIONS
-# ============================================================================
 
 
 @notification_bp.get("/unread")
 @jwt_required()
 def unread_notifications():
     """
-    Get unread notifications belonging to the
-    authenticated user.
-
-    GET /api/notifications/unread
+    Return paginated unread notifications for
+    the authenticated user.
     """
+    query_payload = _query_payload(
+        NotificationListQuerySchema
+    )
+
+    if isinstance(query_payload, tuple):
+        return query_payload
 
     try:
         user = _get_authenticated_user()
 
-        notifications = get_user_notifications(
+        result = get_user_notifications(
             user_id=user.id,
             clinic_id=user.clinic_id,
             unread_only=True,
+            page=query_payload.page,
+            per_page=query_payload.per_page,
         )
 
         return jsonify({
             "success": True,
-            "data": [
-                _serialize_notification(
-                    notification
-                )
-                for notification in notifications
-            ],
+            "data": _serialize_notification_page(
+                result
+            ),
         }), 200
 
     except NotFoundError as exc:
@@ -310,31 +306,20 @@ def unread_notifications():
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
         }), 400
 
 
-# ============================================================================
-# GET SINGLE NOTIFICATION
-# ============================================================================
-
-
 @notification_bp.get("/<int:notification_id>")
 @jwt_required()
 def get(notification_id: int):
     """
-    Get one notification belonging to the
-    authenticated user.
-
-    GET /api/notifications/<notification_id>
+    Return one notification belonging to the
+    authenticated user and clinic.
     """
-
     try:
         user = _get_authenticated_user()
 
@@ -357,19 +342,11 @@ def get(notification_id: int):
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
         }), 400
-
-
-# ============================================================================
-# MARK ONE AS READ
-# ============================================================================
 
 
 @notification_bp.post("/<int:notification_id>/read")
@@ -377,13 +354,8 @@ def get(notification_id: int):
 def read(notification_id: int):
     """
     Mark one notification as read.
-
-    POST /api/notifications/<notification_id>/read
     """
-
-    payload = _payload(
-        NotificationReadSchema
-    )
+    payload = _payload(NotificationReadSchema)
 
     if isinstance(payload, tuple):
         return payload
@@ -410,34 +382,21 @@ def read(notification_id: int):
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),
         }), 400
 
 
-# ============================================================================
-# MARK ALL AS READ
-# ============================================================================
-
-
 @notification_bp.post("/read-all")
 @jwt_required()
 def read_all():
     """
-    Mark all unread notifications belonging to the
-    authenticated user as read.
-
-    POST /api/notifications/read-all
+    Mark all unread notifications for the authenticated
+    user and clinic as read.
     """
-
-    payload = _payload(
-        NotificationReadSchema
-    )
+    payload = _payload(NotificationReadSchema)
 
     if isinstance(payload, tuple):
         return payload
@@ -463,10 +422,7 @@ def read_all():
             "error": str(exc),
         }), 404
 
-    except (
-        ValidationError,
-        ConflictError,
-    ) as exc:
+    except (ValidationError, ConflictError) as exc:
         return jsonify({
             "success": False,
             "error": str(exc),

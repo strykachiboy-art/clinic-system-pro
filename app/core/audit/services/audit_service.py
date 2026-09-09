@@ -7,14 +7,26 @@ from app.extensions import db
 
 from app.core.audit.models.audit_model import AuditLog
 from app.core.enums.audit_enums import AuditAction
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import (
+    NotFoundError,
+    ValidationError,
+)
+
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 100
+MAX_IP_ADDRESS_LENGTH = 45
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _validate_positive_id(value, field_name: str) -> None:
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> None:
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
@@ -32,7 +44,9 @@ def _normalize_action(action) -> AuditAction:
     try:
         return AuditAction(action)
     except (TypeError, ValueError):
-        raise ValidationError("Invalid audit action")
+        raise ValidationError(
+            "Invalid audit action"
+        )
 
 
 def _normalize_optional_string(
@@ -55,7 +69,8 @@ def _normalize_optional_string(
 
     if len(value) > max_length:
         raise ValidationError(
-            f"{field_name} cannot exceed {max_length} characters"
+            f"{field_name} cannot exceed "
+            f"{max_length} characters"
         )
 
     return value
@@ -76,6 +91,56 @@ def _normalize_optional_id(
     return value
 
 
+def _normalize_ip_address(
+    value,
+):
+    """
+    Normalize an optional client IP address.
+
+    IP addresses may be absent for background jobs,
+    scheduled tasks, system operations, or internal
+    service calls.
+    """
+    return _normalize_optional_string(
+        value,
+        "IP address",
+        MAX_IP_ADDRESS_LENGTH,
+    )
+
+
+def _validate_pagination(
+    page: int,
+    per_page: int,
+):
+    """
+    Validate and normalize pagination parameters.
+    """
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page <= 0
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page <= 0
+    ):
+        raise ValidationError(
+            "Per page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"Per page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
 def create_audit_log(
     *,
     action: AuditAction,
@@ -88,15 +153,20 @@ def create_audit_log(
     resource_type: Optional[str] = None,
     resource_id: Optional[int] = None,
     details=None,
+    ip_address: Optional[str] = None,
 ) -> AuditLog:
     """
     Create an audit record.
 
-    Supports both the current entity_* API and the legacy
-    resource_* aliases used by older services.
+    Supports both the current entity_* API and the
+    legacy resource_* aliases used by older services.
 
-    The caller is responsible for committing the surrounding
-    transaction.
+    The caller is responsible for committing the
+    surrounding transaction.
+
+    IP address is optional because audit records may
+    originate from API requests, background jobs,
+    scheduled tasks, or internal system operations.
     """
 
     action = _normalize_action(action)
@@ -140,6 +210,10 @@ def create_audit_log(
         max_length=255,
     )
 
+    ip_address = _normalize_ip_address(
+        ip_address
+    )
+
     log = AuditLog(
         user_id=user_id,
         action=action,
@@ -152,6 +226,7 @@ def create_audit_log(
             if new_value is not None
             else details
         ),
+        ip_address=ip_address,
     )
 
     db.session.add(log)
@@ -165,13 +240,16 @@ def list_audit_logs(
     action: Optional[AuditAction] = None,
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
-    page: int = 1,
-    per_page: int = 20,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
     """
     Return paginated audit logs.
 
     All filters are optional.
+
+    Results are ordered newest-first using both
+    created_at and id for deterministic pagination.
     """
 
     if user_id is not None:
@@ -186,28 +264,10 @@ def list_audit_logs(
             "Entity ID",
         )
 
-    if (
-        isinstance(page, bool)
-        or not isinstance(page, int)
-        or page <= 0
-    ):
-        raise ValidationError(
-            "Page must be a positive integer"
-        )
-
-    if (
-        isinstance(per_page, bool)
-        or not isinstance(per_page, int)
-        or per_page <= 0
-    ):
-        raise ValidationError(
-            "Per page must be a positive integer"
-        )
-
-    if per_page > 100:
-        raise ValidationError(
-            "Per page cannot exceed 100"
-        )
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     if action is not None:
         action = _normalize_action(action)
@@ -254,7 +314,12 @@ def list_audit_logs(
     )
 
 
-def get_audit_log_by_id(log_id: int) -> AuditLog:
+def get_audit_log_by_id(
+    log_id: int,
+) -> AuditLog:
+    """
+    Return one audit log by primary key.
+    """
     _validate_positive_id(
         log_id,
         "Audit log ID",

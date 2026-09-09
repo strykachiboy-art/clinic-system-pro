@@ -518,9 +518,6 @@ def test_deliver_notification_provider_rejection_marks_failed(
         )
         notification_id = notification.id
 
-        # The Celery failure path performs a rollback.
-        # Commit the fixture record first so the rollback does not
-        # remove the notification itself.
         db_session.commit()
 
         monkeypatch.setattr(
@@ -565,8 +562,6 @@ def test_deliver_notification_provider_exception_marks_failed(
         )
         notification_id = notification.id
 
-        # Persist the notification before the worker transaction.
-        # The worker rolls back when the provider raises.
         db_session.commit()
 
         def failing_provider(_notification):
@@ -611,8 +606,6 @@ def test_deliver_notification_truncates_provider_error(
         )
         notification_id = notification.id
 
-        # Persist the notification before the worker transaction.
-        # Otherwise the worker rollback can roll back the fixture insert.
         db_session.commit()
 
         long_error = "x" * 5000
@@ -672,7 +665,7 @@ def test_get_user_notifications_returns_user_notifications(
             clinic_id=clinic.id,
         )
 
-        ids = [item.id for item in result]
+        ids = [item.id for item in result["items"]]
 
         assert first.id in ids
         assert second.id in ids
@@ -704,7 +697,7 @@ def test_get_user_notifications_unread_only(
             unread_only=True,
         )
 
-        assert [item.id for item in result] == [unread.id]
+        assert [item.id for item in result["items"]] == [unread.id]
 
 
 def test_get_user_notifications_is_tenant_scoped(
@@ -732,7 +725,7 @@ def test_get_user_notifications_is_tenant_scoped(
         assert all(
             item.clinic_id == clinic.id
             and item.user_id == user.id
-            for item in result
+            for item in result["items"]
         )
 
 
@@ -758,8 +751,311 @@ def test_get_user_notifications_orders_newest_first(
             clinic_id=clinic.id,
         )
 
-        assert result[0].id == second.id
-        assert result[1].id == first.id
+        assert result["items"][0].id == second.id
+        assert result["items"][1].id == first.id
+
+
+def test_get_user_notifications_returns_default_pagination(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        for index in range(3):
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+                title=f"Notification {index}",
+            )
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+        )
+
+        assert result["page"] == 1
+        assert result["per_page"] == 50
+        assert result["total"] == 3
+        assert result["pages"] == 1
+        assert result["has_next"] is False
+        assert result["has_prev"] is False
+        assert len(result["items"]) == 3
+
+
+def test_get_user_notifications_custom_pagination(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        for index in range(5):
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+                title=f"Notification {index}",
+            )
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert result["page"] == 2
+        assert result["per_page"] == 2
+        assert result["total"] == 5
+        assert result["pages"] == 3
+        assert result["has_next"] is True
+        assert result["has_prev"] is True
+        assert len(result["items"]) == 2
+
+
+def test_get_user_notifications_first_page(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        notifications = [
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+            )
+            for _ in range(5)
+        ]
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in result["items"]] == [
+            notifications[-1].id,
+            notifications[-2].id,
+        ]
+        assert result["has_prev"] is False
+        assert result["has_next"] is True
+
+
+def test_get_user_notifications_middle_page(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        notifications = [
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+            )
+            for _ in range(5)
+        ]
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert [item.id for item in result["items"]] == [
+            notifications[-3].id,
+            notifications[-4].id,
+        ]
+        assert result["has_prev"] is True
+        assert result["has_next"] is True
+
+
+def test_get_user_notifications_last_page(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        notifications = [
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+            )
+            for _ in range(5)
+        ]
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            page=3,
+            per_page=2,
+        )
+
+        assert [item.id for item in result["items"]] == [
+            notifications[0].id,
+        ]
+        assert result["has_prev"] is True
+        assert result["has_next"] is False
+
+
+def test_get_user_notifications_empty_page(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        for _ in range(2):
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+            )
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert result["items"] == []
+        assert result["page"] == 2
+        assert result["per_page"] == 2
+        assert result["total"] == 2
+        assert result["pages"] == 1
+        assert result["has_prev"] is True
+        assert result["has_next"] is False
+
+
+def test_get_user_notifications_empty_collection(
+    app,
+    clinic,
+    user,
+):
+    with app.app_context():
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+        )
+
+        assert result["items"] == []
+        assert result["page"] == 1
+        assert result["per_page"] == 50
+        assert result["total"] == 0
+        assert result["pages"] == 0
+        assert result["has_next"] is False
+        assert result["has_prev"] is False
+
+
+def test_get_user_notifications_unread_only_is_paginated(
+    app,
+    make_notification,
+    clinic,
+    user,
+):
+    with app.app_context():
+        unread_notifications = [
+            make_notification(
+                clinic_id=clinic.id,
+                user_id=user.id,
+                is_read=False,
+            )
+            for _ in range(5)
+        ]
+
+        make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            is_read=True,
+            status=NotificationStatus.READ,
+        )
+
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            unread_only=True,
+            page=2,
+            per_page=2,
+        )
+
+        assert result["total"] == 5
+        assert result["pages"] == 3
+        assert len(result["items"]) == 2
+        assert result["has_prev"] is True
+        assert result["has_next"] is True
+
+        assert [item.id for item in result["items"]] == [
+            unread_notifications[-3].id,
+            unread_notifications[-4].id,
+        ]
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        0,
+        -1,
+        True,
+        False,
+    ],
+)
+def test_get_user_notifications_rejects_invalid_page(
+    app,
+    clinic,
+    user,
+    page,
+):
+    with app.app_context():
+        with pytest.raises(ValidationError):
+            notification_service.get_user_notifications(
+                user_id=user.id,
+                clinic_id=clinic.id,
+                page=page,
+            )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        501,
+    ],
+)
+def test_get_user_notifications_rejects_invalid_per_page(
+    app,
+    clinic,
+    user,
+    per_page,
+):
+    with app.app_context():
+        with pytest.raises(ValidationError):
+            notification_service.get_user_notifications(
+                user_id=user.id,
+                clinic_id=clinic.id,
+                per_page=per_page,
+            )
+
+
+def test_get_user_notifications_allows_max_per_page(
+    app,
+    clinic,
+    user,
+):
+    with app.app_context():
+        result = notification_service.get_user_notifications(
+            user_id=user.id,
+            clinic_id=clinic.id,
+            per_page=500,
+        )
+
+        assert result["per_page"] == 500
 
 
 # ============================================================================

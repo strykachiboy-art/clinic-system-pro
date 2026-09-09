@@ -29,7 +29,7 @@ def _get_int_query_param(
     Parse an integer query parameter without silently converting malformed
     values to None.
 
-    Example:
+    Examples:
         ?page=2     -> 2
         ?page=abc   -> ValidationError
         missing     -> default
@@ -58,8 +58,25 @@ def _get_int_query_param(
 @audit_bp.get("")
 @role_required(Role.ADMIN)
 def get_audit_logs():
-    user_id = _get_int_query_param("user_id")
-    entity_id = _get_int_query_param("entity_id")
+    """
+    Return paginated audit logs.
+
+    Supported query parameters:
+        user_id
+        action
+        entity_type
+        entity_id
+        page
+        per_page
+    """
+
+    user_id = _get_int_query_param(
+        "user_id",
+    )
+
+    entity_id = _get_int_query_param(
+        "entity_id",
+    )
 
     page = _get_int_query_param(
         "page",
@@ -71,7 +88,9 @@ def get_audit_logs():
         default=20,
     )
 
-    action_value = request.args.get("action")
+    action_value = request.args.get(
+        "action",
+    )
 
     action = None
 
@@ -84,14 +103,16 @@ def get_audit_logs():
             )
 
         try:
-            action = AuditAction(action_value)
+            action = AuditAction(
+                action_value
+            )
         except ValueError:
             raise ValidationError(
                 "Invalid audit action"
             )
 
     entity_type = request.args.get(
-        "entity_type"
+        "entity_type",
     )
 
     pagination = list_audit_logs(
@@ -104,9 +125,9 @@ def get_audit_logs():
     )
 
     response_data = [
-        AuditLogResponseSchema.model_validate(log).model_dump(
-            mode="json"
-        )
+        AuditLogResponseSchema
+        .model_validate(log)
+        .model_dump(mode="json")
         for log in pagination.items
     ]
 
@@ -119,6 +140,8 @@ def get_audit_logs():
                 "page": pagination.page,
                 "per_page": pagination.per_page,
                 "pages": pagination.pages,
+                "has_next": pagination.has_next,
+                "has_prev": pagination.has_prev,
             },
         }
     ), 200
@@ -127,7 +150,13 @@ def get_audit_logs():
 @audit_bp.get("/<int:log_id>")
 @role_required(Role.ADMIN)
 def get_audit_log(log_id: int):
-    log = get_audit_log_by_id(log_id)
+    """
+    Return a single audit log by ID.
+    """
+
+    log = get_audit_log_by_id(
+        log_id,
+    )
 
     result = (
         AuditLogResponseSchema
