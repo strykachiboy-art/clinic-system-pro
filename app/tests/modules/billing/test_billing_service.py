@@ -27,15 +27,65 @@ from app.modules.billing.services import billing_service
 # ============================================================================
 
 
+class FakePage:
+    def __init__(
+        self,
+        items=None,
+        page=1,
+        per_page=50,
+        total=None,
+    ):
+        self.items = items or []
+        self.page = page
+        self.per_page = per_page
+        self.total = (
+            len(self.items)
+            if total is None
+            else total
+        )
+        self.pages = (
+            0
+            if self.total == 0
+            else (
+                self.total
+                + self.per_page
+                - 1
+            )
+            // self.per_page
+        )
+        self.has_next = (
+            self.page < self.pages
+        )
+        self.has_prev = (
+            self.page > 1
+        )
+
+
 class FakeQuery:
-    def __init__(self, result=None, results=None):
+    def __init__(
+        self,
+        result=None,
+        results=None,
+        page=None,
+    ):
         self.result = result
         self.results = results or []
+        self.page_result = page
+        self.filter_calls = []
+        self.order_by_calls = []
+        self.with_for_update_called = False
+        self.paginate_calls = []
 
     def filter(self, *args):
+        self.filter_calls.append(args)
         return self
 
     def order_by(self, *args):
+        self.order_by_calls.append(args)
+        return self
+
+    def with_for_update(self):
+        self.with_for_update_called = True
         return self
 
     def first(self):
@@ -43,6 +93,74 @@ class FakeQuery:
 
     def all(self):
         return self.results
+
+    def paginate(
+        self,
+        page,
+        per_page,
+        error_out=False,
+    ):
+        self.paginate_calls.append(
+            {
+                "page": page,
+                "per_page": per_page,
+                "error_out": error_out,
+            }
+        )
+
+        return self.page_result or FakePage(
+            self.results,
+            page=page,
+            per_page=per_page,
+        )
+
+
+def patch_common_create_dependencies(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        billing_service,
+        "_lock_clinic",
+        lambda clinic_id: SimpleNamespace(
+            id=clinic_id
+        ),
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+
+def patch_common_payment_dependencies(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        billing_service,
+        "_lock_clinic",
+        lambda clinic_id: SimpleNamespace(
+            id=clinic_id
+        ),
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
 
 
 # ============================================================================
@@ -92,6 +210,57 @@ def test_validate_positive_id_accepts_positive_integers(
         billing_service._validate_positive_id(
             value,
             "Clinic ID",
+        )
+        is None
+    )
+
+
+# ============================================================================
+# _validate_pagination
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        ("1", 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, "50"),
+        (1, 501),
+    ],
+)
+def test_validate_pagination_rejects_invalid_values(
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        billing_service._validate_pagination(
+            page,
+            per_page,
+        )
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (1, 50),
+        (2, 100),
+        (10, 500),
+    ],
+)
+def test_validate_pagination_accepts_valid_values(
+    page,
+    per_page,
+):
+    assert (
+        billing_service._validate_pagination(
+            page,
+            per_page,
         )
         is None
     )
@@ -148,6 +317,9 @@ def test_to_decimal_rejects_negative_values(
         "not-a-number",
         None,
         object(),
+        "NaN",
+        "Infinity",
+        "-Infinity",
     ],
 )
 def test_to_decimal_rejects_invalid_values(
@@ -215,6 +387,53 @@ def test_normalize_optional_string_rejects_excessive_length():
             "123456",
             "Reference",
             max_length=5,
+        )
+
+
+# ============================================================================
+# _validate_boolean
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        False,
+    ],
+)
+def test_validate_boolean_accepts_bool(
+    value,
+):
+    assert (
+        billing_service._validate_boolean(
+            value,
+            "Insurance claim flag",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1,
+        0,
+        "true",
+        "false",
+        None,
+    ],
+)
+def test_validate_boolean_rejects_non_bool(
+    value,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Insurance claim flag must be a boolean",
+    ):
+        billing_service._validate_boolean(
+            value,
+            "Insurance claim flag",
         )
 
 
@@ -362,6 +581,27 @@ def test_validate_invoice_items_requires_items():
         billing_service._validate_invoice_items([])
 
 
+@pytest.mark.parametrize(
+    "items",
+    [
+        None,
+        {},
+        "invalid",
+        123,
+    ],
+)
+def test_validate_invoice_items_rejects_invalid_collection(
+    items,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invoice must contain at least one item",
+    ):
+        billing_service._validate_invoice_items(
+            items
+        )
+
+
 def test_validate_invoice_items_rejects_non_dict():
     with pytest.raises(
         ValidationError,
@@ -448,6 +688,32 @@ def test_validate_invoice_items_rejects_invalid_quantity(
         )
 
 
+@pytest.mark.parametrize(
+    "unit_price",
+    [
+        "-1",
+        Decimal("-5.00"),
+        "NaN",
+        "Infinity",
+    ],
+)
+def test_validate_invoice_items_rejects_invalid_unit_price(
+    unit_price,
+):
+    with pytest.raises(
+        ValidationError
+    ):
+        billing_service._validate_invoice_items(
+            [
+                {
+                    "description": "Consultation",
+                    "quantity": 1,
+                    "unit_price": unit_price,
+                }
+            ]
+        )
+
+
 # ============================================================================
 # _get_invoice
 # ============================================================================
@@ -477,7 +743,9 @@ def test_get_invoice_returns_invoice(
     )
 
     with app.app_context():
-        result = billing_service._get_invoice(10)
+        result = billing_service._get_invoice(
+            10
+        )
 
     assert result is invoice
 
@@ -491,7 +759,9 @@ def test_get_invoice_applies_clinic_filter(
         clinic_id=5,
     )
 
-    query = FakeQuery(result=invoice)
+    query = FakeQuery(
+        result=invoice
+    )
 
     monkeypatch.setattr(
         billing_service.Invoice,
@@ -506,6 +776,37 @@ def test_get_invoice_applies_clinic_filter(
         )
 
     assert result is invoice
+    assert query.filter_calls
+
+
+def test_get_invoice_locks_row(
+    app,
+    monkeypatch,
+):
+    invoice = SimpleNamespace(
+        id=10,
+        clinic_id=5,
+    )
+
+    query = FakeQuery(
+        result=invoice
+    )
+
+    monkeypatch.setattr(
+        billing_service.Invoice,
+        "query",
+        query,
+    )
+
+    with app.app_context():
+        result = billing_service._get_invoice(
+            10,
+            clinic_id=5,
+            lock=True,
+        )
+
+    assert result is invoice
+    assert query.with_for_update_called is True
 
 
 def test_get_invoice_raises_not_found(
@@ -527,8 +828,103 @@ def test_get_invoice_raises_not_found(
 
 
 # ============================================================================
+# _lock_clinic
+# ============================================================================
+
+
+def test_lock_clinic_rejects_invalid_id(
+    app,
+):
+    with app.app_context():
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be a positive integer",
+        ):
+            billing_service._lock_clinic(0)
+
+
+def test_lock_clinic_returns_clinic(
+    app,
+    monkeypatch,
+):
+    clinic = SimpleNamespace(
+        id=10
+    )
+
+    query = FakeQuery(
+        result=clinic
+    )
+
+    monkeypatch.setattr(
+        billing_service.Clinic,
+        "query",
+        query,
+    )
+
+    with app.app_context():
+        result = billing_service._lock_clinic(
+            10
+        )
+
+    assert result is clinic
+    assert query.with_for_update_called is True
+
+
+def test_lock_clinic_raises_not_found(
+    app,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        billing_service.Clinic,
+        "query",
+        FakeQuery(result=None),
+    )
+
+    with app.app_context():
+        with pytest.raises(
+            NotFoundError,
+            match="Clinic 10 not found",
+        ):
+            billing_service._lock_clinic(10)
+
+
+# ============================================================================
 # _validate_invoice_relationships
 # ============================================================================
+
+
+def test_validate_invoice_relationships_rejects_invalid_clinic():
+    with pytest.raises(
+        ValidationError,
+        match="Clinic ID must be a positive integer",
+    ):
+        billing_service._validate_invoice_relationships(
+            clinic_id=0,
+            patient_id=20,
+        )
+
+
+def test_validate_invoice_relationships_rejects_invalid_patient():
+    with pytest.raises(
+        ValidationError,
+        match="Patient ID must be a positive integer",
+    ):
+        billing_service._validate_invoice_relationships(
+            clinic_id=10,
+            patient_id=0,
+        )
+
+
+def test_validate_invoice_relationships_rejects_invalid_appointment():
+    with pytest.raises(
+        ValidationError,
+        match="Appointment ID must be a positive integer",
+    ):
+        billing_service._validate_invoice_relationships(
+            clinic_id=10,
+            patient_id=20,
+            appointment_id=0,
+        )
 
 
 def test_validate_invoice_relationships_rejects_wrong_patient_clinic(
@@ -576,7 +972,10 @@ def test_validate_invoice_relationships_returns_patient_without_appointment(
         )
     )
 
-    assert result == (patient, None)
+    assert result == (
+        patient,
+        None,
+    )
 
 
 def test_validate_invoice_relationships_rejects_missing_appointment(
@@ -749,16 +1148,16 @@ def test_create_invoice_success(
         clinic=clinic,
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_common_create_dependencies(
+        monkeypatch
     )
 
     monkeypatch.setattr(
         billing_service,
         "_generate_invoice_number",
-        lambda clinic_id: "INV-10-20260907-ABC12345",
+        lambda clinic_id: (
+            "INV-10-20260907-ABC12345"
+        ),
     )
 
     with app.app_context():
@@ -787,9 +1186,15 @@ def test_create_invoice_success(
             invoice.invoice_number
             == "INV-10-20260907-ABC12345"
         )
-        assert invoice.total_amount == Decimal("125.00")
-        assert invoice.amount_paid == Decimal("0.00")
-        assert invoice.status == InvoiceStatus.ISSUED
+        assert invoice.total_amount == Decimal(
+            "125.00"
+        )
+        assert invoice.amount_paid == Decimal(
+            "0.00"
+        )
+        assert invoice.status == (
+            InvoiceStatus.ISSUED
+        )
 
         db_session.flush()
 
@@ -799,36 +1204,44 @@ def test_create_invoice_success(
                 InvoiceItem.invoice_id
                 == invoice.id
             )
+            .order_by(
+                InvoiceItem.id.asc()
+            )
             .all()
         )
 
         assert len(items) == 2
 
-        assert items[0].description == "Consultation"
+        assert (
+            items[0].description
+            == "Consultation"
+        )
         assert items[0].quantity == 2
-        assert items[0].unit_price == Decimal("50.00")
-        assert items[0].subtotal == Decimal("100.00")
+        assert items[0].unit_price == Decimal(
+            "50.00"
+        )
+        assert items[0].subtotal == Decimal(
+            "100.00"
+        )
 
         assert items[1].description == "Lab"
         assert items[1].quantity == 1
-        assert items[1].unit_price == Decimal("25.00")
-        assert items[1].subtotal == Decimal("25.00")
+        assert items[1].unit_price == Decimal(
+            "25.00"
+        )
+        assert items[1].subtotal == Decimal(
+            "25.00"
+        )
 
 
 def test_create_invoice_with_appointment(
     app,
-    db_session,
     make_clinic,
     make_patient,
-    make_user,
     monkeypatch,
 ):
     clinic = make_clinic()
     patient = make_patient(
-        clinic=clinic,
-    )
-
-    user = make_user(
         clinic=clinic,
     )
 
@@ -838,16 +1251,14 @@ def test_create_invoice_with_appointment(
         patient_id=patient.id,
     )
 
+    patch_common_create_dependencies(
+        monkeypatch
+    )
+
     monkeypatch.setattr(
         billing_service.db.session,
         "get",
         lambda model, object_id: appointment,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
     )
 
     with app.app_context():
@@ -865,23 +1276,33 @@ def test_create_invoice_with_appointment(
         )
 
         assert invoice.appointment_id == 30
-        assert invoice.total_amount == Decimal("100.00")
+        assert invoice.total_amount == Decimal(
+            "100.00"
+        )
 
 
 def test_create_invoice_requires_insurance_provider_for_claim(
     app,
     make_clinic,
     make_patient,
+    monkeypatch,
 ):
     clinic = make_clinic()
     patient = make_patient(
         clinic=clinic,
     )
 
+    patch_common_create_dependencies(
+        monkeypatch
+    )
+
     with app.app_context():
         with pytest.raises(
             ValidationError,
-            match="Insurance provider is required for an insurance claim",
+            match=(
+                "Insurance provider is required "
+                "for an insurance claim"
+            ),
         ):
             billing_service.create_invoice(
                 clinic_id=clinic.id,
@@ -908,10 +1329,8 @@ def test_create_invoice_normalizes_insurance_provider(
         clinic=clinic,
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_common_create_dependencies(
+        monkeypatch
     )
 
     with app.app_context():
@@ -929,7 +1348,10 @@ def test_create_invoice_normalizes_insurance_provider(
             ],
         )
 
-        assert invoice.insurance_provider == "NHIA"
+        assert (
+            invoice.insurance_provider
+            == "NHIA"
+        )
 
 
 def test_create_invoice_clears_provider_for_non_insurance_claim(
@@ -943,10 +1365,8 @@ def test_create_invoice_clears_provider_for_non_insurance_claim(
         clinic=clinic,
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_common_create_dependencies(
+        monkeypatch
     )
 
     with app.app_context():
@@ -954,7 +1374,9 @@ def test_create_invoice_clears_provider_for_non_insurance_claim(
             clinic_id=clinic.id,
             patient_id=patient.id,
             is_insurance_claim=False,
-            insurance_provider="Private Insurance",
+            insurance_provider=(
+                "Private Insurance"
+            ),
             items=[
                 {
                     "description": "Treatment",
@@ -965,6 +1387,40 @@ def test_create_invoice_clears_provider_for_non_insurance_claim(
         )
 
         assert invoice.insurance_provider is None
+
+
+def test_create_invoice_rejects_non_boolean_insurance_flag(
+    app,
+    make_clinic,
+    make_patient,
+    monkeypatch,
+):
+    clinic = make_clinic()
+    patient = make_patient(
+        clinic=clinic,
+    )
+
+    patch_common_create_dependencies(
+        monkeypatch
+    )
+
+    with app.app_context():
+        with pytest.raises(
+            ValidationError,
+            match="Insurance claim flag must be a boolean",
+        ):
+            billing_service.create_invoice(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                is_insurance_claim="true",
+                items=[
+                    {
+                        "description": "Treatment",
+                        "quantity": 1,
+                        "unit_price": "100.00",
+                    }
+                ],
+            )
 
 
 # ============================================================================
@@ -1211,10 +1667,36 @@ def _make_payment_invoice(
         id=invoice_id,
         clinic_id=clinic_id,
         patient_id=20,
-        invoice_number="INV-10-20260907-ABC12345",
+        invoice_number=(
+            "INV-10-20260907-ABC12345"
+        ),
         total_amount=total,
         amount_paid=paid,
         status=status,
+    )
+
+
+def patch_payment_invoice(
+    monkeypatch,
+    invoice,
+):
+    monkeypatch.setattr(
+        billing_service,
+        "_get_invoice",
+        lambda invoice_id,
+        clinic_id=None,
+        lock=False: invoice,
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "_find_duplicate_gateway_payment",
+        lambda invoice_id,
+        transaction_id: None,
+    )
+
+    patch_common_payment_dependencies(
+        monkeypatch
     )
 
 
@@ -1224,22 +1706,9 @@ def test_record_payment_success(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "_find_duplicate_gateway_payment",
-        lambda invoice_id, transaction_id: None,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1253,19 +1722,72 @@ def test_record_payment_success(
 
         assert payment.id is not None
         assert payment.invoice_id == 100
-        assert payment.amount == Decimal("40.00")
-        assert payment.method == PaymentMethod.CASH
-        assert payment.status == PaymentStatus.SUCCESSFUL
+        assert payment.amount == Decimal(
+            "40.00"
+        )
+        assert payment.method == (
+            PaymentMethod.CASH
+        )
+        assert payment.status == (
+            PaymentStatus.SUCCESSFUL
+        )
         assert payment.gateway is None
         assert payment.reference == "CASH-001"
-        assert payment.gateway_transaction_id is None
+        assert (
+            payment.gateway_transaction_id
+            is None
+        )
         assert payment.paid_at is not None
 
-        assert invoice.amount_paid == Decimal("40.00")
-        assert (
-            invoice.status
-            == InvoiceStatus.PARTIALLY_PAID
+        assert invoice.amount_paid == Decimal(
+            "40.00"
         )
+        assert invoice.status == (
+            InvoiceStatus.PARTIALLY_PAID
+        )
+
+
+def test_record_payment_uses_invoice_row_lock(
+    app,
+    monkeypatch,
+):
+    invoice = _make_payment_invoice()
+    captured = {}
+
+    patch_common_payment_dependencies(
+        monkeypatch
+    )
+
+    def fake_get_invoice(
+        invoice_id,
+        clinic_id=None,
+        lock=False,
+    ):
+        captured["lock"] = lock
+        return invoice
+
+    monkeypatch.setattr(
+        billing_service,
+        "_get_invoice",
+        fake_get_invoice,
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "_find_duplicate_gateway_payment",
+        lambda invoice_id,
+        transaction_id: None,
+    )
+
+    with app.app_context():
+        billing_service.record_payment(
+            clinic_id=10,
+            invoice_id=100,
+            amount="40.00",
+            method=PaymentMethod.CASH,
+        )
+
+    assert captured["lock"] is True
 
 
 def test_record_payment_fully_pays_invoice(
@@ -1274,22 +1796,9 @@ def test_record_payment_fully_pays_invoice(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "_find_duplicate_gateway_payment",
-        lambda invoice_id, transaction_id: None,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1300,9 +1809,15 @@ def test_record_payment_fully_pays_invoice(
             method=PaymentMethod.CARD,
         )
 
-        assert payment.amount == Decimal("100.00")
-        assert invoice.amount_paid == Decimal("100.00")
-        assert invoice.status == InvoiceStatus.PAID
+        assert payment.amount == Decimal(
+            "100.00"
+        )
+        assert invoice.amount_paid == Decimal(
+            "100.00"
+        )
+        assert invoice.status == (
+            InvoiceStatus.PAID
+        )
 
 
 def test_record_payment_rejects_cancelled_invoice(
@@ -1313,10 +1828,9 @@ def test_record_payment_rejects_cancelled_invoice(
         status=InvoiceStatus.CANCELLED,
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1341,10 +1855,9 @@ def test_record_payment_rejects_paid_invoice(
         status=InvoiceStatus.PAID,
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1366,10 +1879,9 @@ def test_record_payment_rejects_zero_amount(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1399,10 +1911,9 @@ def test_record_payment_rejects_negative_amount(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1418,16 +1929,48 @@ def test_record_payment_rejects_negative_amount(
             )
 
 
+@pytest.mark.parametrize(
+    "amount",
+    [
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ],
+)
+def test_record_payment_rejects_non_finite_amount(
+    app,
+    monkeypatch,
+    amount,
+):
+    invoice = _make_payment_invoice()
+
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
+    )
+
+    with app.app_context():
+        with pytest.raises(
+            ValidationError,
+            match="Invalid payment amount",
+        ):
+            billing_service.record_payment(
+                clinic_id=10,
+                invoice_id=100,
+                amount=amount,
+                method=PaymentMethod.CASH,
+            )
+
+
 def test_record_payment_rejects_gateway_without_transaction_id(
     app,
     monkeypatch,
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1450,10 +1993,9 @@ def test_record_payment_rejects_gateway_for_cash(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1483,22 +2025,32 @@ def test_record_payment_rejects_duplicate_gateway_transaction(
         status=PaymentStatus.SUCCESSFUL,
     )
 
+    patch_common_payment_dependencies(
+        monkeypatch
+    )
+
     monkeypatch.setattr(
         billing_service,
         "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
+        lambda invoice_id,
+        clinic_id=None,
+        lock=False: invoice,
     )
 
     monkeypatch.setattr(
         billing_service,
         "_find_duplicate_gateway_payment",
-        lambda invoice_id, transaction_id: duplicate,
+        lambda invoice_id,
+        transaction_id: duplicate,
     )
 
     with app.app_context():
         with pytest.raises(
             ConflictError,
-            match="successful payment with this gateway transaction ID",
+            match=(
+                "successful payment with this "
+                "gateway transaction ID"
+            ),
         ):
             billing_service.record_payment(
                 clinic_id=10,
@@ -1519,22 +2071,18 @@ def test_record_payment_rejects_overpayment(
         paid=Decimal("75.00"),
     )
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "_find_duplicate_gateway_payment",
-        lambda invoice_id, transaction_id: None,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
         with pytest.raises(
             ValidationError,
-            match="Payment amount exceeds the remaining invoice balance",
+            match=(
+                "Payment amount exceeds the "
+                "remaining invoice balance"
+            ),
         ):
             billing_service.record_payment(
                 clinic_id=10,
@@ -1550,22 +2098,9 @@ def test_record_payment_gateway_success(
 ):
     invoice = _make_payment_invoice()
 
-    monkeypatch.setattr(
-        billing_service,
-        "_get_invoice",
-        lambda invoice_id, clinic_id=None: invoice,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "_find_duplicate_gateway_payment",
-        lambda invoice_id, transaction_id: None,
-    )
-
-    monkeypatch.setattr(
-        billing_service,
-        "create_audit_log",
-        lambda **kwargs: None,
+    patch_payment_invoice(
+        monkeypatch,
+        invoice,
     )
 
     with app.app_context():
@@ -1578,15 +2113,25 @@ def test_record_payment_gateway_success(
             gateway_transaction_id=" TX-123 ",
         )
 
-        assert payment.amount == Decimal("100.00")
-        assert payment.method == PaymentMethod.CARD
-        assert payment.gateway == PaymentGateway.PAYSTACK
+        assert payment.amount == Decimal(
+            "100.00"
+        )
+        assert payment.method == (
+            PaymentMethod.CARD
+        )
+        assert payment.gateway == (
+            PaymentGateway.PAYSTACK
+        )
         assert (
             payment.gateway_transaction_id
             == "TX-123"
         )
-        assert payment.status == PaymentStatus.SUCCESSFUL
-        assert invoice.status == InvoiceStatus.PAID
+        assert payment.status == (
+            PaymentStatus.SUCCESSFUL
+        )
+        assert invoice.status == (
+            InvoiceStatus.PAID
+        )
 
 
 # ============================================================================
@@ -1594,7 +2139,7 @@ def test_record_payment_gateway_success(
 # ============================================================================
 
 
-def test_get_outstanding_invoices_filters_clinic(
+def test_get_outstanding_invoices_returns_page(
     app,
     monkeypatch,
 ):
@@ -1603,8 +2148,16 @@ def test_get_outstanding_invoices_filters_clinic(
         SimpleNamespace(id=2),
     ]
 
+    page = FakePage(
+        invoices,
+        page=1,
+        per_page=50,
+        total=2,
+    )
+
     query = FakeQuery(
         results=invoices,
+        page=page,
     )
 
     monkeypatch.setattr(
@@ -1620,17 +2173,188 @@ def test_get_outstanding_invoices_filters_clinic(
             )
         )
 
-    assert result == invoices
+    assert result is page
+    assert result.items == invoices
+    assert result.page == 1
+    assert result.per_page == 50
+    assert result.total == 2
+    assert query.paginate_calls == [
+        {
+            "page": 1,
+            "per_page": 50,
+            "error_out": False,
+        }
+    ]
+
+
+def test_get_outstanding_invoices_accepts_pagination(
+    app,
+    monkeypatch,
+):
+    page = FakePage(
+        [
+            SimpleNamespace(id=51),
+        ],
+        page=3,
+        per_page=25,
+        total=101,
+    )
+
+    query = FakeQuery(
+        page=page
+    )
+
+    monkeypatch.setattr(
+        billing_service.Invoice,
+        "query",
+        query,
+    )
+
+    with app.app_context():
+        result = (
+            billing_service.get_outstanding_invoices(
+                clinic_id=10,
+                page=3,
+                per_page=25,
+            )
+        )
+
+    assert result is page
+    assert query.paginate_calls == [
+        {
+            "page": 3,
+            "per_page": 25,
+            "error_out": False,
+        }
+    ]
+
+
+def test_get_outstanding_invoices_supports_last_page(
+    app,
+    monkeypatch,
+):
+    page = FakePage(
+        [
+            SimpleNamespace(id=101),
+        ],
+        page=3,
+        per_page=50,
+        total=101,
+    )
+
+    query = FakeQuery(
+        page=page
+    )
+
+    monkeypatch.setattr(
+        billing_service.Invoice,
+        "query",
+        query,
+    )
+
+    with app.app_context():
+        result = (
+            billing_service.get_outstanding_invoices(
+                clinic_id=10,
+                page=3,
+                per_page=50,
+            )
+        )
+
+    assert result.items[0].id == 101
+    assert result.has_next is False
+    assert result.has_prev is True
+
+
+def test_get_outstanding_invoices_returns_empty_page(
+    app,
+    monkeypatch,
+):
+    page = FakePage(
+        [],
+        page=1,
+        per_page=50,
+        total=0,
+    )
+
+    query = FakeQuery(
+        page=page
+    )
+
+    monkeypatch.setattr(
+        billing_service.Invoice,
+        "query",
+        query,
+    )
+
+    with app.app_context():
+        result = (
+            billing_service.get_outstanding_invoices(
+                clinic_id=10,
+                page=1,
+                per_page=50,
+            )
+        )
+
+    assert result.items == []
+    assert result.total == 0
+    assert result.pages == 0
+    assert result.has_next is False
+    assert result.has_prev is False
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (1, 0),
+        (1, 501),
+    ],
+)
+def test_get_outstanding_invoices_rejects_invalid_pagination(
+    app,
+    page,
+    per_page,
+):
+    with app.app_context():
+        with pytest.raises(
+            ValidationError
+        ):
+            billing_service.get_outstanding_invoices(
+                clinic_id=10,
+                page=page,
+                per_page=per_page,
+            )
+
+
+def test_get_outstanding_invoices_rejects_invalid_clinic_id(
+    app,
+):
+    with app.app_context():
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be a positive integer",
+        ):
+            billing_service.get_outstanding_invoices(
+                clinic_id=0,
+            )
 
 
 def test_get_outstanding_invoices_without_clinic(
     app,
     monkeypatch,
 ):
-    query = FakeQuery(
-        results=[
+    page = FakePage(
+        [
             SimpleNamespace(id=1),
-        ]
+        ],
+        page=1,
+        per_page=50,
+        total=1,
+    )
+
+    query = FakeQuery(
+        page=page
     )
 
     monkeypatch.setattr(
@@ -1644,19 +2368,8 @@ def test_get_outstanding_invoices_without_clinic(
             billing_service.get_outstanding_invoices()
         )
 
-    assert len(result) == 1
-    assert result[0].id == 1
-
-
-def test_get_outstanding_invoices_rejects_invalid_clinic_id(app):
-    with app.app_context():
-        with pytest.raises(
-            ValidationError,
-            match="Clinic ID must be a positive integer",
-        ):
-            billing_service.get_outstanding_invoices(
-                clinic_id=0,
-            )
+    assert result is page
+    assert result.items[0].id == 1
 
 
 # ============================================================================
@@ -1726,12 +2439,48 @@ def test_mark_overdue_invoices_marks_expired_invoices(
     )
 
 
+def test_mark_overdue_invoices_without_clinic_is_supported_for_task(
+    app,
+    monkeypatch,
+):
+    invoice = SimpleNamespace(
+        id=1,
+        status=InvoiceStatus.ISSUED,
+    )
+
+    query = FakeQuery(
+        results=[invoice]
+    )
+
+    monkeypatch.setattr(
+        billing_service.Invoice,
+        "query",
+        query,
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    with app.app_context():
+        result = (
+            billing_service._mark_overdue_invoices()
+        )
+
+    assert result == 1
+    assert invoice.status == (
+        InvoiceStatus.OVERDUE
+    )
+
+
 def test_mark_overdue_invoices_returns_zero_when_none_found(
     app,
     monkeypatch,
 ):
     query = FakeQuery(
-        results=[],
+        results=[]
     )
 
     monkeypatch.setattr(
@@ -1750,7 +2499,9 @@ def test_mark_overdue_invoices_returns_zero_when_none_found(
     assert result == 0
 
 
-def test_mark_overdue_invoices_rejects_invalid_clinic(app):
+def test_mark_overdue_invoices_rejects_invalid_clinic(
+    app,
+):
     with app.app_context():
         with pytest.raises(
             ValidationError,
@@ -1760,9 +2511,53 @@ def test_mark_overdue_invoices_rejects_invalid_clinic(app):
                 clinic_id=0,
             )
 
+
 # ============================================================================
 # mark_overdue_invoices
 # ============================================================================
+
+
+def test_mark_overdue_invoices_requires_clinic_id(
+    app,
+):
+    with app.app_context():
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID is required",
+        ):
+            billing_service.mark_overdue_invoices()
+
+
+def test_mark_overdue_invoices_enforces_active_clinic(
+    app,
+    monkeypatch,
+):
+    captured = {}
+
+    monkeypatch.setattr(
+        billing_service,
+        "ensure_clinic_active",
+        lambda clinic_id: captured.setdefault(
+            "clinic_id",
+            clinic_id,
+        ),
+    )
+
+    monkeypatch.setattr(
+        billing_service,
+        "_mark_overdue_invoices",
+        lambda clinic_id=None: 7,
+    )
+
+    with app.app_context():
+        result = (
+            billing_service.mark_overdue_invoices(
+                clinic_id=10,
+            )
+        )
+
+    assert result == 7
+    assert captured["clinic_id"] == 10
 
 
 def test_mark_overdue_invoices_delegates_to_internal_function(
@@ -1770,6 +2565,12 @@ def test_mark_overdue_invoices_delegates_to_internal_function(
     monkeypatch,
 ):
     captured = {}
+
+    monkeypatch.setattr(
+        billing_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
 
     def fake_mark_overdue(
         clinic_id=None,

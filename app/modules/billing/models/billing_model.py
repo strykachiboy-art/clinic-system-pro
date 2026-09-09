@@ -16,6 +16,23 @@ def _utcnow():
 class Invoice(db.Model):
     __tablename__ = "invoices"
 
+    __table_args__ = (
+        db.Index(
+            "ix_invoices_clinic_status_due",
+            "clinic_id",
+            "status",
+            "due_date",
+            "id",
+        ),
+        db.Index(
+            "ix_invoices_clinic_patient_created",
+            "clinic_id",
+            "patient_id",
+            "created_at",
+            "id",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
@@ -64,13 +81,14 @@ class Invoice(db.Model):
     status = db.Column(
         db.Enum(InvoiceStatus),
         nullable=False,
-        default=InvoiceStatus.DRAFT,
+        default=InvoiceStatus.ISSUED,
         index=True,
     )
 
     due_date = db.Column(
         db.Date,
         nullable=True,
+        index=True,
     )
 
     is_insurance_claim = db.Column(
@@ -85,16 +103,18 @@ class Invoice(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=_utcnow,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=_utcnow,
         onupdate=_utcnow,
+        index=True,
     )
 
     clinic = db.relationship(
@@ -125,12 +145,65 @@ class Invoice(db.Model):
         uselist=False,
     )
 
+    __table_args__ = (
+        db.CheckConstraint(
+            "total_amount >= 0",
+            name="ck_invoices_total_amount_nonnegative",
+        ),
+        db.CheckConstraint(
+            "amount_paid >= 0",
+            name="ck_invoices_amount_paid_nonnegative",
+        ),
+        db.CheckConstraint(
+            "amount_paid <= total_amount",
+            name="ck_invoices_amount_paid_lte_total",
+        ),
+        db.Index(
+            "ix_invoices_clinic_status_due",
+            "clinic_id",
+            "status",
+            "due_date",
+            "id",
+        ),
+        db.Index(
+            "ix_invoices_clinic_patient_created",
+            "clinic_id",
+            "patient_id",
+            "created_at",
+            "id",
+        ),
+    )
+
     def __repr__(self):
-        return f"<Invoice {self.invoice_number} - {self.status.value}>"
+        return (
+            f"<Invoice "
+            f"{self.invoice_number} - "
+            f"{self.status.value}>"
+        )
 
 
 class InvoiceItem(db.Model):
     __tablename__ = "invoice_items"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "quantity > 0",
+            name="ck_invoice_items_quantity_positive",
+        ),
+        db.CheckConstraint(
+            "unit_price >= 0",
+            name="ck_invoice_items_unit_price_nonnegative",
+        ),
+        db.CheckConstraint(
+            "subtotal >= 0",
+            name="ck_invoice_items_subtotal_nonnegative",
+        ),
+        db.Index(
+            "ix_invoice_items_invoice_id_id",
+            "invoice_id",
+            "id",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -171,11 +244,29 @@ class InvoiceItem(db.Model):
     )
 
     def __repr__(self):
-        return f"<InvoiceItem {self.description} x{self.quantity}>"
+        return (
+            f"<InvoiceItem "
+            f"{self.description} "
+            f"x{self.quantity}>"
+        )
 
 
 class Payment(db.Model):
     __tablename__ = "payments"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "amount > 0",
+            name="ck_payments_amount_positive",
+        ),
+        db.Index(
+            "ix_payments_invoice_status_created",
+            "invoice_id",
+            "status",
+            "created_at",
+            "id",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -219,12 +310,6 @@ class Payment(db.Model):
         index=True,
     )
 
-    # Nullable so cash/manual payments can omit it.
-    # UNIQUE prevents the same gateway transaction from
-    # being recorded more than once.
-    #
-    # SQLite allows multiple NULL values in a UNIQUE column,
-    # so payments without gateway transactions remain valid.
     gateway_transaction_id = db.Column(
         db.String(255),
         nullable=True,
@@ -238,20 +323,22 @@ class Payment(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=_utcnow,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=_utcnow,
         onupdate=_utcnow,
+        index=True,
     )
 
     paid_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
@@ -261,4 +348,8 @@ class Payment(db.Model):
     )
 
     def __repr__(self):
-        return f"<Payment {self.amount} - {self.status.value}>"
+        return (
+            f"<Payment "
+            f"{self.amount} - "
+            f"{self.status.value}>"
+        )

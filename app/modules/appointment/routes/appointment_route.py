@@ -1,9 +1,13 @@
-from flask import Blueprint, jsonify, request, g, session
+from __future__ import annotations
+
+from flask import Blueprint, jsonify, request
+
 from flask_jwt_extended import get_jwt_identity
+
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
-from app.core.exceptions import DomainError, ValidationError
+
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
@@ -29,21 +33,11 @@ from app.modules.appointment.services.appointment_service import (
 )
 
 
-# ============================================================================
-# Blueprint
-# ============================================================================
-
-
 appointment_bp = Blueprint(
     "appointment",
     __name__,
     url_prefix="/api/appointments",
 )
-
-
-# ============================================================================
-# Permissions
-# ============================================================================
 
 
 APPOINTMENT_ROLES = (
@@ -54,15 +48,12 @@ APPOINTMENT_ROLES = (
 )
 
 
-# ============================================================================
-# Authentication / Clinic Helpers
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 
 def _current_user():
-    """
-    Return the authenticated user.
-    """
     identity = get_jwt_identity()
 
     try:
@@ -72,7 +63,15 @@ def _current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -88,26 +87,124 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    """
-    Return the authenticated user's clinic ID.
-
-    Clinic ownership is derived server-side and is never
-    accepted from the request payload.
-    """
-
     user = _current_user()
 
     if user.clinic_id is None:
-        raise DomainError(
+        raise ValidationError(
             "Authenticated user is not assigned to a clinic"
+        )
+
+    if user.clinic_id <= 0:
+        raise ValidationError(
+            "Authenticated user has an invalid clinic"
         )
 
     return user.clinic_id
 
 
-# ============================================================================
-# Serialization
-# ============================================================================
+def _payload(schema):
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Request body must be a JSON object",
+                }
+            ),
+            422,
+        )
+
+    try:
+        return schema.model_validate(payload)
+
+    except PydanticValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid request payload",
+                    "details": exc.errors(),
+                }
+            ),
+            422,
+        )
+
+
+def _query_payload(schema_class):
+    try:
+        data = request.args.to_dict()
+
+        if "page" in data:
+            data["page"] = int(data["page"])
+
+        if "per_page" in data:
+            data["per_page"] = int(data["per_page"])
+
+        return schema_class.model_validate(data)
+
+    except (PydanticValidationError, ValueError, TypeError):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid query parameters",
+                }
+            ),
+            422,
+        )
+
+
+def _get_int_query_param(
+    name: str,
+    *,
+    default: int,
+) -> int:
+    raw_value = request.args.get(name)
+
+    if raw_value is None:
+        return default
+
+    raw_value = raw_value.strip()
+
+    if not raw_value:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    if value <= 0:
+        raise ValidationError(
+            f"{name} must be a positive integer"
+        )
+
+    return value
+
+
+def _pagination_params():
+    page = _get_int_query_param(
+        "page",
+        default=DEFAULT_PAGE,
+    )
+
+    per_page = _get_int_query_param(
+        "per_page",
+        default=DEFAULT_PER_PAGE,
+    )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
 
 
 def _serialize_appointment(appointment):
@@ -123,7 +220,9 @@ def _serialize_appointment(appointment):
             appointment.scheduled_end.isoformat()
         ),
         "status": appointment.status.value,
-        "appointment_type": appointment.appointment_type.value,
+        "appointment_type": (
+            appointment.appointment_type.value
+        ),
         "reason": appointment.reason,
         "notes": appointment.notes,
         "google_calendar_event_id": (
@@ -151,73 +250,29 @@ def _serialize_appointment(appointment):
     }
 
 
-# ============================================================================
-# Request Validation Helpers
-# ============================================================================
-
-
-def _payload(schema):
-    """
-    Validate a JSON request body using the supplied Pydantic schema.
-
-    Returns:
-        Pydantic model on success.
-        Flask response tuple on validation failure.
-    """
-
-    try:
-        return schema.model_validate(
-            request.get_json(silent=True) or {}
-        )
-
-    except PydanticValidationError as exc:
-        return jsonify({
-            "success": False,
-            "error": exc.errors(),
-        }), 422
-
-
-def _query_payload(schema):
-    """
-    Validate query parameters using the supplied Pydantic schema.
-    """
-
-    try:
-        return schema.model_validate(
-            request.args.to_dict()
-        )
-
-    except PydanticValidationError as exc:
-        return jsonify({
-            "success": False,
-            "error": exc.errors(),
-        }), 422
+def _serialize_page(pagination):
+    return {
+        "items": [
+            _serialize_appointment(item)
+            for item in pagination.items
+        ],
+        "total": pagination.total,
+        "page": pagination.page,
+        "per_page": pagination.per_page,
+        "pages": pagination.pages,
+        "has_next": pagination.has_next,
+        "has_prev": pagination.has_prev,
+    }
 
 
 # ============================================================================
-# Create Appointment
+# CREATE
 # ============================================================================
 
 
 @appointment_bp.post("/")
 @role_required(*APPOINTMENT_ROLES)
 def create():
-    """
-    Create a new appointment.
-
-    Clinic ID is derived from the authenticated user.
-
-    The service validates:
-        - clinic existence
-        - clinic ACTIVE status
-        - patient existence
-        - staff existence
-        - patient/clinic relationship
-        - staff/clinic relationship
-        - schedule conflicts
-        - appointment times
-    """
-
     payload = _payload(
         AppointmentCreateSchema
     )
@@ -236,24 +291,29 @@ def create():
             scheduled_end=payload.scheduled_end,
             appointment_type=payload.appointment_type,
             reason=payload.reason,
+            notes=payload.notes,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 201
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 201
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Reschedule Appointment
+# RESCHEDULE
 # ============================================================================
 
 
@@ -261,19 +321,9 @@ def create():
     "/<int:appointment_id>/reschedule"
 )
 @role_required(*APPOINTMENT_ROLES)
-def reschedule(appointment_id: int):
-    """
-    Reschedule an existing appointment.
-
-    The service validates:
-        - appointment existence
-        - clinic ownership
-        - valid appointment status
-        - clinic ACTIVE status
-        - new schedule
-        - schedule conflicts
-    """
-
+def reschedule(
+    appointment_id: int,
+):
     payload = _payload(
         AppointmentRescheduleSchema
     )
@@ -291,22 +341,26 @@ def reschedule(appointment_id: int):
             new_end=payload.scheduled_end,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Confirm Appointment
+# CONFIRM
 # ============================================================================
 
 
@@ -314,11 +368,9 @@ def reschedule(appointment_id: int):
     "/<int:appointment_id>/confirm"
 )
 @role_required(*APPOINTMENT_ROLES)
-def confirm(appointment_id: int):
-    """
-    Confirm a scheduled appointment.
-    """
-
+def confirm(
+    appointment_id: int,
+):
     try:
         clinic_id = _current_clinic_id()
 
@@ -327,22 +379,26 @@ def confirm(appointment_id: int):
             clinic_id=clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Cancel Appointment
+# CANCEL
 # ============================================================================
 
 
@@ -350,11 +406,9 @@ def confirm(appointment_id: int):
     "/<int:appointment_id>/cancel"
 )
 @role_required(*APPOINTMENT_ROLES)
-def cancel(appointment_id: int):
-    """
-    Cancel a scheduled or confirmed appointment.
-    """
-
+def cancel(
+    appointment_id: int,
+):
     payload = _payload(
         AppointmentCancelSchema
     )
@@ -371,22 +425,26 @@ def cancel(appointment_id: int):
             reason=payload.cancellation_reason,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Complete Appointment
+# COMPLETE
 # ============================================================================
 
 
@@ -394,11 +452,9 @@ def cancel(appointment_id: int):
     "/<int:appointment_id>/complete"
 )
 @role_required(*APPOINTMENT_ROLES)
-def complete(appointment_id: int):
-    """
-    Mark a confirmed appointment as completed.
-    """
-
+def complete(
+    appointment_id: int,
+):
     payload = _payload(
         AppointmentCompleteSchema
     )
@@ -415,22 +471,26 @@ def complete(appointment_id: int):
             notes=payload.notes,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Mark Appointment as No-Show
+# NO-SHOW
 # ============================================================================
 
 
@@ -438,11 +498,9 @@ def complete(appointment_id: int):
     "/<int:appointment_id>/no-show"
 )
 @role_required(*APPOINTMENT_ROLES)
-def no_show(appointment_id: int):
-    """
-    Mark a confirmed appointment as a no-show.
-    """
-
+def no_show(
+    appointment_id: int,
+):
     try:
         clinic_id = _current_clinic_id()
 
@@ -451,22 +509,26 @@ def no_show(appointment_id: int):
             clinic_id=clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_appointment(
-                appointment
-            ),
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_appointment(
+                    appointment
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Patient Appointment History
+# PATIENT APPOINTMENT HISTORY
 # ============================================================================
 
 
@@ -474,42 +536,41 @@ def no_show(appointment_id: int):
     "/patient/<int:patient_id>"
 )
 @role_required(*APPOINTMENT_ROLES)
-def patient_appointments(patient_id: int):
-    """
-    Retrieve all appointments for a patient.
-
-    Historical appointments remain accessible even if
-    the clinic is inactive or suspended.
-
-    Results are always restricted to the authenticated
-    user's clinic.
-    """
-
+def patient_appointments(
+    patient_id: int,
+):
     try:
         clinic_id = _current_clinic_id()
 
-        appointments = get_appointments_for_patient(
+        page, per_page = _pagination_params()
+
+        pagination = get_appointments_for_patient(
             patient_id=patient_id,
             clinic_id=clinic_id,
+            page=page,
+            per_page=per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_appointment(item)
-                for item in appointments
-            ],
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_page(
+                    pagination
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
 
 
 # ============================================================================
-# Staff Appointment Schedule
+# STAFF APPOINTMENT SCHEDULE
 # ============================================================================
 
 
@@ -517,19 +578,9 @@ def patient_appointments(patient_id: int):
     "/staff/<int:staff_id>"
 )
 @role_required(*APPOINTMENT_ROLES)
-def staff_appointments(staff_id: int):
-    """
-    Retrieve appointments assigned to a staff member.
-
-    An optional date query parameter may be supplied.
-
-    Historical appointments remain retrievable regardless
-    of clinic status.
-
-    Results are always restricted to the authenticated
-    user's clinic.
-    """
-
+def staff_appointments(
+    staff_id: int,
+):
     payload = _query_payload(
         AppointmentStaffScheduleQuerySchema
     )
@@ -540,22 +591,29 @@ def staff_appointments(staff_id: int):
     try:
         clinic_id = _current_clinic_id()
 
-        appointments = get_appointments_for_staff(
+        page, per_page = _pagination_params()
+
+        pagination = get_appointments_for_staff(
             staff_id=staff_id,
             clinic_id=clinic_id,
             date_=payload.date_,
+            page=page,
+            per_page=per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_appointment(item)
-                for item in appointments
-            ],
-        }), 200
+        return jsonify(
+            {
+                "success": True,
+                "data": _serialize_page(
+                    pagination
+                ),
+            }
+        ), 200
 
     except DomainError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), exc.status_code
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code

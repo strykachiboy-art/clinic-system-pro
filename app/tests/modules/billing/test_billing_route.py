@@ -1,6 +1,7 @@
 ﻿import pytest
 
 from decimal import Decimal
+
 from app.core.enums.billing_enums import (
     InvoiceStatus,
     PaymentGateway,
@@ -15,9 +16,36 @@ from app.core.exceptions import (
 )
 from app.modules.billing.models.billing_model import (
     Invoice,
-    InvoiceItem,
     Payment,
 )
+
+
+class FakePage:
+    def __init__(
+        self,
+        items,
+        page=1,
+        per_page=50,
+        total=None,
+        pages=None,
+        has_next=False,
+        has_prev=False,
+    ):
+        self.items = items
+        self.page = page
+        self.per_page = per_page
+        self.total = len(items) if total is None else total
+        self.pages = (
+            0
+            if self.total == 0
+            else (
+                (self.total + self.per_page - 1) // self.per_page
+                if pages is None
+                else pages
+            )
+        )
+        self.has_next = has_next
+        self.has_prev = has_prev
 
 
 def _admin_headers(
@@ -109,23 +137,39 @@ def test_billing_endpoints_require_authentication(
     client,
 ):
     endpoints = [
-        ("post", "/api/billing/invoices", {
-            "patient_id": 1,
-            "items": [
-                {
-                    "description": "Consultation",
-                    "quantity": 1,
-                    "unit_price": "100.00",
-                }
-            ],
-        }),
-        ("get", "/api/billing/invoices/outstanding", None),
-        ("post", "/api/billing/payments", {
-            "invoice_id": 1,
-            "amount": "50.00",
-            "method": "cash",
-        }),
-        ("post", "/api/billing/invoices/mark-overdue", None),
+        (
+            "post",
+            "/api/billing/invoices",
+            {
+                "patient_id": 1,
+                "items": [
+                    {
+                        "description": "Consultation",
+                        "quantity": 1,
+                        "unit_price": "100.00",
+                    }
+                ],
+            },
+        ),
+        (
+            "get",
+            "/api/billing/invoices/outstanding",
+            None,
+        ),
+        (
+            "post",
+            "/api/billing/payments",
+            {
+                "invoice_id": 1,
+                "amount": "50.00",
+                "method": "cash",
+            },
+        ),
+        (
+            "post",
+            "/api/billing/invoices/mark-overdue",
+            None,
+        ),
     ]
 
     for method, path, payload in endpoints:
@@ -354,7 +398,6 @@ def test_create_invoice_uses_authenticated_clinic(
         headers=headers,
         json={
             "patient_id": 20,
-            "clinic_id": 999999,
             "items": [
                 {
                     "description": "Consultation",
@@ -493,6 +536,67 @@ def test_create_invoice_rejects_negative_unit_price(
     assert response.status_code == 422
 
 
+def test_create_invoice_rejects_unknown_field(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/billing/invoices",
+        headers=headers,
+        json={
+            "patient_id": 20,
+            "unknown": "blocked",
+            "items": [
+                {
+                    "description": "Consultation",
+                    "quantity": 1,
+                    "unit_price": "100.00",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_invoice_rejects_non_object_json(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/billing/invoices",
+        headers=headers,
+        json=[],
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Request body must be a JSON object"
+
+
 def test_create_invoice_returns_domain_error(
     app,
     client,
@@ -588,7 +692,15 @@ def test_get_outstanding_invoices_success(
 
     def fake_get_outstanding_invoices(**kwargs):
         captured.update(kwargs)
-        return invoices
+        return FakePage(
+            invoices,
+            page=1,
+            per_page=50,
+            total=2,
+            pages=1,
+            has_next=False,
+            has_prev=False,
+        )
 
     monkeypatch.setattr(
         "app.modules.billing.routes.billing_route.get_outstanding_invoices",
@@ -605,14 +717,120 @@ def test_get_outstanding_invoices_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
-    assert body["data"][0]["invoice_number"] == "INV-001"
-    assert body["data"][1]["invoice_number"] == "INV-002"
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert body["data"]["total"] == 2
+    assert body["data"]["pages"] == 1
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is False
+
+    assert len(body["data"]["items"]) == 2
+    assert body["data"]["items"][0]["invoice_number"] == "INV-001"
+    assert body["data"]["items"][1]["invoice_number"] == "INV-002"
 
     assert captured["clinic_id"] == clinic.id
+    assert captured["page"] == 1
+    assert captured["per_page"] == 50
 
 
-def test_get_outstanding_invoices_returns_empty_list(
+def test_get_outstanding_invoices_passes_pagination(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    captured = {}
+
+    def fake_get_outstanding_invoices(**kwargs):
+        captured.update(kwargs)
+        return FakePage(
+            [],
+            page=2,
+            per_page=10,
+            total=30,
+            pages=3,
+            has_next=True,
+            has_prev=True,
+        )
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.get_outstanding_invoices",
+        fake_get_outstanding_invoices,
+    )
+
+    response = client.get(
+        "/api/billing/invoices/outstanding?page=2&per_page=10",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 10
+    assert body["data"]["total"] == 30
+    assert body["data"]["pages"] == 3
+    assert body["data"]["has_next"] is True
+    assert body["data"]["has_prev"] is True
+
+    assert captured["clinic_id"] == clinic.id
+    assert captured["page"] == 2
+    assert captured["per_page"] == 10
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "page=0",
+        "page=-1",
+        "page=abc",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+        "per_page=abc",
+        "page=1&unknown=value",
+    ],
+)
+def test_get_outstanding_invoices_rejects_invalid_query(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    query_string,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    response = client.get(
+        f"/api/billing/invoices/outstanding?{query_string}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Invalid query parameters"
+
+
+def test_get_outstanding_invoices_returns_empty_page(
     app,
     client,
     make_user,
@@ -629,7 +847,15 @@ def test_get_outstanding_invoices_returns_empty_list(
 
     monkeypatch.setattr(
         "app.modules.billing.routes.billing_route.get_outstanding_invoices",
-        lambda **kwargs: [],
+        lambda **kwargs: FakePage(
+            [],
+            page=1,
+            per_page=50,
+            total=0,
+            pages=0,
+            has_next=False,
+            has_prev=False,
+        ),
     )
 
     response = client.get(
@@ -642,7 +868,67 @@ def test_get_outstanding_invoices_returns_empty_list(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"] == []
+    assert body["data"]["items"] == []
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert body["data"]["total"] == 0
+    assert body["data"]["pages"] == 0
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is False
+
+
+def test_get_outstanding_invoices_returns_last_page(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    invoice = _invoice_response(
+        invoice_id=99,
+        clinic_id=clinic.id,
+        patient_id=55,
+        invoice_number="INV-LAST",
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.get_outstanding_invoices",
+        lambda **kwargs: FakePage(
+            [invoice],
+            page=3,
+            per_page=1,
+            total=3,
+            pages=3,
+            has_next=False,
+            has_prev=True,
+        ),
+    )
+
+    response = client.get(
+        "/api/billing/invoices/outstanding?page=3&per_page=1",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 1
+    assert body["data"]["total"] == 3
+    assert body["data"]["pages"] == 3
+    assert body["data"]["has_next"] is False
+    assert body["data"]["has_prev"] is True
+    assert len(body["data"]["items"]) == 1
+    assert body["data"]["items"][0]["invoice_number"] == "INV-LAST"
 
 
 def test_get_outstanding_invoices_returns_domain_error(
@@ -850,7 +1136,6 @@ def test_record_payment_uses_authenticated_clinic(
             "invoice_id": 100,
             "amount": "50.00",
             "method": "cash",
-            "clinic_id": 999999,
         },
     )
 
@@ -942,6 +1227,62 @@ def test_record_payment_rejects_missing_required_fields(
 
     assert body["success"] is False
     assert "error" in body
+
+
+def test_record_payment_rejects_unknown_field(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/billing/payments",
+        headers=headers,
+        json={
+            "invoice_id": 100,
+            "amount": "50.00",
+            "method": "cash",
+            "unknown": "blocked",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_record_payment_rejects_non_object_json(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/billing/payments",
+        headers=headers,
+        json=[],
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Request body must be a JSON object"
 
 
 def test_record_payment_returns_domain_error(

@@ -1,11 +1,18 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from app.extensions import db, celery
 
 from app.modules.appointment.models.appointment_model import Appointment
 from app.modules.patient.services.patient_service import get_patient
 from app.modules.staff.services.staff_service import get_staff
-from app.modules.clinic.services.clinic_service import get_clinic
+from app.modules.clinic.services.clinic_service import (
+    ensure_clinic_active,
+    get_clinic,
+)
+from app.modules.clinic.models.clinic_model import Clinic
 
 from app.core.enums.appointment_enums import (
     AppointmentStatus,
@@ -21,13 +28,77 @@ from app.core.exceptions import (
 from app.core.utils.decorators import transactional
 
 
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
 # ============================================================================
 # INTERNAL HELPERS
 # ============================================================================
 
-def _utcnow():
-    """Return the current timezone-aware UTC datetime."""
+
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value <= 0
+    ):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+
+def _validate_pagination(
+    page: int,
+    per_page: int,
+) -> None:
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page <= 0
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page <= 0
+    ):
+        raise ValidationError(
+            "Per page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"Per page cannot exceed {MAX_PER_PAGE}"
+        )
+
+
+def _normalize_appointment_type(
+    appointment_type,
+) -> AppointmentType:
+    if isinstance(
+        appointment_type,
+        AppointmentType,
+    ):
+        return appointment_type
+
+    try:
+        return AppointmentType(appointment_type)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid appointment type"
+        )
 
 
 def _get_appointment(
@@ -35,11 +106,16 @@ def _get_appointment(
     clinic_id=None,
     lock=False,
 ):
-    """
-    Fetch an appointment.
+    _validate_positive_id(
+        appointment_id,
+        "Appointment ID",
+    )
 
-    When clinic_id is supplied, the lookup is tenant-scoped.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
 
     query = Appointment.query.filter(
         Appointment.id == appointment_id,
@@ -63,13 +139,39 @@ def _get_appointment(
     return appointment
 
 
+def _lock_clinic(
+    clinic_id: int,
+):
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    clinic = (
+        Clinic.query
+        .filter(
+            Clinic.id == clinic_id,
+        )
+        .with_for_update()
+        .first()
+    )
+
+    if clinic is None:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
+
+    return clinic
+
+
 def _validate_schedule_times(
     scheduled_start,
     scheduled_end,
 ):
-    """Validate appointment start/end times."""
-
-    if scheduled_start is None or scheduled_end is None:
+    if (
+        scheduled_start is None
+        or scheduled_end is None
+    ):
         raise ValidationError(
             "scheduled_start and scheduled_end are required"
         )
@@ -84,8 +186,6 @@ def _validate_reschedule_times(
     new_start,
     new_end,
 ):
-    """Validate new appointment start/end times."""
-
     if new_start is None or new_end is None:
         raise ValidationError(
             "new_start and new_end are required"
@@ -101,10 +201,6 @@ def _ensure_status(
     appointment,
     *allowed_statuses,
 ):
-    """
-    Ensure an appointment is currently in one of the allowed states.
-    """
-
     if appointment.status not in allowed_statuses:
         allowed = ", ".join(
             status.value
@@ -123,17 +219,25 @@ def _validate_appointment_participants(
     patient_id,
     staff_id,
 ):
-    """
-    Validate that clinic, patient, and staff all exist and that both
-    patient and staff belong to the clinic.
-    """
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+    _validate_positive_id(
+        staff_id,
+        "Staff ID",
+    )
 
     clinic = get_clinic(
-        clinic_id
+        clinic_id,
     )
 
     patient = get_patient(
-        patient_id
+        patient_id,
     )
 
     staff = get_staff(
@@ -157,12 +261,10 @@ def _find_patient_overlap(
     clinic_id=None,
     exclude_appointment_id=None,
 ):
-    """
-    Find an active appointment belonging to the patient that overlaps
-    the requested period.
-
-    Only SCHEDULED and CONFIRMED appointments block availability.
-    """
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
 
     query = Appointment.query.filter(
         Appointment.patient_id == patient_id,
@@ -196,10 +298,10 @@ def _find_staff_overlap(
     clinic_id=None,
     exclude_appointment_id=None,
 ):
-    """
-    Find an active appointment belonging to the staff member that
-    overlaps the requested period.
-    """
+    _validate_positive_id(
+        staff_id,
+        "Staff ID",
+    )
 
     query = Appointment.query.filter(
         Appointment.staff_id == staff_id,
@@ -234,11 +336,6 @@ def _ensure_no_schedule_conflict(
     clinic_id=None,
     exclude_appointment_id=None,
 ):
-    """
-    Ensure neither patient nor staff has an overlapping active
-    appointment.
-    """
-
     patient_conflict = _find_patient_overlap(
         patient_id=patient_id,
         scheduled_start=scheduled_start,
@@ -274,6 +371,7 @@ def _ensure_no_schedule_conflict(
 # APPOINTMENT CREATION
 # ============================================================================
 
+
 @transactional
 def create_appointment(
     clinic_id,
@@ -283,20 +381,40 @@ def create_appointment(
     scheduled_end,
     appointment_type=AppointmentType.IN_PERSON,
     reason=None,
+    notes=None,
 ):
-    """
-    Create a new appointment.
-
-    New appointments always begin in SCHEDULED status.
-    """
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+    _validate_positive_id(
+        staff_id,
+        "Staff ID",
+    )
 
     _validate_schedule_times(
         scheduled_start,
         scheduled_end,
     )
 
+    appointment_type = _normalize_appointment_type(
+        appointment_type,
+    )
+
+    clinic = _lock_clinic(
+        clinic_id,
+    )
+
+    ensure_clinic_active(
+        clinic_id,
+    )
+
     _validate_appointment_participants(
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
         patient_id=patient_id,
         staff_id=staff_id,
     )
@@ -306,11 +424,11 @@ def create_appointment(
         staff_id=staff_id,
         scheduled_start=scheduled_start,
         scheduled_end=scheduled_end,
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
     )
 
     appointment = Appointment(
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
         patient_id=patient_id,
         staff_id=staff_id,
         scheduled_start=scheduled_start,
@@ -318,6 +436,7 @@ def create_appointment(
         appointment_type=appointment_type,
         status=AppointmentStatus.SCHEDULED,
         reason=reason,
+        notes = notes,
     )
 
     db.session.add(appointment)
@@ -332,7 +451,7 @@ def create_appointment(
             f"{patient_id} with staff {staff_id}"
         ),
         new_value={
-            "clinic_id": clinic_id,
+            "clinic_id": clinic.id,
             "patient_id": patient_id,
             "staff_id": staff_id,
             "scheduled_start": (
@@ -358,6 +477,7 @@ def create_appointment(
 # RESCHEDULING
 # ============================================================================
 
+
 @transactional
 def reschedule_appointment(
     appointment_id,
@@ -365,17 +485,30 @@ def reschedule_appointment(
     new_end,
     clinic_id=None,
 ):
-    """
-    Reschedule an existing appointment.
+    _validate_positive_id(
+        appointment_id,
+        "Appointment ID",
+    )
 
-    Only scheduled or confirmed appointments can be rescheduled.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        ensure_clinic_active(
+            clinic_id,
+        )
 
     appointment = _get_appointment(
         appointment_id=appointment_id,
         clinic_id=clinic_id,
         lock=True,
     )
+
+    if clinic_id is None:
+        ensure_clinic_active(
+            appointment.clinic_id,
+        )
 
     _ensure_status(
         appointment,
@@ -408,8 +541,6 @@ def reschedule_appointment(
 
     appointment.scheduled_start = new_start
     appointment.scheduled_end = new_end
-
-    # Existing reminder is no longer valid.
     appointment.reminder_sent = False
 
     create_audit_log(
@@ -435,20 +566,31 @@ def reschedule_appointment(
 # APPOINTMENT STATUS TRANSITIONS
 # ============================================================================
 
+
 @transactional
 def confirm_appointment(
     appointment_id,
     clinic_id=None,
 ):
-    """
-    Confirm a scheduled appointment.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        ensure_clinic_active(
+            clinic_id,
+        )
 
     appointment = _get_appointment(
         appointment_id=appointment_id,
         clinic_id=clinic_id,
         lock=True,
     )
+
+    if clinic_id is None:
+        ensure_clinic_active(
+            appointment.clinic_id,
+        )
 
     _ensure_status(
         appointment,
@@ -481,17 +623,25 @@ def cancel_appointment(
     reason=None,
     clinic_id=None,
 ):
-    """
-    Cancel an appointment.
-
-    Scheduled and confirmed appointments may be cancelled.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        ensure_clinic_active(
+            clinic_id,
+        )
 
     appointment = _get_appointment(
         appointment_id=appointment_id,
         clinic_id=clinic_id,
         lock=True,
     )
+
+    if clinic_id is None:
+        ensure_clinic_active(
+            appointment.clinic_id,
+        )
 
     _ensure_status(
         appointment,
@@ -528,15 +678,25 @@ def complete_appointment(
     notes=None,
     clinic_id=None,
 ):
-    """
-    Mark a confirmed appointment as completed.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        ensure_clinic_active(
+            clinic_id,
+        )
 
     appointment = _get_appointment(
         appointment_id=appointment_id,
         clinic_id=clinic_id,
         lock=True,
     )
+
+    if clinic_id is None:
+        ensure_clinic_active(
+            appointment.clinic_id,
+        )
 
     _ensure_status(
         appointment,
@@ -571,15 +731,25 @@ def mark_no_show(
     appointment_id,
     clinic_id=None,
 ):
-    """
-    Mark a confirmed appointment as a no-show.
-    """
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        ensure_clinic_active(
+            clinic_id,
+        )
 
     appointment = _get_appointment(
         appointment_id=appointment_id,
         clinic_id=clinic_id,
         lock=True,
     )
+
+    if clinic_id is None:
+        ensure_clinic_active(
+            appointment.clinic_id,
+        )
 
     _ensure_status(
         appointment,
@@ -610,16 +780,31 @@ def mark_no_show(
 # APPOINTMENT QUERIES
 # ============================================================================
 
+
 def get_appointments_for_patient(
     patient_id,
     clinic_id=None,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    Return all appointments belonging to a clinic-owned patient.
-    """
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+
+    _validate_pagination(
+        page,
+        per_page,
+    )
 
     patient = get_patient(
-        patient_id
+        patient_id,
     )
 
     if clinic_id is not None:
@@ -640,9 +825,14 @@ def get_appointments_for_patient(
     return (
         query
         .order_by(
-            Appointment.scheduled_start.desc()
+            Appointment.scheduled_start.desc(),
+            Appointment.id.desc(),
         )
-        .all()
+        .paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
     )
 
 
@@ -650,12 +840,22 @@ def get_appointments_for_staff(
     clinic_id,
     staff_id,
     date_=None,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    Return appointments for a clinic-owned staff member.
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+    _validate_positive_id(
+        staff_id,
+        "Staff ID",
+    )
 
-    If date_ is provided, only appointments on that date are returned.
-    """
+    _validate_pagination(
+        page,
+        per_page,
+    )
 
     get_staff(
         staff_id=staff_id,
@@ -677,9 +877,14 @@ def get_appointments_for_staff(
     return (
         query
         .order_by(
-            Appointment.scheduled_start.asc()
+            Appointment.scheduled_start.asc(),
+            Appointment.id.asc(),
         )
-        .all()
+        .paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
     )
 
 
@@ -687,18 +892,17 @@ def get_appointments_for_staff(
 # CELERY REMINDERS
 # ============================================================================
 
+
 @celery.task(
     name="send_appointment_reminder"
 )
 def send_appointment_reminder(
     appointment_id: int,
 ):
-    """
-    Send an appointment reminder.
-
-    Notification integration remains intentionally isolated until the
-    notifications module is implemented.
-    """
+    _validate_positive_id(
+        appointment_id,
+        "Appointment ID",
+    )
 
     appointment = db.session.get(
         Appointment,
@@ -711,15 +915,6 @@ def send_appointment_reminder(
     if appointment.reminder_sent:
         return
 
-    # Notification integration will be added here later.
-    #
-    # Example:
-    #
-    # notify_patient(
-    #     appointment.patient_id,
-    #     "Reminder: your appointment is tomorrow",
-    # )
-
     appointment.reminder_sent = True
 
     db.session.commit()
@@ -729,19 +924,14 @@ def send_appointment_reminder(
     name="check_upcoming_appointments"
 )
 def check_upcoming_appointments():
-    """
-    Find appointments occurring approximately 24 hours from now and
-    queue reminder tasks.
-    """
-
     now = _utcnow()
 
-    tomorrow = (
-        now + timedelta(days=1)
+    tomorrow = now + timedelta(
+        days=1,
     )
 
-    reminder_window_end = (
-        tomorrow + timedelta(hours=1)
+    reminder_window_end = tomorrow + timedelta(
+        hours=1,
     )
 
     upcoming = (
@@ -758,6 +948,10 @@ def check_upcoming_appointments():
                     AppointmentStatus.CONFIRMED,
                 ]
             ),
+        )
+        .order_by(
+            Appointment.scheduled_start.asc(),
+            Appointment.id.asc(),
         )
         .all()
     )

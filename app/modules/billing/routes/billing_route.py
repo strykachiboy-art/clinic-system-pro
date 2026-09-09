@@ -1,16 +1,21 @@
-from flask import Blueprint, g, jsonify, request, session
+from flask import Blueprint, g, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
+
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.exceptions import DomainError, ValidationError
+from app.core.exceptions import (
+    DomainError,
+    ValidationError,
+)
 from app.core.utils.decorators import role_required
 
 from app.modules.billing.schemas.billing_schema import (
     CreateInvoiceRequest,
     InvoiceResponse,
+    OutstandingInvoiceQuery,
     OutstandingInvoiceResponse,
     PaymentResponse,
     RecordPaymentRequest,
@@ -37,9 +42,6 @@ billing_bp = Blueprint(
 
 
 def _current_user():
-    """
-    Return the authenticated user.
-    """
     identity = get_jwt_identity()
 
     try:
@@ -49,7 +51,15 @@ def _current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -73,6 +83,15 @@ def _current_clinic_id():
             "to a clinic"
         )
 
+    if (
+        isinstance(user.clinic_id, bool)
+        or not isinstance(user.clinic_id, int)
+        or user.clinic_id <= 0
+    ):
+        raise ValidationError(
+            "Invalid clinic identity"
+        )
+
     return user.clinic_id
 
 
@@ -82,21 +101,14 @@ def _current_clinic_id():
 
 
 def _sanitize_pydantic_errors(errors):
-    """
-    Make Pydantic validation errors JSON serializable.
-
-    Pydantic v2 may include non-serializable exception
-    objects inside the ctx field.
-    """
-
     sanitized = []
 
     for error in errors:
         item = dict(error)
 
-        if "ctx" in item and isinstance(
-            item["ctx"],
-            dict,
+        if (
+            "ctx" in item
+            and isinstance(item["ctx"], dict)
         ):
             item["ctx"] = {
                 key: str(value)
@@ -109,22 +121,46 @@ def _sanitize_pydantic_errors(errors):
 
 
 def _payload(schema):
-    try:
-        payload = schema.model_validate(
-            request.get_json(silent=True) or {}
-        )
+    raw = request.get_json(
+        silent=True
+    )
 
-        return payload, None
+    if raw is None:
+        raw = {}
 
-    except PydanticValidationError as exc:
+    if not isinstance(raw, dict):
         return (
             None,
             (
                 jsonify(
                     {
                         "success": False,
-                        "error": _sanitize_pydantic_errors(
-                            exc.errors()
+                        "error": (
+                            "Request body must be "
+                            "a JSON object"
+                        ),
+                    }
+                ),
+                422,
+            ),
+        )
+
+    try:
+        payload = schema.model_validate(
+            raw
+        )
+
+        return payload, None
+
+    except PydanticValidationError:
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Invalid request payload"
                         ),
                     }
                 ),
@@ -133,12 +169,92 @@ def _payload(schema):
         )
 
 
-def _serialize_response(schema, value):
-    return schema.model_validate(
-        value
-    ).model_dump(
-        mode="json"
+def _query_payload(schema):
+    data = request.args.to_dict()
+
+    try:
+        if "page" in data:
+            data["page"] = int(
+                data["page"]
+            )
+
+        if "per_page" in data:
+            data["per_page"] = int(
+                data["per_page"]
+            )
+
+    except (TypeError, ValueError):
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Invalid query parameters"
+                        ),
+                    }
+                ),
+                422,
+            ),
+        )
+
+    try:
+        payload = schema.model_validate(
+            data
+        )
+
+        return payload, None
+
+    except PydanticValidationError:
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Invalid query parameters"
+                        ),
+                    }
+                ),
+                422,
+            ),
+        )
+
+
+def _serialize_response(
+    schema,
+    value,
+):
+    return (
+        schema.model_validate(
+            value
+        ).model_dump(
+            mode="json"
+        )
     )
+
+
+def _serialize_page(
+    page,
+    schema,
+):
+    return {
+        "items": [
+            _serialize_response(
+                schema,
+                item,
+            )
+            for item in page.items
+        ],
+        "page": page.page,
+        "per_page": page.per_page,
+        "total": page.total,
+        "pages": page.pages,
+        "has_next": page.has_next,
+        "has_prev": page.has_prev,
+    }
 
 
 def _domain_error_response(exc):
@@ -219,24 +335,30 @@ def create_invoice_route():
 )
 @role_required(Role.ADMIN)
 def get_outstanding_invoices_route():
+    payload, error = _query_payload(
+        OutstandingInvoiceQuery
+    )
+
+    if error:
+        return error
+
     try:
         clinic_id = _current_clinic_id()
 
         invoices = get_outstanding_invoices(
-            clinic_id=clinic_id
+            clinic_id=clinic_id,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
         return (
             jsonify(
                 {
                     "success": True,
-                    "data": [
-                        _serialize_response(
-                            OutstandingInvoiceResponse,
-                            invoice,
-                        )
-                        for invoice in invoices
-                    ],
+                    "data": _serialize_page(
+                        invoices,
+                        OutstandingInvoiceResponse,
+                    ),
                 }
             ),
             200,

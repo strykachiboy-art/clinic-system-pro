@@ -1,4 +1,6 @@
-﻿from datetime import date, datetime, timedelta
+﻿# app/tests/modules/appointment/test_appointment_service.py
+
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -6,13 +8,11 @@ from app.core.enums.appointment_enums import (
     AppointmentStatus,
     AppointmentType,
 )
-
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
-
 from app.modules.appointment.services import (
     appointment_service,
 )
@@ -83,6 +83,143 @@ def make_appointment(
     return appointment
 
 
+def make_pagination(
+    items,
+    *,
+    page=1,
+    per_page=50,
+    total=None,
+):
+    total = len(items) if total is None else total
+
+    pages = (
+        (total + per_page - 1) // per_page
+        if total
+        else 0
+    )
+
+    return type(
+        "Pagination",
+        (),
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1,
+        },
+    )()
+
+
+# ============================================================================
+# Validation helpers
+# ============================================================================
+
+
+def test_validate_positive_id_accepts_valid_id():
+    assert (
+        appointment_service._validate_positive_id(
+            10,
+            "Appointment ID",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0,
+        -1,
+        True,
+        False,
+        None,
+        "1",
+    ],
+)
+def test_validate_positive_id_rejects_invalid_ids(
+    value,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Appointment ID must be a positive integer",
+    ):
+        appointment_service._validate_positive_id(
+            value,
+            "Appointment ID",
+        )
+
+
+def test_validate_pagination_accepts_valid_values():
+    assert (
+        appointment_service._validate_pagination(
+            1,
+            50,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, 501),
+    ],
+)
+def test_validate_pagination_rejects_invalid_values(
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        appointment_service._validate_pagination(
+            page,
+            per_page,
+        )
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (
+            AppointmentType.IN_PERSON,
+            AppointmentType.IN_PERSON,
+        ),
+        (
+            AppointmentType.IN_PERSON.value,
+            AppointmentType.IN_PERSON,
+        ),
+    ],
+)
+def test_normalize_appointment_type(
+    value,
+    expected,
+):
+    assert (
+        appointment_service._normalize_appointment_type(
+            value,
+        )
+        == expected
+    )
+
+
+def test_normalize_appointment_type_rejects_invalid_value():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid appointment type",
+    ):
+        appointment_service._normalize_appointment_type(
+            "not-valid",
+        )
+
+
 # ============================================================================
 # _utcnow
 # ============================================================================
@@ -129,9 +266,18 @@ def test_validate_schedule_times_accepts_valid_times():
 @pytest.mark.parametrize(
     "scheduled_start,scheduled_end",
     [
-        (None, datetime(2026, 9, 8, 10, 30)),
-        (datetime(2026, 9, 8, 10, 0), None),
-        (None, None),
+        (
+            None,
+            datetime(2026, 9, 8, 10, 30),
+        ),
+        (
+            datetime(2026, 9, 8, 10, 0),
+            None,
+        ),
+        (
+            None,
+            None,
+        ),
     ],
 )
 def test_validate_schedule_times_requires_both_values(
@@ -140,7 +286,9 @@ def test_validate_schedule_times_requires_both_values(
 ):
     with pytest.raises(
         ValidationError,
-        match="scheduled_start and scheduled_end are required",
+        match=(
+            "scheduled_start and scheduled_end are required"
+        ),
     ):
         appointment_service._validate_schedule_times(
             scheduled_start,
@@ -159,7 +307,10 @@ def test_validate_schedule_times_rejects_equal_times():
 
     with pytest.raises(
         ValidationError,
-        match="scheduled_end must be later than scheduled_start",
+        match=(
+            "scheduled_end must be later than "
+            "scheduled_start"
+        ),
     ):
         appointment_service._validate_schedule_times(
             start,
@@ -186,7 +337,10 @@ def test_validate_schedule_times_rejects_end_before_start():
 
     with pytest.raises(
         ValidationError,
-        match="scheduled_end must be later than scheduled_start",
+        match=(
+            "scheduled_end must be later than "
+            "scheduled_start"
+        ),
     ):
         appointment_service._validate_schedule_times(
             start,
@@ -227,9 +381,18 @@ def test_validate_reschedule_times_accepts_valid_times():
 @pytest.mark.parametrize(
     "new_start,new_end",
     [
-        (None, datetime(2026, 9, 9, 11, 30)),
-        (datetime(2026, 9, 9, 11, 0), None),
-        (None, None),
+        (
+            None,
+            datetime(2026, 9, 9, 11, 30),
+        ),
+        (
+            datetime(2026, 9, 9, 11, 0),
+            None,
+        ),
+        (
+            None,
+            None,
+        ),
     ],
 )
 def test_validate_reschedule_times_requires_both_values(
@@ -345,6 +508,9 @@ def test_get_appointment_returns_appointment(
         def filter(self, *args):
             return self
 
+        def with_for_update(self):
+            return self
+
         def first(self):
             return appointment
 
@@ -367,6 +533,9 @@ def test_get_appointment_raises_not_found(
 ):
     class FakeQuery:
         def filter(self, *args):
+            return self
+
+        def with_for_update(self):
             return self
 
         def first(self):
@@ -419,6 +588,113 @@ def test_get_appointment_supports_clinic_filter(
 
     assert result is appointment
     assert len(filters) == 2
+
+
+def test_get_appointment_uses_row_lock(
+    app,
+    monkeypatch,
+):
+    appointment = make_appointment(
+        appointment_id=7,
+    )
+
+    locked = False
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            nonlocal locked
+            locked = True
+            return self
+
+        def first(self):
+            return appointment
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._get_appointment(
+        appointment_id=7,
+        lock=True,
+    )
+
+    assert result is appointment
+    assert locked is True
+
+
+# ============================================================================
+# _lock_clinic
+# ============================================================================
+
+
+def test_lock_clinic_returns_clinic(
+    app,
+    monkeypatch,
+):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    locked = False
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            nonlocal locked
+            locked = True
+            return self
+
+        def first(self):
+            return clinic
+
+    monkeypatch.setattr(
+        appointment_service.Clinic,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service._lock_clinic(
+        10,
+    )
+
+    assert result is clinic
+    assert locked is True
+
+
+def test_lock_clinic_raises_not_found(
+    app,
+    monkeypatch,
+):
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def first(self):
+            return None
+
+    monkeypatch.setattr(
+        appointment_service.Clinic,
+        "query",
+        FakeQuery(),
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Clinic 999 not found",
+    ):
+        appointment_service._lock_clinic(999)
 
 
 # ============================================================================
@@ -746,6 +1022,18 @@ def test_create_appointment_success(
 
     monkeypatch.setattr(
         appointment_service,
+        "_lock_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "get_clinic",
         lambda clinic_id: clinic,
     )
@@ -820,6 +1108,7 @@ def test_create_appointment_success(
         scheduled_end=end,
         appointment_type=AppointmentType.IN_PERSON,
         reason="Routine consultation",
+        notes="Initial visit",
     )
 
     assert result.id == 101
@@ -833,12 +1122,114 @@ def test_create_appointment_success(
     )
     assert result.status == AppointmentStatus.SCHEDULED
     assert result.reason == "Routine consultation"
+    assert result.notes == "Initial visit"
 
 
-def test_create_appointment_rejects_invalid_schedule(
+def test_create_appointment_accepts_string_appointment_type(
     app,
     monkeypatch,
 ):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    staff = type(
+        "Staff",
+        (),
+        {"id": 30},
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_lock_clinic",
+        lambda clinic_id: clinic,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "get_clinic",
+        lambda clinic_id: clinic,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: staff,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "_ensure_no_schedule_conflict",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    created = {}
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "add",
+        lambda appointment: created.update(
+            appointment=appointment
+        ),
+    )
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "flush",
+        lambda: setattr(
+            created["appointment"],
+            "id",
+            102,
+        ),
+    )
+
+    result = appointment_service.create_appointment(
+        clinic_id=10,
+        patient_id=20,
+        staff_id=30,
+        scheduled_start=datetime(
+            2026,
+            9,
+            8,
+            10,
+            0,
+        ),
+        scheduled_end=datetime(
+            2026,
+            9,
+            8,
+            10,
+            30,
+        ),
+        appointment_type=AppointmentType.IN_PERSON.value,
+    )
+
+    assert result.appointment_type == (
+        AppointmentType.IN_PERSON
+    )
+
+
+def test_create_appointment_rejects_invalid_schedule(app):
     with pytest.raises(
         ValidationError,
         match="scheduled_end must be later than scheduled_start",
@@ -864,6 +1255,34 @@ def test_create_appointment_rejects_invalid_schedule(
         )
 
 
+def test_create_appointment_rejects_invalid_ids(
+    app,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Clinic ID must be a positive integer",
+    ):
+        appointment_service.create_appointment(
+            clinic_id=0,
+            patient_id=20,
+            staff_id=30,
+            scheduled_start=datetime(
+                2026,
+                9,
+                8,
+                10,
+                0,
+            ),
+            scheduled_end=datetime(
+                2026,
+                9,
+                8,
+                10,
+                30,
+            ),
+        )
+
+
 def test_create_appointment_rejects_patient_clinic_mismatch(
     app,
     monkeypatch,
@@ -885,6 +1304,18 @@ def test_create_appointment_rejects_patient_clinic_mismatch(
         (),
         {"id": 30},
     )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_lock_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
 
     monkeypatch.setattr(
         appointment_service,
@@ -933,13 +1364,43 @@ def test_create_appointment_rejects_patient_schedule_conflict(
     app,
     monkeypatch,
 ):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    staff = type(
+        "Staff",
+        (),
+        {},
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_lock_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
     monkeypatch.setattr(
         appointment_service,
         "_validate_appointment_participants",
         lambda **kwargs: (
-            type("Clinic", (), {"id": 10})(),
-            type("Patient", (), {"clinic_id": 10})(),
-            type("Staff", (), {})(),
+            clinic,
+            patient,
+            staff,
         ),
     )
 
@@ -1000,6 +1461,12 @@ def test_reschedule_appointment_success(
 
     monkeypatch.setattr(
         appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "_ensure_no_schedule_conflict",
         lambda **kwargs: None,
     )
@@ -1056,6 +1523,12 @@ def test_reschedule_appointment_rejects_invalid_status(
         lambda **kwargs: appointment,
     )
 
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
     with pytest.raises(
         ConflictError,
         match="cannot perform this action",
@@ -1093,6 +1566,12 @@ def test_reschedule_appointment_rejects_invalid_times(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     with pytest.raises(
@@ -1141,6 +1620,12 @@ def test_confirm_appointment_success(
 
     monkeypatch.setattr(
         appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "create_audit_log",
         lambda **kwargs: None,
     )
@@ -1167,6 +1652,12 @@ def test_confirm_appointment_rejects_non_scheduled_status(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     with pytest.raises(
@@ -1197,6 +1688,12 @@ def test_cancel_appointment_success(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     monkeypatch.setattr(
@@ -1237,6 +1734,12 @@ def test_cancel_appointment_accepts_no_reason(
 
     monkeypatch.setattr(
         appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "create_audit_log",
         lambda **kwargs: None,
     )
@@ -1263,6 +1766,12 @@ def test_cancel_appointment_rejects_completed_status(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     with pytest.raises(
@@ -1297,6 +1806,12 @@ def test_complete_appointment_success(
 
     monkeypatch.setattr(
         appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "create_audit_log",
         lambda **kwargs: None,
     )
@@ -1309,9 +1824,7 @@ def test_complete_appointment_success(
 
     assert result is appointment
     assert result.status == AppointmentStatus.COMPLETED
-    assert result.notes == (
-        "Consultation completed"
-    )
+    assert result.notes == "Consultation completed"
 
 
 def test_complete_appointment_without_notes_preserves_existing_notes(
@@ -1328,6 +1841,12 @@ def test_complete_appointment_without_notes_preserves_existing_notes(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     monkeypatch.setattr(
@@ -1359,6 +1878,12 @@ def test_complete_appointment_rejects_scheduled_status(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     with pytest.raises(
@@ -1393,6 +1918,12 @@ def test_mark_no_show_success(
 
     monkeypatch.setattr(
         appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
         "create_audit_log",
         lambda **kwargs: None,
     )
@@ -1419,6 +1950,12 @@ def test_mark_no_show_rejects_scheduled_status(
         appointment_service,
         "_get_appointment",
         lambda **kwargs: appointment,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
     )
 
     with pytest.raises(
@@ -1463,6 +2000,13 @@ def test_get_appointments_for_patient_success(
         lambda patient_id: patient,
     )
 
+    pagination = make_pagination(
+        appointments,
+        page=1,
+        per_page=50,
+        total=2,
+    )
+
     class FakeQuery:
         def filter(self, *args):
             return self
@@ -1470,8 +2014,16 @@ def test_get_appointments_for_patient_success(
         def order_by(self, *args):
             return self
 
-        def all(self):
-            return appointments
+        def paginate(
+            self,
+            page,
+            per_page,
+            error_out,
+        ):
+            assert page == 1
+            assert per_page == 50
+            assert error_out is False
+            return pagination
 
     monkeypatch.setattr(
         appointment_service.Appointment,
@@ -1484,7 +2036,75 @@ def test_get_appointments_for_patient_success(
         clinic_id=10,
     )
 
-    assert result == appointments
+    assert result is pagination
+    assert result.items == appointments
+    assert result.total == 2
+
+
+def test_get_appointments_for_patient_supports_pagination(
+    app,
+    monkeypatch,
+):
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    pagination = make_pagination(
+        [
+            make_appointment(
+                appointment_id=51,
+                patient_id=20,
+            )
+        ],
+        page=2,
+        per_page=25,
+        total=51,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def paginate(
+            self,
+            page,
+            per_page,
+            error_out,
+        ):
+            assert page == 2
+            assert per_page == 25
+            assert error_out is False
+            return pagination
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service.get_appointments_for_patient(
+        patient_id=20,
+        clinic_id=10,
+        page=2,
+        per_page=25,
+    )
+
+    assert result.page == 2
+    assert result.per_page == 25
+    assert result.total == 51
+    assert result.has_next is True
+    assert result.has_prev is True
 
 
 def test_get_appointments_for_patient_rejects_wrong_clinic(
@@ -1509,6 +2129,32 @@ def test_get_appointments_for_patient_rejects_wrong_clinic(
         appointment_service.get_appointments_for_patient(
             patient_id=20,
             clinic_id=10,
+        )
+
+
+def test_get_appointments_for_patient_rejects_invalid_pagination(
+    app,
+    monkeypatch,
+):
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+
+    with pytest.raises(
+        ValidationError,
+    ):
+        appointment_service.get_appointments_for_patient(
+            patient_id=20,
+            clinic_id=10,
+            page=0,
         )
 
 
@@ -1540,6 +2186,13 @@ def test_get_appointments_for_staff_success(
         lambda staff_id, clinic_id: object(),
     )
 
+    pagination = make_pagination(
+        appointments,
+        page=1,
+        per_page=50,
+        total=2,
+    )
+
     class FakeQuery:
         def filter(self, *args):
             return self
@@ -1547,8 +2200,16 @@ def test_get_appointments_for_staff_success(
         def order_by(self, *args):
             return self
 
-        def all(self):
-            return appointments
+        def paginate(
+            self,
+            page,
+            per_page,
+            error_out,
+        ):
+            assert page == 1
+            assert per_page == 50
+            assert error_out is False
+            return pagination
 
     monkeypatch.setattr(
         appointment_service.Appointment,
@@ -1561,7 +2222,68 @@ def test_get_appointments_for_staff_success(
         staff_id=30,
     )
 
-    assert result == appointments
+    assert result is pagination
+    assert result.items == appointments
+
+
+def test_get_appointments_for_staff_supports_pagination(
+    app,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: object(),
+    )
+
+    pagination = make_pagination(
+        [
+            make_appointment(
+                appointment_id=51,
+                clinic_id=10,
+                staff_id=30,
+            )
+        ],
+        page=2,
+        per_page=25,
+        total=51,
+    )
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def paginate(
+            self,
+            page,
+            per_page,
+            error_out,
+        ):
+            assert page == 2
+            assert per_page == 25
+            assert error_out is False
+            return pagination
+
+    monkeypatch.setattr(
+        appointment_service.Appointment,
+        "query",
+        FakeQuery(),
+    )
+
+    result = appointment_service.get_appointments_for_staff(
+        clinic_id=10,
+        staff_id=30,
+        page=2,
+        per_page=25,
+    )
+
+    assert result.page == 2
+    assert result.per_page == 25
+    assert result.total == 51
+    assert result.pages == 3
 
 
 def test_get_appointments_for_staff_with_date_filter(
@@ -1588,6 +2310,10 @@ def test_get_appointments_for_staff_with_date_filter(
         lambda staff_id, clinic_id: object(),
     )
 
+    pagination = make_pagination(
+        appointments,
+    )
+
     class FakeQuery:
         def filter(self, *args):
             return self
@@ -1595,8 +2321,13 @@ def test_get_appointments_for_staff_with_date_filter(
         def order_by(self, *args):
             return self
 
-        def all(self):
-            return appointments
+        def paginate(
+            self,
+            page,
+            per_page,
+            error_out,
+        ):
+            return pagination
 
     monkeypatch.setattr(
         appointment_service.Appointment,
@@ -1610,7 +2341,29 @@ def test_get_appointments_for_staff_with_date_filter(
         date_=target_date,
     )
 
-    assert result == appointments
+    assert result.items == appointments
+
+
+@pytest.mark.parametrize(
+    "clinic_id,staff_id",
+    [
+        (0, 30),
+        (10, 0),
+        (-1, 30),
+        (10, -1),
+    ],
+)
+def test_get_appointments_for_staff_rejects_invalid_ids(
+    clinic_id,
+    staff_id,
+):
+    with pytest.raises(
+        ValidationError,
+    ):
+        appointment_service.get_appointments_for_staff(
+            clinic_id=clinic_id,
+            staff_id=staff_id,
+        )
 
 
 # ============================================================================
@@ -1694,6 +2447,16 @@ def test_send_appointment_reminder_marks_reminder_sent(
     assert committed is True
 
 
+def test_send_appointment_reminder_rejects_invalid_id(
+    app,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Appointment ID must be a positive integer",
+    ):
+        appointment_service.send_appointment_reminder(0)
+
+
 # ============================================================================
 # Upcoming appointment reminder task
 # ============================================================================
@@ -1722,6 +2485,9 @@ def test_check_upcoming_appointments_queues_reminders(
 
     class FakeQuery:
         def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
             return self
 
         def all(self):
@@ -1756,6 +2522,9 @@ def test_check_upcoming_appointments_handles_no_upcoming_appointments(
 ):
     class FakeQuery:
         def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
             return self
 
         def all(self):

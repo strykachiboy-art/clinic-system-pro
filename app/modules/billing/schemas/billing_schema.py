@@ -1,7 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app.core.enums.billing_enums import (
     InvoiceStatus,
@@ -12,24 +20,34 @@ from app.core.enums.billing_enums import (
 
 
 # ============================================================================
+# Constants
+# ============================================================================
+
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+MAX_INSURANCE_PROVIDER_LENGTH = 120
+MAX_PAYMENT_REFERENCE_LENGTH = 120
+MAX_GATEWAY_TRANSACTION_ID_LENGTH = 255
+
+
+# ============================================================================
 # Invoice Item Schemas
 # ============================================================================
 
 
 class InvoiceItemRequest(BaseModel):
-    """
-    Data required to add an item to an invoice.
-    """
-
     description: str = Field(
         ...,
         min_length=1,
         max_length=255,
     )
 
-    quantity: int = Field(
+    quantity: StrictInt = Field(
         default=1,
-        ge=1,
+        gt=0,
     )
 
     unit_price: Decimal = Field(
@@ -39,7 +57,10 @@ class InvoiceItemRequest(BaseModel):
 
     @field_validator("description")
     @classmethod
-    def validate_description(cls, value: str) -> str:
+    def validate_description(
+        cls,
+        value: str,
+    ) -> str:
         value = value.strip()
 
         if not value:
@@ -49,20 +70,34 @@ class InvoiceItemRequest(BaseModel):
 
         return value
 
+    @field_validator("unit_price")
+    @classmethod
+    def validate_unit_price(
+        cls,
+        value: Decimal,
+    ) -> Decimal:
+        if not value.is_finite():
+            raise ValueError(
+                "Unit price must be a finite value"
+            )
 
-class InvoiceItemResponse(BaseModel):
-    """
-    Invoice item returned by the API.
-    """
+        return value
 
     model_config = ConfigDict(
-        from_attributes=True
+        extra="forbid",
+        str_strip_whitespace=True,
     )
 
-    id: int
-    invoice_id: int
+
+class InvoiceItemResponse(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: StrictInt
+    invoice_id: StrictInt
     description: str
-    quantity: int
+    quantity: StrictInt
     unit_price: Decimal
     subtotal: Decimal
 
@@ -73,32 +108,23 @@ class InvoiceItemResponse(BaseModel):
 
 
 class CreateInvoiceRequest(BaseModel):
-    """
-    Data required to create an invoice.
-
-    clinic_id is intentionally excluded.
-
-    The clinic is derived from the authenticated user's
-    clinic assignment.
-    """
-
-    patient_id: int = Field(
+    patient_id: StrictInt = Field(
         ...,
         gt=0,
     )
 
-    appointment_id: int | None = Field(
+    appointment_id: StrictInt | None = Field(
         default=None,
         gt=0,
     )
 
     due_date: date | None = None
 
-    is_insurance_claim: bool = False
+    is_insurance_claim: StrictBool = False
 
     insurance_provider: str | None = Field(
         default=None,
-        max_length=120,
+        max_length=MAX_INSURANCE_PROVIDER_LENGTH,
     )
 
     items: list[InvoiceItemRequest] = Field(
@@ -132,20 +158,37 @@ class CreateInvoiceRequest(BaseModel):
 
         return value
 
+    @model_validator(mode="after")
+    def validate_insurance_claim(self):
+        if (
+            self.is_insurance_claim
+            and not self.insurance_provider
+        ):
+            raise ValueError(
+                "Insurance provider is required "
+                "for an insurance claim"
+            )
 
-class InvoiceResponse(BaseModel):
-    """
-    Complete invoice representation returned by the API.
-    """
+        if not self.is_insurance_claim:
+            self.insurance_provider = None
+
+        return self
 
     model_config = ConfigDict(
-        from_attributes=True
+        extra="forbid",
+        str_strip_whitespace=True,
     )
 
-    id: int
-    clinic_id: int
-    patient_id: int
-    appointment_id: int | None
+
+class InvoiceResponse(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: StrictInt
+    clinic_id: StrictInt
+    patient_id: StrictInt
+    appointment_id: StrictInt | None
 
     invoice_number: str
 
@@ -163,24 +206,19 @@ class InvoiceResponse(BaseModel):
     updated_at: datetime
 
     items: list[InvoiceItemResponse] = Field(
-        default_factory=list
+        default_factory=list,
     )
 
 
 class OutstandingInvoiceResponse(BaseModel):
-    """
-    Invoice representation used when returning
-    outstanding invoices.
-    """
-
     model_config = ConfigDict(
-        from_attributes=True
+        from_attributes=True,
     )
 
-    id: int
-    clinic_id: int
-    patient_id: int
-    appointment_id: int | None
+    id: StrictInt
+    clinic_id: StrictInt
+    patient_id: StrictInt
+    appointment_id: StrictInt | None
 
     invoice_number: str
 
@@ -199,21 +237,34 @@ class OutstandingInvoiceResponse(BaseModel):
 
 
 # ============================================================================
+# Outstanding Invoice Query
+# ============================================================================
+
+
+class OutstandingInvoiceQuery(BaseModel):
+    page: StrictInt = Field(
+        default=DEFAULT_PAGE,
+        gt=0,
+    )
+
+    per_page: StrictInt = Field(
+        default=DEFAULT_PER_PAGE,
+        gt=0,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+# ============================================================================
 # Payment Schemas
 # ============================================================================
 
 
 class RecordPaymentRequest(BaseModel):
-    """
-    Data required to record a successful payment.
-
-    clinic_id is intentionally excluded.
-
-    The invoice's clinic is derived from the authenticated
-    user's clinic assignment.
-    """
-
-    invoice_id: int = Field(
+    invoice_id: StrictInt = Field(
         ...,
         gt=0,
     )
@@ -229,13 +280,31 @@ class RecordPaymentRequest(BaseModel):
 
     reference: str | None = Field(
         default=None,
-        max_length=120,
+        max_length=MAX_PAYMENT_REFERENCE_LENGTH,
     )
 
     gateway_transaction_id: str | None = Field(
         default=None,
-        max_length=255,
+        max_length=MAX_GATEWAY_TRANSACTION_ID_LENGTH,
     )
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(
+        cls,
+        value: Decimal,
+    ) -> Decimal:
+        if not value.is_finite():
+            raise ValueError(
+                "Amount must be a finite value"
+            )
+
+        if value <= 0:
+            raise ValueError(
+                "Amount must be greater than zero"
+            )
+
+        return value
 
     @field_validator(
         "reference",
@@ -253,18 +322,48 @@ class RecordPaymentRequest(BaseModel):
 
         return value or None
 
+    @model_validator(mode="after")
+    def validate_gateway_data(self):
+        electronic_methods = {
+            PaymentMethod.CARD,
+            PaymentMethod.BANK_TRANSFER,
+            PaymentMethod.MOBILE_MONEY,
+        }
 
-class PaymentResponse(BaseModel):
-    """
-    Payment representation returned by the API.
-    """
+        if (
+            self.gateway is not None
+            and self.method not in electronic_methods
+        ):
+            raise ValueError(
+                "Payment gateway cannot be used "
+                f"with payment method "
+                f"'{self.method.value}'"
+            )
+
+        if (
+            self.gateway is not None
+            and not self.gateway_transaction_id
+        ):
+            raise ValueError(
+                "Gateway transaction ID is required "
+                "for gateway payments"
+            )
+
+        return self
 
     model_config = ConfigDict(
-        from_attributes=True
+        extra="forbid",
+        str_strip_whitespace=True,
     )
 
-    id: int
-    invoice_id: int
+
+class PaymentResponse(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    id: StrictInt
+    invoice_id: StrictInt
 
     amount: Decimal
 

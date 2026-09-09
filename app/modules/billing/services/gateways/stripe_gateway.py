@@ -4,91 +4,174 @@ from typing import Any
 import stripe
 from flask import current_app
 
-from app.modules.billing.services.gateways.base_gateway import PaymentGatewayBase
+from app.modules.billing.services.gateways.base_gateway import (
+    PaymentGatewayBase,
+)
 
 
 class StripeGateway(PaymentGatewayBase):
-    """
-    Stripe payment gateway implementation.
-
-    This class is responsible only for communication with Stripe.
-    It does not create or update Payment or Invoice records.
-
-    Amounts received from the billing layer are treated as major
-    currency units and converted to Stripe's smallest currency unit
-    before making API requests.
-    """
+    ZERO_DECIMAL_CURRENCIES = {
+        "bif",
+        "clp",
+        "djf",
+        "gnf",
+        "jpy",
+        "kmf",
+        "krw",
+        "mga",
+        "pyg",
+        "rwf",
+        "ugx",
+        "vnd",
+        "vuv",
+        "xaf",
+        "xof",
+        "xpf",
+    }
 
     def __init__(self):
-        self.secret_key = current_app.config.get("STRIPE_SECRET_KEY")
-        self.webhook_secret = current_app.config.get("STRIPE_WEBHOOK_SECRET")
+        self.secret_key = current_app.config.get(
+            "STRIPE_SECRET_KEY"
+        )
+
+        self.webhook_secret = current_app.config.get(
+            "STRIPE_WEBHOOK_SECRET"
+        )
 
         if not self.secret_key:
-            raise ValueError("Stripe secret key is not configured")
+            raise ValueError(
+                "Stripe secret key is not configured"
+            )
 
         stripe.api_key = self.secret_key
 
-    @staticmethod
-    def _to_smallest_unit(amount: Decimal, currency: str) -> int:
+    @classmethod
+    def _to_smallest_unit(
+        cls,
+        amount: Decimal,
+        currency: str,
+    ) -> int:
         try:
-            amount = Decimal(amount)
-        except (InvalidOperation, TypeError, ValueError) as exc:
-            raise ValueError("Invalid payment amount") from exc
+            amount = Decimal(str(amount))
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ValueError(
+                "Invalid payment amount"
+            ) from exc
+
+        if not amount.is_finite():
+            raise ValueError(
+                "Invalid payment amount"
+            )
 
         if amount <= 0:
-            raise ValueError("Payment amount must be greater than zero")
+            raise ValueError(
+                "Payment amount must be greater than zero"
+            )
 
-        currency = currency.upper()
+        currency = cls._normalize_currency(
+            currency
+        )
 
-        zero_decimal_currencies = {
-            "BIF",
-            "CLP",
-            "DJF",
-            "GNF",
-            "JPY",
-            "KMF",
-            "KRW",
-            "MGA",
-            "PYG",
-            "RWF",
-            "UGX",
-            "VND",
-            "VUV",
-            "XAF",
-            "XOF",
-            "XPF",
-        }
-
-        if currency in zero_decimal_currencies:
-            if amount != amount.to_integral_value():
+        if currency in cls.ZERO_DECIMAL_CURRENCIES:
+            if (
+                amount
+                != amount.to_integral_value()
+            ):
                 raise ValueError(
-                    f"{currency} does not support fractional amounts"
+                    f"{currency.upper()} does not support "
+                    "fractional amounts"
                 )
 
             return int(amount)
 
-        smallest_unit = amount * Decimal("100")
+        smallest_unit = (
+            amount * Decimal("100")
+        )
 
-        if smallest_unit != smallest_unit.to_integral_value():
+        if (
+            smallest_unit
+            != smallest_unit.to_integral_value()
+        ):
             raise ValueError(
-                "Amount has more precision than the currency supports"
+                "Amount has more precision than "
+                "the currency supports"
             )
 
         return int(smallest_unit)
 
     @staticmethod
-    def _normalize_currency(currency: str) -> str:
-        if not currency or not currency.strip():
-            raise ValueError("Currency is required")
+    def _normalize_currency(
+        currency: str,
+    ) -> str:
+        if (
+            not isinstance(currency, str)
+            or not currency.strip()
+        ):
+            raise ValueError(
+                "Currency is required"
+            )
 
         return currency.strip().lower()
 
     @staticmethod
-    def _normalize_email(email: str) -> str:
-        if not email or not email.strip():
-            raise ValueError("Customer email is required")
+    def _normalize_email(
+        email: str,
+    ) -> str:
+        if (
+            not isinstance(email, str)
+            or not email.strip()
+        ):
+            raise ValueError(
+                "Customer email is required"
+            )
 
         return email.strip()
+
+    @staticmethod
+    def _normalize_reference(
+        reference: str,
+    ) -> str:
+        if (
+            not isinstance(reference, str)
+            or not reference.strip()
+        ):
+            raise ValueError(
+                "Payment reference is required"
+            )
+
+        return reference.strip()
+
+    @staticmethod
+    def _from_smallest_unit(
+        amount,
+        currency: str,
+    ) -> Decimal:
+        try:
+            amount = Decimal(str(amount))
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ValueError(
+                "Invalid provider payment amount"
+            ) from exc
+
+        if not amount.is_finite():
+            raise ValueError(
+                "Invalid provider payment amount"
+            )
+
+        currency = currency.lower()
+
+        if currency in StripeGateway.ZERO_DECIMAL_CURRENCIES:
+            return amount
+
+        return amount / Decimal("100")
 
     def initialize_payment(
         self,
@@ -100,19 +183,29 @@ class StripeGateway(PaymentGatewayBase):
         callback_url: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not reference or not reference.strip():
-            raise ValueError("Payment reference is required")
+        reference = self._normalize_reference(
+            reference
+        )
 
-        currency = self._normalize_currency(currency)
-        customer_email = self._normalize_email(customer_email)
+        currency = self._normalize_currency(
+            currency
+        )
 
-        amount_in_smallest_unit = self._to_smallest_unit(
-            amount,
-            currency,
+        customer_email = self._normalize_email(
+            customer_email
+        )
+
+        amount = Decimal(str(amount))
+
+        amount_in_smallest_unit = (
+            self._to_smallest_unit(
+                amount,
+                currency,
+            )
         )
 
         payment_metadata = {
-            "reference": reference.strip(),
+            "reference": reference,
         }
 
         if metadata:
@@ -121,6 +214,11 @@ class StripeGateway(PaymentGatewayBase):
                     str(key): str(value)
                     for key, value in metadata.items()
                 }
+            )
+
+        if callback_url:
+            payment_metadata["callback_url"] = (
+                callback_url
             )
 
         params: dict[str, Any] = {
@@ -133,26 +231,38 @@ class StripeGateway(PaymentGatewayBase):
             "metadata": payment_metadata,
         }
 
-        # Stripe PaymentIntent does not use callback_url directly.
-        # Preserve it as metadata so the application can retain it.
-        if callback_url:
-            params["metadata"]["callback_url"] = callback_url
-
         try:
-            intent = stripe.PaymentIntent.create(**params)
+            intent = stripe.PaymentIntent.create(
+                **params
+            )
         except stripe.StripeError as exc:
             raise RuntimeError(
-                f"Stripe payment initialization failed: {exc}"
+                "Stripe payment initialization "
+                f"failed: {exc}"
             ) from exc
+
+        if not intent or not getattr(
+            intent,
+            "id",
+            None,
+        ):
+            raise RuntimeError(
+                "Stripe returned an invalid "
+                "PaymentIntent"
+            )
 
         return {
             "provider": "stripe",
-            "reference": reference.strip(),
+            "reference": reference,
             "transaction_id": intent.id,
             "status": intent.status,
             "amount": amount,
             "currency": currency.upper(),
-            "client_secret": intent.client_secret,
+            "client_secret": getattr(
+                intent,
+                "client_secret",
+                None,
+            ),
         }
 
     def verify_payment(
@@ -160,26 +270,74 @@ class StripeGateway(PaymentGatewayBase):
         *,
         reference: str,
     ) -> dict[str, Any]:
-        if not reference or not reference.strip():
-            raise ValueError("Payment reference is required")
+        reference = self._normalize_reference(
+            reference
+        )
 
         try:
             intent = stripe.PaymentIntent.retrieve(
-                reference.strip()
+                reference
             )
         except stripe.StripeError as exc:
             raise RuntimeError(
-                f"Stripe payment verification failed: {exc}"
+                "Stripe payment verification "
+                f"failed: {exc}"
             ) from exc
+
+        transaction_id = getattr(
+            intent,
+            "id",
+            None,
+        )
+
+        if not transaction_id:
+            raise RuntimeError(
+                "Stripe returned an invalid "
+                "PaymentIntent"
+            )
+
+        currency = (
+            getattr(
+                intent,
+                "currency",
+                "",
+            )
+            or ""
+        ).lower()
 
         return {
             "provider": "stripe",
-            "reference": reference.strip(),
-            "transaction_id": intent.id,
-            "status": intent.status,
-            "amount": intent.amount,
-            "currency": intent.currency.upper(),
-            "paid": intent.status == "succeeded",
+            "reference": (
+                getattr(
+                    intent,
+                    "metadata",
+                    {}
+                ).get("reference")
+                or reference
+            ),
+            "transaction_id": transaction_id,
+            "status": getattr(
+                intent,
+                "status",
+                None,
+            ),
+            "amount": self._from_smallest_unit(
+                getattr(
+                    intent,
+                    "amount",
+                    None,
+                ),
+                currency,
+            ),
+            "currency": currency.upper(),
+            "paid": (
+                getattr(
+                    intent,
+                    "status",
+                    None,
+                )
+                == "succeeded"
+            ),
         }
 
     def handle_webhook(
@@ -190,7 +348,9 @@ class StripeGateway(PaymentGatewayBase):
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if not payload:
-            raise ValueError("Webhook payload is required")
+            raise ValueError(
+                "Webhook payload is required"
+            )
 
         if not self.webhook_secret:
             raise ValueError(
@@ -199,8 +359,13 @@ class StripeGateway(PaymentGatewayBase):
 
         webhook_signature = signature
 
-        if not webhook_signature and headers:
-            webhook_signature = headers.get("Stripe-Signature")
+        if (
+            not webhook_signature
+            and headers
+        ):
+            webhook_signature = headers.get(
+                "Stripe-Signature"
+            )
 
         if not webhook_signature:
             raise ValueError(
@@ -222,51 +387,108 @@ class StripeGateway(PaymentGatewayBase):
                 "Invalid Stripe webhook signature"
             ) from exc
 
-        event_type = event["type"]
-        event_object = event["data"]["object"]
+        if not isinstance(event, dict):
+            raise ValueError(
+                "Invalid Stripe webhook event"
+            )
+
+        event_type = event.get("type")
+
+        if not event_type:
+            raise ValueError(
+                "Stripe webhook event type is missing"
+            )
+
+        event_data = event.get("data") or {}
+        event_object = event_data.get(
+            "object"
+        ) if isinstance(
+            event_data,
+            dict,
+        ) else None
+
+        if not isinstance(
+            event_object,
+            dict,
+        ):
+            raise ValueError(
+                "Invalid Stripe webhook event data"
+            )
+
+        metadata = (
+            event_object.get("metadata")
+            or {}
+        )
+
+        if not isinstance(
+            metadata,
+            dict,
+        ):
+            metadata = {}
 
         normalized: dict[str, Any] = {
             "provider": "stripe",
-            "event_id": event["id"],
+            "event_id": event.get("id"),
             "event_type": event_type,
-            "livemode": event.get("livemode", False),
-            "transaction_id": event_object.get("id"),
+            "livemode": bool(
+                event.get("livemode", False)
+            ),
+            "transaction_id": (
+                event_object.get("id")
+            ),
+            "reference": metadata.get(
+                "reference"
+            ),
         }
 
-        metadata = event_object.get("metadata") or {}
-        normalized["reference"] = metadata.get("reference")
+        currency = (
+            event_object.get("currency")
+            or ""
+        ).lower()
 
-        if event_type == "payment_intent.succeeded":
-            normalized.update(
-                {
-                    "status": "successful",
-                    "amount": event_object.get("amount"),
-                    "currency": (
-                        event_object.get("currency") or ""
-                    ).upper(),
-                }
+        provider_amount = event_object.get(
+            "amount"
+        )
+
+        normalized["amount"] = (
+            self._from_smallest_unit(
+                provider_amount,
+                currency,
+            )
+            if provider_amount is not None
+            else None
+        )
+
+        normalized["currency"] = (
+            currency.upper()
+        )
+
+        if event_type == (
+            "payment_intent.succeeded"
+        ):
+            normalized["status"] = (
+                "successful"
             )
 
-        elif event_type == "payment_intent.payment_failed":
-            last_error = event_object.get(
-                "last_payment_error"
-            ) or {}
+        elif event_type == (
+            "payment_intent.payment_failed"
+        ):
+            last_error = (
+                event_object.get(
+                    "last_payment_error"
+                )
+                or {}
+            )
 
-            normalized.update(
-                {
-                    "status": "failed",
-                    "amount": event_object.get("amount"),
-                    "currency": (
-                        event_object.get("currency") or ""
-                    ).upper(),
-                    "failure_reason": (
-                        last_error.get("message")
-                        or "Stripe payment failed"
-                    ),
-                }
+            normalized["status"] = "failed"
+            normalized["failure_reason"] = (
+                last_error.get("message")
+                or "Stripe payment failed"
             )
 
         else:
-            normalized["status"] = event_object.get("status")
+            normalized["status"] = (
+                event_object.get("status")
+            )
 
         return normalized

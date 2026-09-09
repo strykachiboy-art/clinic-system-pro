@@ -29,9 +29,30 @@ from app.modules.billing.models.billing_model import (
     InvoiceItem,
     Payment,
 )
+from app.modules.clinic.models.clinic_model import (
+    Clinic,
+)
+from app.modules.clinic.services.clinic_service import (
+    ensure_clinic_active,
+)
 from app.modules.patient.services.patient_service import (
     get_patient,
 )
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+MAX_INSURANCE_PROVIDER_LENGTH = 120
+MAX_INVOICE_ITEM_DESCRIPTION_LENGTH = 255
+MAX_PAYMENT_REFERENCE_LENGTH = 120
+MAX_GATEWAY_TRANSACTION_ID_LENGTH = 255
 
 
 # ============================================================================
@@ -57,6 +78,34 @@ def _validate_positive_id(
         )
 
 
+def _validate_pagination(
+    page,
+    per_page,
+):
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page <= 0
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page <= 0
+    ):
+        raise ValidationError(
+            "Per page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"Per page cannot exceed {MAX_PER_PAGE}"
+        )
+
+
 def _to_decimal(
     value,
     field_name="amount",
@@ -68,6 +117,11 @@ def _to_decimal(
         TypeError,
         ValueError,
     ):
+        raise ValidationError(
+            f"Invalid {field_name}"
+        )
+
+    if not amount.is_finite():
         raise ValidationError(
             f"Invalid {field_name}"
         )
@@ -110,6 +164,16 @@ def _normalize_optional_string(
     return value
 
 
+def _validate_boolean(
+    value,
+    field_name,
+):
+    if not isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a boolean"
+        )
+
+
 # ============================================================================
 # Invoice Helpers
 # ============================================================================
@@ -118,11 +182,18 @@ def _normalize_optional_string(
 def _get_invoice(
     invoice_id,
     clinic_id=None,
+    lock=False,
 ):
     _validate_positive_id(
         invoice_id,
         "Invoice ID",
     )
+
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
 
     query = Invoice.query.filter(
         Invoice.id == invoice_id
@@ -132,6 +203,9 @@ def _get_invoice(
         query = query.filter(
             Invoice.clinic_id == clinic_id
         )
+
+    if lock:
+        query = query.with_for_update()
 
     invoice = query.first()
 
@@ -143,7 +217,30 @@ def _get_invoice(
     return invoice
 
 
-def _generate_invoice_number(clinic_id):
+def _lock_clinic(clinic_id):
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    clinic = (
+        Clinic.query
+        .filter(Clinic.id == clinic_id)
+        .with_for_update()
+        .first()
+    )
+
+    if clinic is None:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
+
+    return clinic
+
+
+def _generate_invoice_number(
+    clinic_id,
+):
     today = date.today().strftime(
         "%Y%m%d"
     )
@@ -159,7 +256,9 @@ def _generate_invoice_number(clinic_id):
     )
 
 
-def _calculate_invoice_status(invoice):
+def _calculate_invoice_status(
+    invoice,
+):
     amount_paid = Decimal(
         invoice.amount_paid or 0
     )
@@ -177,8 +276,10 @@ def _calculate_invoice_status(invoice):
     return InvoiceStatus.ISSUED
 
 
-def _validate_invoice_items(items):
-    if not items:
+def _validate_invoice_items(
+    items,
+):
+    if not isinstance(items, list) or not items:
         raise ValidationError(
             "Invoice must contain at least one item"
         )
@@ -212,7 +313,9 @@ def _validate_invoice_items(items):
                 "a description"
             )
 
-        if len(description) > 255:
+        if len(description) > (
+            MAX_INVOICE_ITEM_DESCRIPTION_LENGTH
+        ):
             raise ValidationError(
                 "Invoice item description cannot "
                 "exceed 255 characters"
@@ -254,13 +357,21 @@ def _validate_invoice_relationships(
     patient_id,
     appointment_id=None,
 ):
-    """
-    Verify that referenced entities belong to the
-    authenticated clinic.
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
-    If an appointment is supplied, it must also belong
-    to the specified patient.
-    """
+    _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
+    if appointment_id is not None:
+        _validate_positive_id(
+            appointment_id,
+            "Appointment ID",
+        )
 
     patient = get_patient(
         patient_id
@@ -331,6 +442,14 @@ def create_invoice(
             "Appointment ID",
         )
 
+    _validate_boolean(
+        is_insurance_claim,
+        "Insurance claim flag",
+    )
+
+    _lock_clinic(clinic_id)
+    ensure_clinic_active(clinic_id)
+
     patient, appointment = (
         _validate_invoice_relationships(
             clinic_id=clinic_id,
@@ -347,7 +466,9 @@ def create_invoice(
         _normalize_optional_string(
             insurance_provider,
             "Insurance provider",
-            max_length=120,
+            max_length=(
+                MAX_INSURANCE_PROVIDER_LENGTH
+            ),
         )
     )
 
@@ -458,7 +579,9 @@ def create_invoice(
 # ============================================================================
 
 
-def _normalize_payment_method(method):
+def _normalize_payment_method(
+    method,
+):
     if isinstance(
         method,
         PaymentMethod,
@@ -476,7 +599,9 @@ def _normalize_payment_method(method):
         )
 
 
-def _normalize_payment_gateway(gateway):
+def _normalize_payment_gateway(
+    gateway,
+):
     if gateway is None:
         return None
 
@@ -525,13 +650,17 @@ def _find_duplicate_gateway_payment(
     if not gateway_transaction_id:
         return None
 
-    return Payment.query.filter(
-        Payment.invoice_id == invoice_id,
-        Payment.gateway_transaction_id
-        == gateway_transaction_id,
-        Payment.status
-        == PaymentStatus.SUCCESSFUL,
-    ).first()
+    return (
+        Payment.query
+        .filter(
+            Payment.invoice_id == invoice_id,
+            Payment.gateway_transaction_id
+            == gateway_transaction_id,
+            Payment.status
+            == PaymentStatus.SUCCESSFUL,
+        )
+        .first()
+    )
 
 
 # ============================================================================
@@ -559,9 +688,13 @@ def record_payment(
         "Invoice ID",
     )
 
+    _lock_clinic(clinic_id)
+    ensure_clinic_active(clinic_id)
+
     invoice = _get_invoice(
         invoice_id,
         clinic_id=clinic_id,
+        lock=True,
     )
 
     if (
@@ -610,14 +743,18 @@ def record_payment(
     reference = _normalize_optional_string(
         reference,
         "Payment reference",
-        max_length=120,
+        max_length=(
+            MAX_PAYMENT_REFERENCE_LENGTH
+        ),
     )
 
     gateway_transaction_id = (
         _normalize_optional_string(
             gateway_transaction_id,
             "Gateway transaction ID",
-            max_length=255,
+            max_length=(
+                MAX_GATEWAY_TRANSACTION_ID_LENGTH
+            ),
         )
     )
 
@@ -645,11 +782,11 @@ def record_payment(
         )
 
     total_amount = Decimal(
-        invoice.total_amount
+        invoice.total_amount or 0
     )
 
     amount_paid = Decimal(
-        invoice.amount_paid
+        invoice.amount_paid or 0
     )
 
     remaining_balance = (
@@ -735,7 +872,14 @@ def record_payment(
 
 def get_outstanding_invoices(
     clinic_id=None,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
 ):
+    _validate_pagination(
+        page,
+        per_page,
+    )
+
     query = Invoice.query.filter(
         Invoice.status.in_(
             [
@@ -756,10 +900,19 @@ def get_outstanding_invoices(
             Invoice.clinic_id == clinic_id
         )
 
-    return query.order_by(
-        Invoice.due_date.asc(),
-        Invoice.created_at.asc(),
-    ).all()
+    return (
+        query
+        .order_by(
+            Invoice.due_date.asc(),
+            Invoice.created_at.asc(),
+            Invoice.id.asc(),
+        )
+        .paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+    )
 
 
 # ============================================================================
@@ -771,6 +924,12 @@ def _mark_overdue_invoices(
     clinic_id=None,
 ):
     today = date.today()
+
+    if clinic_id is not None:
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
 
     query = Invoice.query.filter(
         Invoice.due_date.isnot(None),
@@ -784,11 +943,6 @@ def _mark_overdue_invoices(
     )
 
     if clinic_id is not None:
-        _validate_positive_id(
-            clinic_id,
-            "Clinic ID",
-        )
-
         query = query.filter(
             Invoice.clinic_id == clinic_id
         )
@@ -831,9 +985,17 @@ def _mark_overdue_invoices(
 def mark_overdue_invoices(
     clinic_id=None,
 ):
-    """
-    Clinic-scoped operation used by the HTTP route.
-    """
+    if clinic_id is None:
+        raise ValidationError(
+            "Clinic ID is required"
+        )
+
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    ensure_clinic_active(clinic_id)
 
     return _mark_overdue_invoices(
         clinic_id=clinic_id
@@ -842,12 +1004,6 @@ def mark_overdue_invoices(
 
 @celery.task(name="mark_overdue_invoices")
 def mark_overdue_invoices_task():
-    """
-    Global scheduled operation.
-
-    Processes overdue invoices across all clinics.
-    """
-
     try:
         updated_count = (
             _mark_overdue_invoices()

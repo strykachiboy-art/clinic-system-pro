@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -7,25 +8,18 @@ from typing import Any
 import requests
 from flask import current_app
 
-from app.modules.billing.services.gateways.base_gateway import PaymentGatewayBase
+from app.modules.billing.services.gateways.base_gateway import (
+    PaymentGatewayBase,
+)
 
 
 class FlutterwaveGateway(PaymentGatewayBase):
-    """
-    Flutterwave payment gateway implementation.
-
-    This class is responsible only for communication with Flutterwave.
-    It does not create or update Payment or Invoice records.
-
-    Amounts received from the billing layer are treated as major
-    currency units and converted to the smallest currency unit
-    where applicable.
-    """
-
     BASE_URL = "https://api.flutterwave.com/v3"
 
     def __init__(self):
-        self.secret_key = current_app.config.get("FLUTTERWAVE_SECRET_KEY")
+        self.secret_key = current_app.config.get(
+            "FLUTTERWAVE_SECRET_KEY"
+        )
 
         if not self.secret_key:
             raise ValueError(
@@ -33,32 +27,66 @@ class FlutterwaveGateway(PaymentGatewayBase):
             )
 
     @staticmethod
-    def _normalize_currency(currency: str) -> str:
-        if not currency or not currency.strip():
-            raise ValueError("Currency is required")
+    def _normalize_currency(
+        currency: str,
+    ) -> str:
+        if (
+            not isinstance(currency, str)
+            or not currency.strip()
+        ):
+            raise ValueError(
+                "Currency is required"
+            )
 
         return currency.strip().upper()
 
     @staticmethod
-    def _normalize_email(email: str) -> str:
-        if not email or not email.strip():
-            raise ValueError("Customer email is required")
+    def _normalize_email(
+        email: str,
+    ) -> str:
+        if (
+            not isinstance(email, str)
+            or not email.strip()
+        ):
+            raise ValueError(
+                "Customer email is required"
+            )
 
         return email.strip()
 
     @staticmethod
-    def _normalize_reference(reference: str) -> str:
-        if not reference or not reference.strip():
-            raise ValueError("Payment reference is required")
+    def _normalize_reference(
+        reference: str,
+    ) -> str:
+        if (
+            not isinstance(reference, str)
+            or not reference.strip()
+        ):
+            raise ValueError(
+                "Payment reference is required"
+            )
 
         return reference.strip()
 
     @staticmethod
-    def _normalize_amount(amount: Decimal) -> Decimal:
+    def _normalize_amount(
+        amount: Decimal,
+    ) -> Decimal:
         try:
-            amount = Decimal(amount)
-        except (InvalidOperation, TypeError, ValueError) as exc:
-            raise ValueError("Invalid payment amount") from exc
+            amount = Decimal(str(amount))
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ValueError(
+                "Invalid payment amount"
+            ) from exc
+
+        if not amount.is_finite():
+            raise ValueError(
+                "Invalid payment amount"
+            )
 
         if amount <= 0:
             raise ValueError(
@@ -69,8 +97,11 @@ class FlutterwaveGateway(PaymentGatewayBase):
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.secret_key}",
+            "Authorization": (
+                f"Bearer {self.secret_key}"
+            ),
             "Content-Type": "application/json",
+            "Accept": "application/json",
         }
 
     def initialize_payment(
@@ -83,10 +114,18 @@ class FlutterwaveGateway(PaymentGatewayBase):
         callback_url: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        reference = self._normalize_reference(reference)
-        amount = self._normalize_amount(amount)
-        currency = self._normalize_currency(currency)
-        customer_email = self._normalize_email(customer_email)
+        reference = self._normalize_reference(
+            reference
+        )
+        amount = self._normalize_amount(
+            amount
+        )
+        currency = self._normalize_currency(
+            currency
+        )
+        customer_email = self._normalize_email(
+            customer_email
+        )
 
         payload: dict[str, Any] = {
             "tx_ref": reference,
@@ -118,7 +157,8 @@ class FlutterwaveGateway(PaymentGatewayBase):
             )
         except requests.RequestException as exc:
             raise RuntimeError(
-                f"Flutterwave payment initialization failed: {exc}"
+                "Flutterwave payment initialization "
+                f"failed: {exc}"
             ) from exc
 
         try:
@@ -128,14 +168,19 @@ class FlutterwaveGateway(PaymentGatewayBase):
                 "Flutterwave returned an invalid response"
             ) from exc
 
-        if not response.ok or response_data.get("status") != "success":
+        if (
+            not response.ok
+            or response_data.get("status")
+            != "success"
+        ):
             message = response_data.get(
                 "message",
                 "Flutterwave payment initialization failed",
             )
 
             raise RuntimeError(
-                f"Flutterwave payment initialization failed: {message}"
+                "Flutterwave payment initialization "
+                f"failed: {message}"
             )
 
         data = response_data.get("data") or {}
@@ -143,7 +188,11 @@ class FlutterwaveGateway(PaymentGatewayBase):
         return {
             "provider": "flutterwave",
             "reference": reference,
-            "transaction_id": None,
+            "transaction_id": (
+                str(data["id"])
+                if data.get("id") is not None
+                else None
+            ),
             "status": "initialized",
             "amount": amount,
             "currency": currency,
@@ -155,55 +204,64 @@ class FlutterwaveGateway(PaymentGatewayBase):
         *,
         reference: str,
     ) -> dict[str, Any]:
-        """
-        Verify a Flutterwave transaction.
-
-        Flutterwave's verification endpoint expects the provider's
-        transaction ID, not the merchant tx_ref.
-
-        Therefore, `reference` is treated as the Flutterwave
-        transaction ID for this provider.
-        """
-        reference = self._normalize_reference(reference)
+        reference = self._normalize_reference(
+            reference
+        )
 
         try:
             transaction_id = int(reference)
         except ValueError as exc:
             raise ValueError(
-                "Flutterwave verification requires a transaction ID"
+                "Flutterwave verification requires "
+                "a transaction ID"
             ) from exc
+
+        if transaction_id <= 0:
+            raise ValueError(
+                "Flutterwave transaction ID must be positive"
+            )
 
         try:
             response = requests.get(
-                f"{self.BASE_URL}/transactions/{transaction_id}/verify",
+                f"{self.BASE_URL}/transactions/"
+                f"{transaction_id}/verify",
                 headers=self._headers(),
                 timeout=30,
             )
         except requests.RequestException as exc:
             raise RuntimeError(
-                f"Flutterwave payment verification failed: {exc}"
+                "Flutterwave payment verification "
+                f"failed: {exc}"
             ) from exc
 
         try:
             response_data = response.json()
         except ValueError as exc:
             raise RuntimeError(
-                "Flutterwave returned an invalid verification response"
+                "Flutterwave returned an invalid "
+                "verification response"
             ) from exc
 
-        if not response.ok or response_data.get("status") != "success":
+        if (
+            not response.ok
+            or response_data.get("status")
+            != "success"
+        ):
             message = response_data.get(
                 "message",
                 "Flutterwave payment verification failed",
             )
 
             raise RuntimeError(
-                f"Flutterwave payment verification failed: {message}"
+                "Flutterwave payment verification "
+                f"failed: {message}"
             )
 
         data = response_data.get("data") or {}
 
-        transaction_status = data.get("status")
+        transaction_status = data.get(
+            "status"
+        )
 
         return {
             "provider": "flutterwave",
@@ -215,11 +273,16 @@ class FlutterwaveGateway(PaymentGatewayBase):
             ),
             "status": transaction_status,
             "amount": data.get("amount"),
-            "charged_amount": data.get("charged_amount"),
+            "charged_amount": data.get(
+                "charged_amount"
+            ),
             "currency": (
                 data.get("currency") or ""
             ).upper(),
-            "paid": transaction_status == "successful",
+            "paid": (
+                transaction_status
+                == "successful"
+            ),
         }
 
     def handle_webhook(
@@ -229,29 +292,30 @@ class FlutterwaveGateway(PaymentGatewayBase):
         signature: str | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Validate and normalize a Flutterwave webhook.
-
-        The webhook secret/hash configuration is intentionally
-        handled separately from the gateway implementation for now.
-        """
-
         if not payload:
-            raise ValueError("Webhook payload is required")
+            raise ValueError(
+                "Webhook payload is required"
+            )
 
         webhook_signature = signature
 
-        if not webhook_signature and headers:
+        if (
+            not webhook_signature
+            and headers
+        ):
             webhook_signature = (
-                headers.get("flutterwave-signature")
-                or headers.get("Flutterwave-Signature")
-                or headers.get("verif-hash")
-                or headers.get("Verif-Hash")
+                headers.get(
+                    "flutterwave-signature"
+                )
+                or headers.get(
+                    "Flutterwave-Signature"
+                )
             )
 
         if not webhook_signature:
             raise ValueError(
-                "Flutterwave webhook signature is required"
+                "Flutterwave webhook signature "
+                "is required"
             )
 
         webhook_secret = current_app.config.get(
@@ -260,75 +324,106 @@ class FlutterwaveGateway(PaymentGatewayBase):
 
         if not webhook_secret:
             raise ValueError(
-                "Flutterwave webhook secret is not configured"
+                "Flutterwave webhook secret is "
+                "not configured"
             )
 
-        expected_signature = hmac.new(
-            webhook_secret.encode("utf-8"),
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
+        expected_signature = base64.b64encode(
+            hmac.new(
+                webhook_secret.encode("utf-8"),
+                payload,
+                hashlib.sha256,
+            ).digest()
+        ).decode("utf-8")
 
         if not hmac.compare_digest(
             expected_signature,
-            webhook_signature,
+            webhook_signature.strip(),
         ):
             raise ValueError(
                 "Invalid Flutterwave webhook signature"
             )
 
         try:
-            event = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            event = json.loads(
+                payload.decode("utf-8")
+            )
+        except (
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             raise ValueError(
                 "Invalid Flutterwave webhook payload"
             ) from exc
 
-        event_type = event.get("event") or event.get("type")
+        if not isinstance(event, dict):
+            raise ValueError(
+                "Invalid Flutterwave webhook payload"
+            )
+
+        event_type = (
+            event.get("event")
+            or event.get("type")
+        )
 
         if not event_type:
             raise ValueError(
-                "Flutterwave webhook event type is missing"
+                "Flutterwave webhook event type "
+                "is missing"
             )
 
         event_data = event.get("data") or {}
 
+        if not isinstance(event_data, dict):
+            raise ValueError(
+                "Invalid Flutterwave webhook data"
+            )
+
         transaction_id = event_data.get("id")
 
-        normalized: dict[str, Any] = {
+        normalized = {
             "provider": "flutterwave",
             "event_id": (
-                str(event.get("id"))
+                str(event["id"])
                 if event.get("id") is not None
                 else (
                     str(transaction_id)
                     if transaction_id is not None
-                    else hashlib.sha256(payload).hexdigest()
+                    else hashlib.sha256(
+                        payload
+                    ).hexdigest()
                 )
             ),
             "event_type": event_type,
-            "livemode": (
-                event_data.get("account_id") is not None
-            ),
             "transaction_id": (
                 str(transaction_id)
                 if transaction_id is not None
                 else None
             ),
-            "reference": event_data.get("tx_ref"),
-            "amount": event_data.get("amount"),
+            "reference": event_data.get(
+                "tx_ref"
+            ),
+            "amount": event_data.get(
+                "amount"
+            ),
             "currency": (
-                event_data.get("currency") or ""
+                event_data.get("currency")
+                or ""
             ).upper(),
         }
 
-        transaction_status = event_data.get("status")
+        transaction_status = event_data.get(
+            "status"
+        )
 
         if (
             event_type == "charge.completed"
-            and transaction_status == "successful"
+            and transaction_status
+            == "successful"
         ):
-            normalized["status"] = "successful"
+            normalized["status"] = (
+                "successful"
+            )
 
         elif transaction_status in {
             "failed",
@@ -337,12 +432,16 @@ class FlutterwaveGateway(PaymentGatewayBase):
         }:
             normalized["status"] = "failed"
             normalized["failure_reason"] = (
-                event_data.get("processor_response")
+                event_data.get(
+                    "processor_response"
+                )
                 or event_data.get("message")
                 or "Flutterwave payment failed"
             )
 
         else:
-            normalized["status"] = transaction_status
+            normalized["status"] = (
+                transaction_status
+            )
 
         return normalized

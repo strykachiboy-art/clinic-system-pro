@@ -5,6 +5,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
+    field_validator,
 )
 
 from app.core.enums.appointment_enums import AppointmentType
@@ -16,22 +18,13 @@ from app.core.enums.appointment_enums import AppointmentType
 
 
 class AppointmentCreateSchema(BaseModel):
-    """
-    Request schema for creating an appointment.
-
-    clinic_id is intentionally excluded.
-
-    The clinic is derived from the authenticated user's
-    clinic assignment by the route layer.
-    """
-
-    patient_id: int = Field(
+    patient_id: StrictInt = Field(
         ...,
         gt=0,
         description="ID of the patient",
     )
 
-    staff_id: int = Field(
+    staff_id: StrictInt = Field(
         ...,
         gt=0,
         description="ID of the staff member",
@@ -60,11 +53,27 @@ class AppointmentCreateSchema(BaseModel):
 
     notes: Optional[str] = Field(
         default=None,
+        max_length=2000,
         description="Additional notes",
     )
 
+    @field_validator("reason", "notes")
+    @classmethod
+    def validate_optional_text(cls, value):
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Value cannot be empty")
+
+        return value
+
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
@@ -74,10 +83,6 @@ class AppointmentCreateSchema(BaseModel):
 
 
 class AppointmentRescheduleSchema(BaseModel):
-    """
-    Request schema for rescheduling an appointment.
-    """
-
     scheduled_start: datetime = Field(
         ...,
         description="New start date and time",
@@ -89,7 +94,9 @@ class AppointmentRescheduleSchema(BaseModel):
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
@@ -99,18 +106,31 @@ class AppointmentRescheduleSchema(BaseModel):
 
 
 class AppointmentCancelSchema(BaseModel):
-    """
-    Request schema for cancelling an appointment.
-    """
-
     cancellation_reason: Optional[str] = Field(
         default=None,
         max_length=255,
         description="Reason for cancellation",
     )
 
+    @field_validator("cancellation_reason")
+    @classmethod
+    def validate_cancellation_reason(cls, value):
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Cancellation reason cannot be empty"
+            )
+
+        return value
+
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
@@ -120,17 +140,31 @@ class AppointmentCancelSchema(BaseModel):
 
 
 class AppointmentCompleteSchema(BaseModel):
-    """
-    Request schema for completing an appointment.
-    """
-
     notes: Optional[str] = Field(
         default=None,
+        max_length=2000,
         description="Consultation/visit notes to attach on completion",
     )
 
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, value):
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Notes cannot be empty"
+            )
+
+        return value
+
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
+        str_strip_whitespace=True,
     )
 
 
@@ -140,16 +174,26 @@ class AppointmentCompleteSchema(BaseModel):
 
 
 class AppointmentStaffScheduleQuerySchema(BaseModel):
-    """
-    Query parameters for retrieving a staff member's schedule.
-    """
-
     date_: Optional[date] = Field(
         default=None,
         alias="date",
         description="Filter staff schedule to a single day (YYYY-MM-DD)",
     )
 
+    page: StrictInt = Field(
+        default=1,
+        gt=0,
+        description="Page number",
+    )
+
+    per_page: StrictInt = Field(
+        default=50,
+        gt=0,
+        le=500,
+        description="Number of appointments per page",
+    )
+
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
     )
