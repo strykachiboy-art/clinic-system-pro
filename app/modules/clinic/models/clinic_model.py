@@ -262,6 +262,19 @@ class Clinic(db.Model):
         "Notification",
          back_populates="clinic",
     )
+    
+    settings = db.relationship(
+        "ClinicSettings",
+        back_populates="clinic",
+        uselist=False,
+        cascade="all, delete-orphan",
+   )
+    
+    integration_configs = db.relationship(
+        "IntegrationConfig",
+        back_populates="clinic",
+        cascade="all, delete-orphan",
+   )
 
     def __repr__(self):
         return (

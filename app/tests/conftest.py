@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+from cryptography.fernet import Fernet
 from flask_jwt_extended import create_access_token
 
 from app import create_app
@@ -30,11 +31,22 @@ def app():
     """
     Create an isolated Flask application and database for every test.
 
-    The project's existing testing configuration is used rather than
-    rebuilding application configuration inside the test suite.
+    A fresh Fernet encryption key is generated for each test application.
+    This keeps integration credentials encrypted during tests without using
+    a real production secret or weakening the application's encryption layer.
     """
 
     flask_app = create_app("testing")
+
+    # ------------------------------------------------------------------------
+    # Test-only integration encryption key.
+    #
+    # Production continues to require INTEGRATION_ENCRYPTION_KEY from the
+    # environment/deployment secret manager.
+    # ------------------------------------------------------------------------
+    flask_app.config["INTEGRATION_ENCRYPTION_KEY"] = (
+        Fernet.generate_key().decode("utf-8")
+    )
 
     with flask_app.app_context():
         _db.create_all()
@@ -57,13 +69,6 @@ def db(app):
 def db_session(app, db):
     """
     Return the active SQLAlchemy session.
-
-    Prefer this fixture in service tests:
-
-        db_session.add(...)
-        db_session.flush()
-
-    rather than importing the global db object directly.
     """
 
     return db.session
@@ -83,18 +88,7 @@ def client(app):
 @pytest.fixture()
 def auth_headers_for(app):
     """
-    Factory:
-
-        auth_headers_for(user)
-        auth_headers_for(user, role=Role.ADMIN)
-
-    Returns:
-
-        {
-            "Authorization": "Bearer <jwt>"
-        }
-
-    The JWT contains the role claim expected by role_required().
+    Factory for authenticated JWT headers.
     """
 
     def _make(user, role=None):
@@ -121,12 +115,7 @@ def auth_headers_for(app):
 @pytest.fixture()
 def make_auth_headers(auth_headers_for):
     """
-    Backward-compatible helper.
-
-    Usage:
-
-        headers = make_auth_headers(user)
-        headers = make_auth_headers(user, role=Role.ADMIN)
+    Backward-compatible authentication helper.
     """
 
     def _make(user, role=None):
@@ -146,13 +135,10 @@ def make_auth_headers(auth_headers_for):
 @pytest.fixture()
 def make_clinic(db):
     """
-    Factory:
-
-        make_clinic(**overrides) -> Clinic
-
-    Creates and flushes a Clinic.
+    Factory for Clinic.
     """
 
+    from app.core.enums.clinic_enums import ClinicStatus
     from app.modules.clinic.models.clinic_model import Clinic
 
     counter = {"n": 0}
@@ -168,6 +154,13 @@ def make_clinic(db):
         overrides.setdefault(
             "ai_credits",
             5,
+        )
+
+        # Default test clinics are active.
+        # Individual tests can explicitly override this.
+        overrides.setdefault(
+            "status",
+            ClinicStatus.ACTIVE,
         )
 
         clinic = Clinic(**overrides)
@@ -206,15 +199,7 @@ def suspended_clinic(make_clinic):
 @pytest.fixture()
 def make_user(db):
     """
-    Factory:
-
-        make_user(
-            clinic,
-            role=Role.ADMIN,
-            is_active=True,
-            password="supersecret",
-            **overrides,
-        ) -> User
+    Factory for User.
     """
 
     from app.core.auth.user.models.user_model import User
@@ -271,12 +256,109 @@ def user(make_user, clinic):
 
 
 # ============================================================================
+# SETTINGS
+# ============================================================================
+
+
+@pytest.fixture()
+def make_clinic_settings(db_session):
+    """
+    Factory for ClinicSettings.
+    """
+
+    from app.modules.settings.models.clinic_settings import (
+        ClinicSettings,
+    )
+
+    def _make(
+        clinic,
+        language="en",
+        date_format="YYYY-MM-DD",
+        time_format="24h",
+        notification_preferences=None,
+        feature_flags=None,
+        operational_preferences=None,
+        security_preferences=None,
+        system_preferences=None,
+        is_enabled=True,
+        version=1,
+        **overrides,
+    ):
+        settings = ClinicSettings(
+            clinic_id=clinic.id,
+            language=language,
+            date_format=date_format,
+            time_format=time_format,
+            notification_preferences=(
+                {}
+                if notification_preferences is None
+                else notification_preferences
+            ),
+            feature_flags=(
+                {}
+                if feature_flags is None
+                else feature_flags
+            ),
+            operational_preferences=(
+                {}
+                if operational_preferences is None
+                else operational_preferences
+            ),
+            security_preferences=(
+                {}
+                if security_preferences is None
+                else security_preferences
+            ),
+            system_preferences=(
+                {}
+                if system_preferences is None
+                else system_preferences
+            ),
+            is_enabled=is_enabled,
+            version=version,
+            **overrides,
+        )
+
+        db_session.add(settings)
+        db_session.flush()
+
+        return settings
+
+    return _make
+
+
+@pytest.fixture()
+def clinic_settings(make_clinic_settings, clinic):
+    """Default enabled clinic settings."""
+
+    return make_clinic_settings(
+        clinic,
+    )
+
+
+@pytest.fixture()
+def disabled_clinic_settings(
+    make_clinic_settings,
+    clinic,
+):
+    """Default disabled clinic settings."""
+
+    return make_clinic_settings(
+        clinic,
+        is_enabled=False,
+    )
+
+
+# ============================================================================
 # MESSAGE
 # ============================================================================
 
 
 @pytest.fixture()
 def make_message(db):
+    """
+    Factory for Message.
+    """
 
     from app.core.enums.message_enums import (
         MessagePriority,
@@ -340,17 +422,14 @@ def make_message(db):
 
 
 # ============================================================================
-# NOTIFICATION FIXTURES
+# NOTIFICATION
 # ============================================================================
 
 
 @pytest.fixture()
 def make_notification(db_session):
     """
-    Factory fixture for creating Notification records.
-
-    Keeps notification creation centralized so service tests do not
-    duplicate model construction logic.
+    Factory for Notification.
     """
 
     def _make_notification(
@@ -412,10 +491,7 @@ def notification(
     user,
 ):
     """
-    Default notification fixture.
-
-    Creates a pending in-app notification belonging to the
-    default clinic and authenticated test user.
+    Default pending in-app notification.
     """
 
     return make_notification(
@@ -432,16 +508,7 @@ def notification(
 @pytest.fixture()
 def make_staff(db, make_user):
     """
-    Factory:
-
-        make_staff(
-            clinic,
-            role=Role.ADMIN,
-            status=StaffStatus.ACTIVE,
-            **overrides,
-        ) -> Staff
-
-    Creates both User and Staff.
+    Factory for Staff.
     """
 
     from app.core.enums.role_enums import Role
@@ -502,9 +569,7 @@ def make_authenticated_staff(
     auth_headers_for,
 ):
     """
-    Factory returning:
-
-        (staff, headers)
+    Factory returning (staff, headers).
     """
 
     def _make(clinic, role, **overrides):
@@ -532,14 +597,7 @@ def make_authenticated_staff(
 @pytest.fixture()
 def make_patient(db):
     """
-    Factory:
-
-        make_patient(clinic, **overrides) -> Patient
-
-    This creates the model directly.
-
-    Tests specifically covering patient-number generation should use
-    patient_service.create_patient() instead.
+    Factory for Patient.
     """
 
     from app.modules.patient.models.patient_model import Patient
@@ -844,8 +902,6 @@ def make_drug_batch(db):
 
         return batch
 
-    return _make
-
 
 # ============================================================================
 # PRESCRIPTION
@@ -1085,9 +1141,6 @@ def make_lab_order(db):
 def make_audit_log(db):
     """
     Factory for AuditLog.
-
-    Creates a raw AuditLog model. Pass a real user when the audit
-    record should be associated with a user.
     """
 
     from app.core.audit.models.audit_model import AuditLog
@@ -1248,10 +1301,6 @@ def assert_unauthorized():
 def get_by_id(db_session):
     """
     SQLAlchemy 2.x-style primary-key lookup helper.
-
-    Usage:
-
-        patient = get_by_id(Patient, patient_id)
     """
 
     def _get(model, object_id):
@@ -1266,7 +1315,7 @@ def get_by_id(db_session):
 @pytest.fixture()
 def commit_db(db_session):
     """
-    Explicit transaction helper for tests that need committed state.
+    Explicit transaction helper.
     """
 
     def _commit():
@@ -1277,9 +1326,6 @@ def commit_db(db_session):
 
 @pytest.fixture()
 def rollback_db(db_session):
-    """
-    Explicit rollback helper for transaction/error-path tests.
-    """
 
     def _rollback():
         db_session.rollback()

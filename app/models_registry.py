@@ -59,3 +59,9 @@ from app.modules.messages.models.message_model import Message
 
 # Notifications
 from app.core.notifications.models.notification_models import Notification
+
+# Clinic_settings
+from app.modules.settings.models.clinic_settings import ClinicSettings
+
+# Intergration
+from app.modules.settings.models.integration_config import IntegrationConfig
