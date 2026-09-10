@@ -145,6 +145,18 @@ class User(db.Model):
         back_populates="user",
         cascade="all, delete",
     )
+    
+    
+    # ================================================================
+    # Devices
+    # ================================================================
+    
+    
+    devices = db.relationship(
+       "UserDevice",
+       back_populates="user",
+       cascade="all, delete-orphan",
+    )
 
     # ================================================================
     # PASSWORD / AUTH HELPERS

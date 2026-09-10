@@ -8,4 +8,3 @@ if __name__ == "__main__":
     
 
 # $env:FLASK_APP = "wsgi.py"
-# flask --app run.py db init

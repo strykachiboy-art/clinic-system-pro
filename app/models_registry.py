@@ -65,3 +65,10 @@ from app.modules.settings.models.clinic_settings import ClinicSettings
 
 # Intergration
 from app.modules.settings.models.integration_config import IntegrationConfig
+
+# Google auth
+from app.core.auth.user.models.user_auth_identity_model import UserAuthIdentity
+
+# User Device
+from app.core.auth.user.models.user_device_model import UserDevice
+
