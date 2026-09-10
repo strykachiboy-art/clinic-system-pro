@@ -1,4 +1,6 @@
-﻿from datetime import datetime, timezone
+﻿from __future__ import annotations
+
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -10,11 +12,6 @@ from app.core.enums.consultation_enums import (
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.modules.consultation.routes import consultation_route
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
 
 
 def make_consultation(
@@ -91,9 +88,27 @@ def make_template(
     )
 
 
-# ============================================================================
-# START CONSULTATION
-# ============================================================================
+def make_pagination(
+    *,
+    page=1,
+    per_page=50,
+    total=0,
+    pages=0,
+    has_next=False,
+    has_prev=False,
+    next_page=None,
+    prev_page=None,
+):
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_next": has_next,
+        "has_prev": has_prev,
+        "next_page": next_page,
+        "prev_page": prev_page,
+    }
 
 
 def test_start_consultation_success(
@@ -145,11 +160,63 @@ def test_start_consultation_success(
     assert body["data"]["clinic_id"] == clinic.id
     assert body["data"]["patient_id"] == patient.id
     assert body["data"]["staff_id"] == staff.id
-    assert body["data"]["status"] == ConsultationStatus.IN_PROGRESS.value
+    assert body["data"]["consultation_type"] == (
+        ConsultationType.GENERAL.value
+    )
+    assert body["data"]["status"] == (
+        ConsultationStatus.IN_PROGRESS.value
+    )
 
     assert called["clinic_id"] == clinic.id
     assert called["patient_id"] == patient.id
     assert called["staff_id"] == staff.id
+    assert called["consultation_type"] == ConsultationType.GENERAL
+
+
+def test_start_consultation_forwards_consultation_type(
+    app,
+    clinic,
+    patient,
+    staff,
+    auth_headers_for,
+    monkeypatch,
+):
+    headers = auth_headers_for(staff.user, role=Role.DOCTOR)
+
+    consultation = make_consultation(
+        clinic_id=clinic.id,
+        patient_id=patient.id,
+        staff_id=staff.id,
+        consultation_type=ConsultationType.EMERGENCY,
+    )
+
+    called = {}
+
+    def fake_start_consultation(**kwargs):
+        called.update(kwargs)
+        return consultation
+
+    monkeypatch.setattr(
+        consultation_route,
+        "start_consultation",
+        fake_start_consultation,
+    )
+
+    response = app.test_client().post(
+        "/api/consultations/",
+        json={
+            "patient_id": patient.id,
+            "staff_id": staff.id,
+            "consultation_type": ConsultationType.EMERGENCY.value,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    assert called["consultation_type"] == ConsultationType.EMERGENCY
+    assert response.get_json()["data"]["consultation_type"] == (
+        ConsultationType.EMERGENCY.value
+    )
 
 
 def test_start_consultation_ignores_client_clinic_id(
@@ -264,11 +331,6 @@ def test_start_consultation_rejects_unknown_field(
     assert response.status_code == 422
 
 
-# ============================================================================
-# GET CONSULTATION
-# ============================================================================
-
-
 def test_get_consultation_success(
     app,
     clinic,
@@ -348,11 +410,6 @@ def test_get_consultation_uses_authenticated_clinic(
     assert response.status_code == 200
     assert called["consultation_id"] == 44
     assert called["clinic_id"] == clinic.id
-
-
-# ============================================================================
-# UPDATE CONSULTATION
-# ============================================================================
 
 
 def test_update_consultation_success(
@@ -447,11 +504,6 @@ def test_update_consultation_rejects_unknown_field(
     assert response.status_code == 422
 
 
-# ============================================================================
-# COMPLETE CONSULTATION
-# ============================================================================
-
-
 def test_complete_consultation_success(
     app,
     clinic,
@@ -497,7 +549,9 @@ def test_complete_consultation_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["status"] == ConsultationStatus.COMPLETED.value
+    assert body["data"]["status"] == (
+        ConsultationStatus.COMPLETED.value
+    )
     assert body["data"]["diagnosis"] == "Malaria"
 
     assert called["consultation_id"] == 20
@@ -549,11 +603,6 @@ def test_complete_consultation_rejects_blank_diagnosis(
     assert "error" in body
 
 
-# ============================================================================
-# CANCEL CONSULTATION
-# ============================================================================
-
-
 def test_cancel_consultation_success(
     app,
     clinic,
@@ -594,7 +643,9 @@ def test_cancel_consultation_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["status"] == ConsultationStatus.CANCELLED.value
+    assert body["data"]["status"] == (
+        ConsultationStatus.CANCELLED.value
+    )
 
     assert called["consultation_id"] == 30
     assert called["clinic_id"] == clinic.id
@@ -616,10 +667,16 @@ def test_cancel_consultation_allows_missing_reason(
         status=ConsultationStatus.CANCELLED,
     )
 
+    called = {}
+
+    def fake_cancel_consultation(**kwargs):
+        called.update(kwargs)
+        return consultation
+
     monkeypatch.setattr(
         consultation_route,
         "cancel_consultation",
-        lambda **kwargs: consultation,
+        fake_cancel_consultation,
     )
 
     response = app.test_client().post(
@@ -629,6 +686,9 @@ def test_cancel_consultation_allows_missing_reason(
     )
 
     assert response.status_code == 200
+    assert called["consultation_id"] == 31
+    assert called["clinic_id"] == clinic.id
+    assert "reason" not in called
 
 
 def test_cancel_consultation_rejects_blank_reason(
@@ -654,11 +714,6 @@ def test_cancel_consultation_rejects_blank_reason(
     assert "error" in body
 
 
-# ============================================================================
-# PATIENT CONSULTATION HISTORY
-# ============================================================================
-
-
 def test_patient_consultations_success(
     app,
     clinic,
@@ -681,11 +736,18 @@ def test_patient_consultations_success(
         ),
     ]
 
+    pagination = make_pagination(
+        page=1,
+        per_page=50,
+        total=2,
+        pages=1,
+    )
+
     called = {}
 
     def fake_get_consultations_for_patient(**kwargs):
         called.update(kwargs)
-        return consultations
+        return consultations, pagination
 
     monkeypatch.setattr(
         consultation_route,
@@ -706,14 +768,136 @@ def test_patient_consultations_success(
     assert len(body["data"]) == 2
     assert body["data"][0]["id"] == 1
     assert body["data"][1]["id"] == 2
+    assert body["pagination"] == pagination
 
     assert called["patient_id"] == 55
     assert called["clinic_id"] == clinic.id
+    assert called["page"] == 1
+    assert called["per_page"] == 50
+    assert called["consultation_type"] is None
 
 
-# ============================================================================
-# STAFF CONSULTATION HISTORY
-# ============================================================================
+def test_patient_consultations_forwards_pagination(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    pagination = make_pagination(
+        page=3,
+        per_page=25,
+        total=55,
+        pages=3,
+        has_next=False,
+        has_prev=True,
+        prev_page=2,
+    )
+
+    called = {}
+
+    def fake_get_consultations_for_patient(**kwargs):
+        called.update(kwargs)
+        return [], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_consultations_for_patient",
+        fake_get_consultations_for_patient,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/patient/55?page=3&per_page=25",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"] == []
+    assert body["pagination"] == pagination
+
+    assert called["page"] == 3
+    assert called["per_page"] == 25
+
+
+def test_patient_consultations_filters_by_type(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    consultation = make_consultation(
+        clinic_id=clinic.id,
+        patient_id=55,
+        consultation_id=3,
+        consultation_type=ConsultationType.SPECIALIST,
+    )
+
+    pagination = make_pagination(
+        total=1,
+        pages=1,
+    )
+
+    called = {}
+
+    def fake_get_consultations_for_patient(**kwargs):
+        called.update(kwargs)
+        return [consultation], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_consultations_for_patient",
+        fake_get_consultations_for_patient,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/patient/55"
+        "?consultation_type=specialist",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"][0]["consultation_type"] == (
+        ConsultationType.SPECIALIST.value
+    )
+
+    assert called["consultation_type"] == (
+        ConsultationType.SPECIALIST
+    )
+    assert called["page"] == 1
+    assert called["per_page"] == 50
+
+
+def test_patient_consultations_rejects_invalid_type(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    response = app.test_client().get(
+        "/api/consultations/patient/55"
+        "?consultation_type=invalid",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert "Invalid consultation type" in body["error"]
 
 
 def test_staff_consultations_success(
@@ -733,11 +917,16 @@ def test_staff_consultations_success(
         )
     ]
 
+    pagination = make_pagination(
+        total=1,
+        pages=1,
+    )
+
     called = {}
 
     def fake_get_consultations_for_staff(**kwargs):
         called.update(kwargs)
-        return consultations
+        return consultations, pagination
 
     monkeypatch.setattr(
         consultation_route,
@@ -756,10 +945,14 @@ def test_staff_consultations_success(
 
     assert body["success"] is True
     assert len(body["data"]) == 1
+    assert body["pagination"] == pagination
 
     assert called["staff_id"] == 77
     assert called["clinic_id"] == clinic.id
     assert called["status"] == ConsultationStatus.IN_PROGRESS
+    assert called["consultation_type"] is None
+    assert called["page"] == 1
+    assert called["per_page"] == 50
 
 
 def test_staff_consultations_without_status(
@@ -775,7 +968,7 @@ def test_staff_consultations_without_status(
 
     def fake_get_consultations_for_staff(**kwargs):
         called.update(kwargs)
-        return []
+        return [], make_pagination()
 
     monkeypatch.setattr(
         consultation_route,
@@ -790,6 +983,106 @@ def test_staff_consultations_without_status(
 
     assert response.status_code == 200
     assert called["status"] is None
+    assert called["consultation_type"] is None
+    assert called["page"] == 1
+    assert called["per_page"] == 50
+
+
+def test_staff_consultations_filters_by_type(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    consultation = make_consultation(
+        clinic_id=clinic.id,
+        staff_id=77,
+        consultation_id=5,
+        consultation_type=ConsultationType.EMERGENCY,
+        status=ConsultationStatus.IN_PROGRESS,
+    )
+
+    pagination = make_pagination(
+        total=1,
+        pages=1,
+    )
+
+    called = {}
+
+    def fake_get_consultations_for_staff(**kwargs):
+        called.update(kwargs)
+        return [consultation], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_consultations_for_staff",
+        fake_get_consultations_for_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/staff/77"
+        "?status=in_progress&consultation_type=emergency",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"][0]["consultation_type"] == (
+        ConsultationType.EMERGENCY.value
+    )
+
+    assert called["staff_id"] == 77
+    assert called["clinic_id"] == clinic.id
+    assert called["status"] == ConsultationStatus.IN_PROGRESS
+    assert called["consultation_type"] == ConsultationType.EMERGENCY
+
+
+def test_staff_consultations_forwards_pagination(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    pagination = make_pagination(
+        page=2,
+        per_page=10,
+        total=15,
+        pages=2,
+        has_next=False,
+        has_prev=True,
+        prev_page=1,
+    )
+
+    called = {}
+
+    def fake_get_consultations_for_staff(**kwargs):
+        called.update(kwargs)
+        return [], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_consultations_for_staff",
+        fake_get_consultations_for_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/staff/77?page=2&per_page=10",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["pagination"] == pagination
+    assert called["page"] == 2
+    assert called["per_page"] == 10
 
 
 def test_staff_consultations_rejects_invalid_status(
@@ -812,9 +1105,149 @@ def test_staff_consultations_rejects_invalid_status(
     assert "Invalid consultation status" in body["error"]
 
 
-# ============================================================================
-# TEMPLATES
-# ============================================================================
+def test_staff_consultations_rejects_invalid_type(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(user, role=Role.DOCTOR)
+
+    response = app.test_client().get(
+        "/api/consultations/staff/77"
+        "?consultation_type=invalid",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert "Invalid consultation type" in body["error"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/patient/55?page=0",
+        "/api/consultations/patient/55?page=-1",
+        "/api/consultations/staff/77?page=0",
+        "/api/consultations/staff/77?page=-1",
+        "/api/consultations/templates?page=0",
+        "/api/consultations/templates?page=-1",
+    ],
+)
+def test_pagination_rejects_invalid_page(
+    app,
+    auth_headers_for,
+    user,
+    path,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be greater than 0"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/patient/55?page=abc",
+        "/api/consultations/staff/77?page=abc",
+        "/api/consultations/templates?page=abc",
+    ],
+)
+def test_pagination_rejects_non_integer_page(
+    app,
+    auth_headers_for,
+    user,
+    path,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be an integer"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/patient/55?per_page=0",
+        "/api/consultations/patient/55?per_page=-1",
+        "/api/consultations/staff/77?per_page=0",
+        "/api/consultations/staff/77?per_page=-1",
+        "/api/consultations/templates?per_page=0",
+        "/api/consultations/templates?per_page=-1",
+    ],
+)
+def test_pagination_rejects_invalid_per_page(
+    app,
+    auth_headers_for,
+    user,
+    path,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "per_page must be greater than 0"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/patient/55?per_page=501",
+        "/api/consultations/staff/77?per_page=501",
+        "/api/consultations/templates?per_page=501",
+    ],
+)
+def test_pagination_rejects_per_page_above_maximum(
+    app,
+    auth_headers_for,
+    user,
+    path,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "per_page must be less than or equal to 500"
+    )
 
 
 def test_create_template_success(
@@ -964,11 +1397,16 @@ def test_active_templates_admin_without_clinic_filter(
         ),
     ]
 
+    pagination = make_pagination(
+        total=2,
+        pages=1,
+    )
+
     called = {}
 
     def fake_get_active_templates(**kwargs):
         called.update(kwargs)
-        return templates
+        return templates, pagination
 
     monkeypatch.setattr(
         consultation_route,
@@ -987,7 +1425,44 @@ def test_active_templates_admin_without_clinic_filter(
 
     assert body["success"] is True
     assert len(body["data"]) == 2
+    assert body["pagination"] == pagination
     assert called["clinic_id"] is None
+    assert called["page"] == 1
+    assert called["per_page"] == 50
+
+
+def test_active_templates_admin_with_clinic_filter(
+    app,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    pagination = make_pagination(
+        total=1,
+        pages=1,
+    )
+
+    called = {}
+
+    def fake_get_active_templates(**kwargs):
+        called.update(kwargs)
+        return [make_template(clinic_id=7)], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_active_templates",
+        fake_get_active_templates,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/templates?clinic_id=7",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert called["clinic_id"] == 7
 
 
 def test_active_templates_non_admin_uses_authenticated_clinic(
@@ -1003,7 +1478,7 @@ def test_active_templates_non_admin_uses_authenticated_clinic(
 
     def fake_get_active_templates(**kwargs):
         called.update(kwargs)
-        return []
+        return [], make_pagination()
 
     monkeypatch.setattr(
         consultation_route,
@@ -1018,6 +1493,8 @@ def test_active_templates_non_admin_uses_authenticated_clinic(
 
     assert response.status_code == 200
     assert called["clinic_id"] == clinic.id
+    assert called["page"] == 1
+    assert called["per_page"] == 50
 
 
 def test_active_templates_non_admin_rejects_other_clinic(
@@ -1081,9 +1558,50 @@ def test_active_templates_rejects_non_positive_clinic_id(
     assert body["error"] == "clinic_id must be greater than 0"
 
 
-# ============================================================================
-# AUTHENTICATION / AUTHORIZATION
-# ============================================================================
+def test_active_templates_forwards_pagination(
+    app,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(user, role=Role.ADMIN)
+
+    pagination = make_pagination(
+        page=2,
+        per_page=20,
+        total=25,
+        pages=2,
+        has_next=False,
+        has_prev=True,
+        prev_page=1,
+    )
+
+    called = {}
+
+    def fake_get_active_templates(**kwargs):
+        called.update(kwargs)
+        return [], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_active_templates",
+        fake_get_active_templates,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/templates?page=2&per_page=20",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"] == []
+    assert body["pagination"] == pagination
+    assert called["clinic_id"] is None
+    assert called["page"] == 2
+    assert called["per_page"] == 20
 
 
 @pytest.mark.parametrize(
@@ -1174,11 +1692,6 @@ def test_template_create_allowed_for_admin(
     )
 
     assert response.status_code == 201
-
-
-# ============================================================================
-# DOMAIN ERROR HANDLING
-# ============================================================================
 
 
 def test_route_returns_domain_error_status(

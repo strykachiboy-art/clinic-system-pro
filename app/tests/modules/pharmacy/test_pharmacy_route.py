@@ -25,6 +25,11 @@ from app.modules.pharmacy.routes import pharmacy_routes
 # ============================================================================
 
 
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
 def _utcnow():
     return datetime.now(timezone.utc)
 
@@ -35,7 +40,7 @@ def _auth_headers(make_authenticated_staff, clinic, role):
 
         (staff, headers)
 
-    The pharmacy tests use:
+    The pharmacy route tests use:
 
         (headers, staff)
     """
@@ -137,13 +142,6 @@ def _mock_dispense_record(**overrides):
 def _mock_stock_summary(**overrides):
     """
     Schema-compatible StockSummaryResponseSchema test double.
-
-    StockSummaryResponseSchema requires:
-        clinic_id
-        drug_id
-        drug_name
-        quantity_on_hand
-        batch_count
     """
     defaults = {
         "clinic_id": 1,
@@ -158,18 +156,25 @@ def _mock_stock_summary(**overrides):
     return defaults
 
 
-def _mock_dispense_item(**overrides):
-    defaults = {
-        "id": 1,
-        "dispense_record_id": 1,
-        "batch_id": 1,
-        "prescription_item_id": 1,
-        "quantity_dispensed": 5,
+def _mock_paginated(
+    items,
+    *,
+    total=None,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
+):
+    """
+    Service-compatible paginated collection response.
+    """
+    if total is None:
+        total = len(items)
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
     }
-
-    defaults.update(overrides)
-
-    return SimpleNamespace(**defaults)
 
 
 # ============================================================================
@@ -201,7 +206,12 @@ def test_list_drugs_success(
         ),
     ]
 
-    service = Mock(return_value=drugs)
+    service = Mock(
+        return_value=_mock_paginated(
+            drugs,
+            total=2,
+        )
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -219,11 +229,17 @@ def test_list_drugs_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
+    assert body["data"]["items"]
+    assert len(body["data"]["items"]) == 2
+    assert body["data"]["total"] == 2
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
 
     service.assert_called_once_with(
         clinic_id=clinic.id,
         include_inactive=False,
+        page=1,
+        per_page=50,
     )
 
 
@@ -240,12 +256,15 @@ def test_list_drugs_include_inactive_true(
     )
 
     service = Mock(
-        return_value=[
-            _mock_drug(
-                clinic_id=clinic.id,
-                is_active=False,
-            )
-        ]
+        return_value=_mock_paginated(
+            [
+                _mock_drug(
+                    clinic_id=clinic.id,
+                    is_active=False,
+                )
+            ],
+            total=1,
+        )
     )
 
     monkeypatch.setattr(
@@ -261,9 +280,70 @@ def test_list_drugs_include_inactive_true(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["total"] == 1
+
     service.assert_called_once_with(
         clinic_id=clinic.id,
         include_inactive=True,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_list_drugs_forwards_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    service = Mock(
+        return_value=_mock_paginated(
+            [
+                _mock_drug(
+                    id=7,
+                    clinic_id=clinic.id,
+                )
+            ],
+            total=15,
+            page=2,
+            per_page=5,
+        )
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_drugs",
+        service,
+    )
+
+    response = client.get(
+        "/pharmacy/drugs?page=2&per_page=5",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 5
+    assert body["data"]["total"] == 15
+
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        include_inactive=False,
+        page=2,
+        per_page=5,
     )
 
 
@@ -279,7 +359,9 @@ def test_list_drugs_default_excludes_inactive(
         Role.PHARMACIST,
     )
 
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=_mock_paginated([])
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -298,6 +380,46 @@ def test_list_drugs_default_excludes_inactive(
         service.call_args.kwargs["include_inactive"]
         is False
     )
+
+    assert (
+        service.call_args.kwargs["page"]
+        == DEFAULT_PAGE
+    )
+
+    assert (
+        service.call_args.kwargs["per_page"]
+        == DEFAULT_PER_PAGE
+    )
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+    ],
+)
+def test_list_drugs_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    query_string,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    response = client.get(
+        f"/pharmacy/drugs?{query_string}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 # ============================================================================
@@ -778,7 +900,12 @@ def test_list_batches_success(
         ),
     ]
 
-    service = Mock(return_value=batches)
+    service = Mock(
+        return_value=_mock_paginated(
+            batches,
+            total=2,
+        )
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -796,17 +923,18 @@ def test_list_batches_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
+    assert len(body["data"]["items"]) == 2
+    assert body["data"]["total"] == 2
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
 
-    service.assert_called_once()
-
-    assert service.call_args.args == ()
-
-    kwargs = service.call_args.kwargs
-
-    assert kwargs["drug_id"] == 7
-    assert kwargs["clinic_id"] == clinic.id
-    assert kwargs["include_expired"] is True
+    service.assert_called_once_with(
+        drug_id=7,
+        clinic_id=clinic.id,
+        include_expired=True,
+        page=1,
+        per_page=50,
+    )
 
 
 def test_list_batches_can_exclude_expired(
@@ -822,13 +950,15 @@ def test_list_batches_can_exclude_expired(
     )
 
     service = Mock(
-        return_value=[
-            _mock_batch(
-                id=7,
-                clinic_id=clinic.id,
-                drug_id=7,
-            )
-        ]
+        return_value=_mock_paginated(
+            [
+                _mock_batch(
+                    id=7,
+                    clinic_id=clinic.id,
+                    drug_id=7,
+                )
+            ]
+        )
     )
 
     monkeypatch.setattr(
@@ -844,15 +974,98 @@ def test_list_batches_can_exclude_expired(
 
     assert response.status_code == 200
 
-    service.assert_called_once()
+    service.assert_called_once_with(
+        drug_id=7,
+        clinic_id=clinic.id,
+        include_expired=False,
+        page=1,
+        per_page=50,
+    )
 
-    assert service.call_args.args == ()
 
-    kwargs = service.call_args.kwargs
+def test_list_batches_forwards_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
 
-    assert kwargs["drug_id"] == 7
-    assert kwargs["clinic_id"] == clinic.id
-    assert kwargs["include_expired"] is False
+    service = Mock(
+        return_value=_mock_paginated(
+            [
+                _mock_batch(
+                    id=7,
+                    clinic_id=clinic.id,
+                    drug_id=7,
+                )
+            ],
+            total=12,
+            page=2,
+            per_page=5,
+        )
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_batches",
+        service,
+    )
+
+    response = client.get(
+        "/pharmacy/drugs/7/batches?page=2&per_page=5",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 5
+    assert body["data"]["total"] == 12
+
+    service.assert_called_once_with(
+        drug_id=7,
+        clinic_id=clinic.id,
+        include_expired=True,
+        page=2,
+        per_page=5,
+    )
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+    ],
+)
+def test_list_batches_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    query_string,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    response = client.get(
+        f"/pharmacy/drugs/7/batches?{query_string}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 # ============================================================================
@@ -897,8 +1110,6 @@ def test_get_batch_success(
     assert body["success"] is True
     assert body["data"]["id"] == 12
 
-    # IMPORTANT:
-    # The route calls get_batch(batch_id=..., clinic_id=...).
     service.assert_called_once_with(
         batch_id=12,
         clinic_id=clinic.id,
@@ -930,7 +1141,12 @@ def test_list_expiring_batches_success(
         )
     ]
 
-    service = Mock(return_value=batches)
+    service = Mock(
+        return_value=_mock_paginated(
+            batches,
+            total=1,
+        )
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -948,11 +1164,16 @@ def test_list_expiring_batches_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 1
+    assert len(body["data"]["items"]) == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
 
     service.assert_called_once_with(
         clinic_id=clinic.id,
         days=30,
+        page=1,
+        per_page=50,
     )
 
 
@@ -968,7 +1189,9 @@ def test_list_expiring_batches_forwards_days(
         Role.PHARMACIST,
     )
 
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=_mock_paginated([])
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -986,6 +1209,61 @@ def test_list_expiring_batches_forwards_days(
     service.assert_called_once_with(
         clinic_id=clinic.id,
         days=14,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_list_expiring_batches_forwards_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    service = Mock(
+        return_value=_mock_paginated(
+            [
+                _mock_batch(
+                    id=3,
+                    clinic_id=clinic.id,
+                )
+            ],
+            total=9,
+            page=2,
+            per_page=4,
+        )
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_expiring_batches",
+        service,
+    )
+
+    response = client.get(
+        "/pharmacy/batches/expiring?days=14&page=2&per_page=4",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 4
+    assert body["data"]["total"] == 9
+
+    service.assert_called_once_with(
+        clinic_id=clinic.id,
+        days=14,
+        page=2,
+        per_page=4,
     )
 
 
@@ -1011,6 +1289,36 @@ def test_list_expiring_batches_rejects_invalid_days(
 
     response = client.get(
         f"/pharmacy/batches/expiring?days={days}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+    ],
+)
+def test_list_expiring_batches_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    query_string,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    response = client.get(
+        f"/pharmacy/batches/expiring?{query_string}",
         headers=headers,
     )
 
@@ -1634,7 +1942,12 @@ def test_list_dispense_records_for_prescription_success(
         ),
     ]
 
-    service = Mock(return_value=records)
+    service = Mock(
+        return_value=_mock_paginated(
+            records,
+            total=2,
+        )
+    )
 
     monkeypatch.setattr(
         pharmacy_routes,
@@ -1652,12 +1965,102 @@ def test_list_dispense_records_for_prescription_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
+    assert len(body["data"]["items"]) == 2
+    assert body["data"]["total"] == 2
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
 
     service.assert_called_once_with(
         prescription_id=10,
         clinic_id=clinic.id,
+        page=1,
+        per_page=50,
     )
+
+
+def test_list_dispense_records_for_prescription_forwards_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    service = Mock(
+        return_value=_mock_paginated(
+            [
+                _mock_dispense_record(
+                    id=3,
+                    prescription_id=10,
+                )
+            ],
+            total=9,
+            page=2,
+            per_page=4,
+        )
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_dispense_records_for_prescription",
+        service,
+    )
+
+    response = client.get(
+        "/pharmacy/prescriptions/10/dispense-records"
+        "?page=2&per_page=4",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 4
+    assert body["data"]["total"] == 9
+
+    service.assert_called_once_with(
+        prescription_id=10,
+        clinic_id=clinic.id,
+        page=2,
+        per_page=4,
+    )
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+    ],
+)
+def test_list_dispense_records_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    query_string,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    response = client.get(
+        "/pharmacy/prescriptions/10/dispense-records"
+        f"?{query_string}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 # ============================================================================
@@ -1839,9 +2242,6 @@ def test_pharmacist_can_read_pharmacy_resources(
         headers=headers,
     )
 
-    # A valid authenticated pharmacist must pass role_required.
-    # Service/database behavior may determine whether the endpoint
-    # ultimately returns a resource error.
     assert response.status_code != 403
 
 
@@ -2265,6 +2665,63 @@ def test_get_drug_response_has_expected_shape(
     assert body["success"] is True
 
 
+def test_list_drugs_response_has_paginated_shape(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_drugs",
+        Mock(
+            return_value=_mock_paginated(
+                [
+                    _mock_drug(
+                        id=7,
+                        clinic_id=clinic.id,
+                    )
+                ],
+                total=7,
+                page=2,
+                per_page=5,
+            )
+        ),
+    )
+
+    response = client.get(
+        "/pharmacy/drugs?page=2&per_page=5",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert set(body.keys()) == {
+        "success",
+        "data",
+    }
+
+    assert set(body["data"].keys()) == {
+        "items",
+        "total",
+        "page",
+        "per_page",
+    }
+
+    assert body["success"] is True
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 5
+    assert body["data"]["total"] == 7
+
+
 def test_get_batch_response_has_expected_shape(
     client,
     clinic,
@@ -2303,6 +2760,119 @@ def test_get_batch_response_has_expected_shape(
     }
 
     assert body["success"] is True
+
+
+def test_list_batches_response_has_paginated_shape(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_batches",
+        Mock(
+            return_value=_mock_paginated(
+                [
+                    _mock_batch(
+                        id=12,
+                        clinic_id=clinic.id,
+                        drug_id=7,
+                    )
+                ],
+                total=8,
+                page=2,
+                per_page=4,
+            )
+        ),
+    )
+
+    response = client.get(
+        "/pharmacy/drugs/7/batches?page=2&per_page=4",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert set(body.keys()) == {
+        "success",
+        "data",
+    }
+
+    assert set(body["data"].keys()) == {
+        "items",
+        "total",
+        "page",
+        "per_page",
+    }
+
+    assert body["success"] is True
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 4
+    assert body["data"]["total"] == 8
+
+
+def test_expiring_batches_response_has_paginated_shape(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_expiring_batches",
+        Mock(
+            return_value=_mock_paginated(
+                [
+                    _mock_batch(
+                        id=5,
+                        clinic_id=clinic.id,
+                    )
+                ],
+                total=3,
+                page=1,
+                per_page=2,
+            )
+        ),
+    )
+
+    response = client.get(
+        "/pharmacy/batches/expiring?per_page=2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert set(body.keys()) == {
+        "success",
+        "data",
+    }
+
+    assert set(body["data"].keys()) == {
+        "items",
+        "total",
+        "page",
+        "per_page",
+    }
+
+    assert body["data"]["total"] == 3
+    assert body["data"]["per_page"] == 2
 
 
 def test_stock_summary_response_has_expected_shape(
@@ -2352,6 +2922,64 @@ def test_stock_summary_response_has_expected_shape(
         "quantity_on_hand",
         "batch_count",
     }
+
+
+def test_list_dispense_records_response_has_paginated_shape(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _auth_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.PHARMACIST,
+    )
+
+    monkeypatch.setattr(
+        pharmacy_routes,
+        "list_dispense_records_for_prescription",
+        Mock(
+            return_value=_mock_paginated(
+                [
+                    _mock_dispense_record(
+                        id=20,
+                        prescription_id=10,
+                    )
+                ],
+                total=6,
+                page=2,
+                per_page=3,
+            )
+        ),
+    )
+
+    response = client.get(
+        "/pharmacy/prescriptions/10/dispense-records"
+        "?page=2&per_page=3",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert set(body.keys()) == {
+        "success",
+        "data",
+    }
+
+    assert set(body["data"].keys()) == {
+        "items",
+        "total",
+        "page",
+        "per_page",
+    }
+
+    assert body["success"] is True
+    assert body["data"]["total"] == 6
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 3
 
 
 def test_dispense_response_has_expected_shape(

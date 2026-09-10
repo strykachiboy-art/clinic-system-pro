@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.extensions import db
@@ -8,7 +10,7 @@ from app.core.enums.lab_enums import (
 )
 
 
-def _utcnow():
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -19,12 +21,23 @@ class LabTest(db.Model):
         db.CheckConstraint(
             "critical_low IS NULL "
             "OR critical_high IS NULL "
-            "OR critical_low <= critical_high",
+            "OR critical_low < critical_high",
             name="ck_lab_tests_valid_critical_range",
         ),
         db.CheckConstraint(
             "price IS NULL OR price >= 0",
             name="ck_lab_tests_price_non_negative",
+        ),
+        db.Index(
+            "ix_lab_tests_clinic_active_name",
+            "clinic_id",
+            "is_active",
+            "name",
+        ),
+        db.Index(
+            "ix_lab_tests_clinic_sample_type",
+            "clinic_id",
+            "sample_type",
         ),
     )
 
@@ -88,8 +101,8 @@ class LabTest(db.Model):
     #
     # These are separate from reference_range because
     # reference_range is descriptive/display information,
-    # while these values can be used for automatic
-    # CRITICAL flagging.
+    # while these values are used for automatic CRITICAL
+    # flagging.
     critical_low = db.Column(
         db.Numeric(10, 3),
         nullable=True,
@@ -108,13 +121,14 @@ class LabTest(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -142,6 +156,13 @@ class LabOrder(db.Model):
             name="ck_lab_orders_sample_collected_after_created",
         ),
 
+        db.CheckConstraint(
+            "(collected_by_id IS NULL AND sample_collected_at IS NULL) "
+            "OR "
+            "(collected_by_id IS NOT NULL AND sample_collected_at IS NOT NULL)",
+            name="ck_lab_orders_collection_actor_timestamp_pair",
+        ),
+
         # ---------------------------------------------------------
         # Processing timestamp integrity
         # ---------------------------------------------------------
@@ -158,6 +179,13 @@ class LabOrder(db.Model):
             name="ck_lab_orders_processed_after_sample",
         ),
 
+        db.CheckConstraint(
+            "(processed_by_id IS NULL AND processed_at IS NULL) "
+            "OR "
+            "(processed_by_id IS NOT NULL AND processed_at IS NOT NULL)",
+            name="ck_lab_orders_processing_actor_timestamp_pair",
+        ),
+
         # ---------------------------------------------------------
         # Verification timestamp integrity
         # ---------------------------------------------------------
@@ -172,6 +200,13 @@ class LabOrder(db.Model):
             "OR processed_at IS NULL "
             "OR verified_at >= processed_at",
             name="ck_lab_orders_verified_after_processed",
+        ),
+
+        db.CheckConstraint(
+            "(verified_by_id IS NULL AND verified_at IS NULL) "
+            "OR "
+            "(verified_by_id IS NOT NULL AND verified_at IS NOT NULL)",
+            name="ck_lab_orders_verification_actor_timestamp_pair",
         ),
 
         # ---------------------------------------------------------
@@ -202,6 +237,33 @@ class LabOrder(db.Model):
             "OR verified_at IS NULL "
             "OR completed_at >= verified_at",
             name="ck_lab_orders_completed_after_verified",
+        ),
+
+        # ---------------------------------------------------------
+        # Workflow/index optimization
+        # ---------------------------------------------------------
+        db.Index(
+            "ix_lab_orders_clinic_status_created",
+            "clinic_id",
+            "status",
+            "created_at",
+        ),
+        db.Index(
+            "ix_lab_orders_clinic_patient_created",
+            "clinic_id",
+            "patient_id",
+            "created_at",
+        ),
+        db.Index(
+            "ix_lab_orders_patient_created",
+            "patient_id",
+            "created_at",
+        ),
+        db.Index(
+            "ix_lab_orders_clinic_ordered_by_created",
+            "clinic_id",
+            "ordered_by_id",
+            "created_at",
         ),
     )
 
@@ -237,9 +299,6 @@ class LabOrder(db.Model):
 
     # -------------------------------------------------------------
     # Clinical actors
-    #
-    # These are populated by the service from the authenticated
-    # user's Staff record. They must NOT come from the request body.
     # -------------------------------------------------------------
 
     ordered_by_id = db.Column(
@@ -281,8 +340,6 @@ class LabOrder(db.Model):
         index=True,
     )
 
-    # Unique QR identifier used to identify the order during
-    # specimen collection/workflow.
     qr_code = db.Column(
         db.String(150),
         unique=True,
@@ -295,8 +352,9 @@ class LabOrder(db.Model):
     # -------------------------------------------------------------
 
     sample_collected_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     # -------------------------------------------------------------
@@ -304,8 +362,9 @@ class LabOrder(db.Model):
     # -------------------------------------------------------------
 
     processed_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     # -------------------------------------------------------------
@@ -313,8 +372,9 @@ class LabOrder(db.Model):
     # -------------------------------------------------------------
 
     verified_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     # -------------------------------------------------------------
@@ -331,8 +391,6 @@ class LabOrder(db.Model):
     # Cancellation
     # -------------------------------------------------------------
 
-    # Persisted separately so cancellation reason is
-    # queryable/reportable and not stored only in audit logs.
     cancellation_reason = db.Column(
         db.String(255),
         nullable=True,
@@ -343,21 +401,23 @@ class LabOrder(db.Model):
     # -------------------------------------------------------------
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
     )
 
     completed_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     # -------------------------------------------------------------
@@ -379,8 +439,6 @@ class LabOrder(db.Model):
         back_populates="lab_orders",
     )
 
-    # Multiple foreign keys point to Staff, so foreign_keys must
-    # be explicit to avoid SQLAlchemy relationship ambiguity.
     ordered_by = db.relationship(
         "Staff",
         foreign_keys=[ordered_by_id],
@@ -419,9 +477,6 @@ class LabOrder(db.Model):
 class LabOrderItem(db.Model):
     """
     A single laboratory test within a lab order.
-
-    Stores the result associated with that test once
-    laboratory processing is completed.
     """
 
     __tablename__ = "lab_order_items"
@@ -431,6 +486,16 @@ class LabOrderItem(db.Model):
             "order_id",
             "test_id",
             name="uq_lab_order_item_order_test",
+        ),
+        db.Index(
+            "ix_lab_order_items_order_resulted_at",
+            "order_id",
+            "resulted_at",
+        ),
+        db.Index(
+            "ix_lab_order_items_test_flag",
+            "test_id",
+            "flag",
         ),
     )
 
@@ -475,8 +540,9 @@ class LabOrderItem(db.Model):
     )
 
     resulted_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     order = db.relationship(

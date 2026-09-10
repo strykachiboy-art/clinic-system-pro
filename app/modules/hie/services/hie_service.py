@@ -18,27 +18,13 @@ from app.modules.hie.providers.malaffi_provider import (
 from app.modules.patient.models.patient_model import Patient
 
 
-# ======================================================================
-# INTERNAL HELPERS
-# ======================================================================
-
-
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _get_clinic(clinic_id: int) -> Clinic:
-    """
-    Return the clinic identified by clinic_id.
-
-    Authorization to access the clinic should be enforced by the
-    authenticated route/decorator layer. This helper only verifies
-    that the clinic exists.
-    """
     if clinic_id is None or clinic_id <= 0:
-        raise ValidationError(
-            "Invalid clinic ID"
-        )
+        raise ValidationError("Invalid clinic ID")
 
     clinic = db.session.get(
         Clinic,
@@ -57,16 +43,11 @@ def _get_patient(
     clinic_id: int,
     patient_id: Optional[int],
 ) -> Optional[Patient]:
-    """
-    Return a patient belonging to the supplied clinic.
-    """
     if patient_id is None:
         return None
 
     if patient_id <= 0:
-        raise ValidationError(
-            "Invalid patient ID"
-        )
+        raise ValidationError("Invalid patient ID")
 
     patient = db.session.get(
         Patient,
@@ -90,16 +71,8 @@ def _get_integration(
     clinic_id: int,
     integration_id: Optional[int] = None,
 ) -> HIEIntegration:
-    """
-    Return an HIE integration belonging to the supplied clinic.
-
-    If integration_id is omitted, return the active Malaffi
-    integration for the clinic.
-    """
     if clinic_id is None or clinic_id <= 0:
-        raise ValidationError(
-            "Invalid clinic ID"
-        )
+        raise ValidationError("Invalid clinic ID")
 
     if integration_id is not None:
         if integration_id <= 0:
@@ -129,13 +102,16 @@ def _get_integration(
         .where(
             HIEIntegration.clinic_id == clinic_id,
             HIEIntegration.provider == "malaffi",
-            HIEIntegration.status == HIEIntegrationStatus.ACTIVE,
+            HIEIntegration.status
+            == HIEIntegrationStatus.ACTIVE,
         )
     )
 
-    integration = db.session.execute(
-        statement
-    ).scalars().first()
+    integration = (
+        db.session.execute(statement)
+        .scalars()
+        .first()
+    )
 
     if integration is None:
         raise ValidationError(
@@ -149,9 +125,6 @@ def _get_integration(
 def _validate_integration(
     integration: HIEIntegration,
 ) -> None:
-    """
-    Ensure the integration is configured for supported operation.
-    """
     if integration is None:
         raise ValidationError(
             "HIE integration is required"
@@ -181,9 +154,6 @@ def _validate_integration(
 def _get_provider(
     integration: HIEIntegration,
 ) -> HIEProvider:
-    """
-    Resolve the provider implementation for an integration.
-    """
     provider_name = (
         integration.provider or ""
     ).strip().lower()
@@ -202,9 +172,6 @@ def _get_provider(
 def _validate_patient_identifier(
     patient_identifier: str,
 ) -> str:
-    """
-    Normalize and validate an external HIE patient identifier.
-    """
     if patient_identifier is None:
         raise ValidationError(
             "Patient identifier is required"
@@ -226,10 +193,6 @@ def _validate_submission_context(
     clinic_id: int,
     patient_id: Optional[int],
 ) -> None:
-    """
-    Ensure the integration and patient belong to the same clinic
-    before creating a submission.
-    """
     if integration is None:
         raise ValidationError(
             "HIE integration is required"
@@ -241,25 +204,37 @@ def _validate_submission_context(
         )
 
     if patient_id is not None:
-        patient = db.session.get(
-            Patient,
+        _get_patient(
+            clinic_id,
             patient_id,
         )
 
-        if patient is None:
-            raise NotFoundError(
-                f"Patient {patient_id} not found"
-            )
 
-        if patient.clinic_id != clinic_id:
-            raise ValidationError(
-                "Patient does not belong to the clinic"
-            )
+def _validate_pagination(
+    page: int,
+    per_page: int,
+) -> tuple[int, int]:
+    if isinstance(page, bool) or not isinstance(page, int):
+        raise ValidationError(
+            "Page must be an integer"
+        )
 
+    if isinstance(per_page, bool) or not isinstance(per_page, int):
+        raise ValidationError(
+            "per_page must be an integer"
+        )
 
-# ======================================================================
-# SUBMISSION HELPERS
-# ======================================================================
+    if page < 1:
+        raise ValidationError(
+            "Page must be greater than or equal to 1"
+        )
+
+    if per_page < 1 or per_page > 100:
+        raise ValidationError(
+            "per_page must be between 1 and 100"
+        )
+
+    return page, per_page
 
 
 @transactional
@@ -271,10 +246,6 @@ def _create_submission(
     operation: HIEOperation,
     request_data: Optional[dict[str, Any]],
 ) -> int:
-    """
-    Create a pending HIE submission after validating its ownership
-    relationships.
-    """
     if clinic_id is None or clinic_id <= 0:
         raise ValidationError(
             "Invalid clinic ID"
@@ -335,10 +306,6 @@ def _mark_submission_success(
     submission_id: int,
     response: dict[str, Any],
 ) -> None:
-    """
-    Mark an HIE submission as successful and persist the provider
-    response metadata.
-    """
     if submission_id is None or submission_id <= 0:
         raise ValidationError(
             "Invalid HIE submission ID"
@@ -376,9 +343,6 @@ def _mark_submission_failure(
     submission_id: int,
     error: Exception,
 ) -> None:
-    """
-    Mark an HIE submission as failed and increment its retry count.
-    """
     if submission_id is None or submission_id <= 0:
         raise ValidationError(
             "Invalid HIE submission ID"
@@ -406,9 +370,6 @@ def _mark_submission_failure(
 def _update_last_sync(
     integration_id: int,
 ) -> None:
-    """
-    Update the last successful HIE synchronization timestamp.
-    """
     if integration_id is None or integration_id <= 0:
         raise ValidationError(
             "Invalid HIE integration ID"
@@ -427,11 +388,6 @@ def _update_last_sync(
     integration.last_sync_at = _utcnow()
 
 
-# ======================================================================
-# HIE SUBMISSION OPERATIONS
-# ======================================================================
-
-
 def submit_patient(
     *,
     clinic_id: int,
@@ -439,9 +395,6 @@ def submit_patient(
     payload: dict[str, Any],
     integration_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Submit patient information to the configured HIE provider.
-    """
     _get_clinic(clinic_id)
 
     _get_patient(
@@ -454,9 +407,7 @@ def submit_patient(
         integration_id,
     )
 
-    _validate_integration(
-        integration
-    )
+    _validate_integration(integration)
 
     submission_id = _create_submission(
         integration_id=integration.id,
@@ -466,14 +417,10 @@ def submit_patient(
         request_data=payload,
     )
 
-    provider = _get_provider(
-        integration
-    )
+    provider = _get_provider(integration)
 
     try:
-        response = provider.submit_patient(
-            payload
-        )
+        response = provider.submit_patient(payload)
 
     except Exception as exc:
         _mark_submission_failure(
@@ -501,9 +448,6 @@ def submit_clinical_data(
     payload: dict[str, Any],
     integration_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Submit clinical data to the configured HIE provider.
-    """
     _get_clinic(clinic_id)
 
     _get_patient(
@@ -516,9 +460,7 @@ def submit_clinical_data(
         integration_id,
     )
 
-    _validate_integration(
-        integration
-    )
+    _validate_integration(integration)
 
     submission_id = _create_submission(
         integration_id=integration.id,
@@ -528,9 +470,7 @@ def submit_clinical_data(
         request_data=payload,
     )
 
-    provider = _get_provider(
-        integration
-    )
+    provider = _get_provider(integration)
 
     try:
         response = provider.submit_clinical_data(
@@ -563,9 +503,6 @@ def submit_clinical_document(
     payload: dict[str, Any],
     integration_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Submit a clinical document to the configured HIE provider.
-    """
     _get_clinic(clinic_id)
 
     _get_patient(
@@ -578,9 +515,7 @@ def submit_clinical_document(
         integration_id,
     )
 
-    _validate_integration(
-        integration
-    )
+    _validate_integration(integration)
 
     submission_id = _create_submission(
         integration_id=integration.id,
@@ -590,9 +525,7 @@ def submit_clinical_document(
         request_data=payload,
     )
 
-    provider = _get_provider(
-        integration
-    )
+    provider = _get_provider(integration)
 
     try:
         response = provider.submit_clinical_document(
@@ -618,20 +551,12 @@ def submit_clinical_document(
     return response
 
 
-# ======================================================================
-# HIE QUERY OPERATIONS
-# ======================================================================
-
-
 def query_patient(
     *,
     clinic_id: int,
     patient_identifier: str,
     integration_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Query a patient from the configured HIE provider.
-    """
     _get_clinic(clinic_id)
 
     patient_identifier = _validate_patient_identifier(
@@ -643,13 +568,9 @@ def query_patient(
         integration_id,
     )
 
-    _validate_integration(
-        integration
-    )
+    _validate_integration(integration)
 
-    provider = _get_provider(
-        integration
-    )
+    provider = _get_provider(integration)
 
     submission_id = _create_submission(
         integration_id=integration.id,
@@ -692,9 +613,6 @@ def query_clinical_data(
     filters: Optional[dict[str, Any]] = None,
     integration_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Query clinical data from the configured HIE provider.
-    """
     _get_clinic(clinic_id)
 
     patient_identifier = _validate_patient_identifier(
@@ -714,13 +632,9 @@ def query_clinical_data(
         integration_id,
     )
 
-    _validate_integration(
-        integration
-    )
+    _validate_integration(integration)
 
-    provider = _get_provider(
-        integration
-    )
+    provider = _get_provider(integration)
 
     request_data = {
         "patient_identifier": patient_identifier,
@@ -760,18 +674,10 @@ def query_clinical_data(
     return response
 
 
-# ======================================================================
-# HIE INTEGRATION MANAGEMENT
-# ======================================================================
-
-
 def get_hie_integration(
     clinic_id: int,
     integration_id: int,
 ) -> HIEIntegration:
-    """
-    Return an HIE integration belonging to the clinic.
-    """
     _get_clinic(clinic_id)
 
     return _get_integration(
@@ -789,11 +695,6 @@ def create_hie_integration(
     organization_id: Optional[str] = None,
     facility_id: Optional[str] = None,
 ) -> HIEIntegration:
-    """
-    Create a pending HIE integration for a clinic.
-
-    The clinic must already be authorized by the calling route.
-    """
     _get_clinic(clinic_id)
 
     if provider is None:
@@ -863,9 +764,6 @@ def update_hie_integration(
     organization_id: Optional[str] = None,
     facility_id: Optional[str] = None,
 ) -> HIEIntegration:
-    """
-    Update an HIE integration belonging to the clinic.
-    """
     integration = _get_integration(
         clinic_id,
         integration_id,
@@ -932,11 +830,6 @@ def update_hie_integration(
     return integration
 
 
-# ======================================================================
-# HIE SUBMISSION LISTING
-# ======================================================================
-
-
 def list_hie_submissions(
     *,
     clinic_id: int,
@@ -947,20 +840,12 @@ def list_hie_submissions(
     page: int = 1,
     per_page: int = 20,
 ):
-    """
-    List HIE submissions belonging exclusively to the supplied clinic.
-    """
     _get_clinic(clinic_id)
 
-    if page < 1:
-        raise ValidationError(
-            "Page must be greater than or equal to 1"
-        )
-
-    if per_page < 1 or per_page > 100:
-        raise ValidationError(
-            "per_page must be between 1 and 100"
-        )
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     if integration_id is not None:
         if integration_id <= 0:
@@ -968,7 +853,6 @@ def list_hie_submissions(
                 "Invalid HIE integration ID"
             )
 
-        # Verify ownership before applying the filter.
         _get_integration(
             clinic_id,
             integration_id,
@@ -980,7 +864,6 @@ def list_hie_submissions(
                 "Invalid patient ID"
             )
 
-        # Verify patient belongs to this clinic.
         _get_patient(
             clinic_id,
             patient_id,
@@ -1034,7 +917,8 @@ def list_hie_submissions(
         )
 
     statement = statement.order_by(
-        HIESubmission.created_at.desc()
+        HIESubmission.created_at.desc(),
+        HIESubmission.id.desc(),
     )
 
     return db.paginate(

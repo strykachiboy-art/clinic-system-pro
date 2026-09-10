@@ -8,6 +8,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 
 from app.extensions import db
+
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
@@ -19,16 +20,20 @@ from app.core.utils.decorators import role_required
 
 from app.modules.inventory.schemas.inventory_schema import (
     ExpiringInventoryBatchQuerySchema,
+    ExpiringInventoryBatchListResponseSchema,
     InventoryBatchCreateSchema,
     InventoryBatchFilterSchema,
+    InventoryBatchListResponseSchema,
     InventoryBatchResponseSchema,
     InventoryBatchUpdateSchema,
     InventoryItemCreateSchema,
     InventoryItemFilterSchema,
+    InventoryItemListResponseSchema,
     InventoryItemResponseSchema,
     InventoryItemUpdateSchema,
     InventorySupplierCreateSchema,
     InventorySupplierFilterSchema,
+    InventorySupplierListResponseSchema,
     InventorySupplierResponseSchema,
     InventorySupplierUpdateSchema,
     InventoryTransferApproveSchema,
@@ -36,8 +41,11 @@ from app.modules.inventory.schemas.inventory_schema import (
     InventoryTransferCompleteSchema,
     InventoryTransferCreateSchema,
     InventoryTransferFilterSchema,
+    InventoryTransferListResponseSchema,
     InventoryTransferResponseSchema,
     StockMovementCreateSchema,
+    StockMovementFilterSchema,
+    StockMovementListResponseSchema,
     StockMovementResponseSchema,
 )
 
@@ -89,7 +97,9 @@ inventory_bp = Blueprint(
 # ============================================================================
 
 def _json_body() -> dict:
-    payload = request.get_json(silent=True)
+    payload = request.get_json(
+        silent=True
+    )
 
     if payload is None:
         return {}
@@ -125,11 +135,20 @@ def _sanitize_pydantic_errors(
             input_value = item["input"]
 
             try:
-                json.dumps(input_value)
-            except (TypeError, ValueError):
-                item["input"] = str(input_value)
+                json.dumps(
+                    input_value
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                item["input"] = str(
+                    input_value
+                )
 
-        sanitized.append(item)
+        sanitized.append(
+            item
+        )
 
     return sanitized
 
@@ -140,45 +159,48 @@ def _validation_response(
     return (
         jsonify(
             {
+                "success": False,
                 "error": "Validation error",
-                "details": _sanitize_pydantic_errors(exc),
+                "details": _sanitize_pydantic_errors(
+                    exc
+                ),
             }
         ),
-        400,
+        422,
     )
 
 
 def _validate_json(schema):
     try:
-        return (
-            schema.model_validate(
-                _json_body()
-            ),
-            None,
+        payload = schema.model_validate(
+            _json_body()
         )
+
+        return payload, None
 
     except PydanticValidationError as exc:
-        return None, _validation_response(exc)
+        return (
+            None,
+            _validation_response(exc),
+        )
 
     except ValidationError as exc:
-        return None, (
-            jsonify(
-                {
-                    "error": str(exc),
-                }
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": str(exc),
+                    }
+                ),
+                400,
             ),
-            400,
         )
 
 
-def _query_without(*excluded: str) -> dict:
-    excluded = set(excluded)
-
-    return {
-        key: value
-        for key, value in request.args.to_dict().items()
-        if key not in excluded
-    }
+def _query_params() -> dict:
+    return request.args.to_dict()
 
 
 def _serialize(
@@ -206,15 +228,36 @@ def _serialize_many(
     ]
 
 
+def _serialize_page(
+    response_schema,
+    item_schema,
+    pagination,
+):
+    return response_schema(
+        total=pagination.total,
+        page=pagination.page,
+        per_page=pagination.per_page,
+        items=_serialize_many(
+            item_schema,
+            pagination.items,
+        ),
+    ).model_dump(
+        mode="json"
+    )
+
+
 def _get_current_user():
     """
-    Return the authenticated user.
+    Return the authenticated active user.
     """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (TypeError, ValueError):
+    except (
+        TypeError,
+        ValueError,
+    ):
         raise ValidationError(
             "Invalid authentication identity"
         )
@@ -239,14 +282,14 @@ def _get_current_user():
 
 def _get_current_clinic_id() -> int:
     """
-    Resolve the authoritative clinic from the authenticated user.
-
-    Client-supplied clinic_id values are never used as the
-    authoritative tenant identity.
+    Resolve the authoritative clinic from JWT user context.
     """
     user = _get_current_user()
 
-    if user.clinic_id is None or user.clinic_id <= 0:
+    if (
+        user.clinic_id is None
+        or user.clinic_id <= 0
+    ):
         raise ValidationError(
             "Authenticated user is not associated "
             "with a clinic"
@@ -255,11 +298,9 @@ def _get_current_clinic_id() -> int:
     return user.clinic_id
 
 
-def _get_current_staff_id() -> int:
+def _get_current_staff() -> Staff:
     """
-    Resolve the Staff record belonging to the authenticated user.
-
-    Actor identity is always derived from JWT context.
+    Resolve the active Staff record for the authenticated user.
     """
     user = _get_current_user()
 
@@ -285,66 +326,48 @@ def _get_current_staff_id() -> int:
             "with a staff record"
         )
 
-    return staff.id
+    return staff
 
 
-def _get_requested_clinic_id(
-    payload_clinic_id: int | None,
-    *,
-    allow_global: bool = False,
-) -> int | None:
-    """
-    Validate a client-supplied clinic ID against the
-    authenticated clinic.
-
-    A client cannot select another clinic.
-
-    When allow_global=True, None may represent a global/shared
-    resource. Explicit global creation is restricted to ADMIN.
-    """
-    current_clinic_id = _get_current_clinic_id()
-
-    if payload_clinic_id is None:
-        if allow_global:
-            user = _get_current_user()
-
-            if getattr(user, "role", None) == Role.ADMIN:
-                return None
-
-        return current_clinic_id
-
-    if payload_clinic_id != current_clinic_id:
-        raise ValidationError(
-            "Requested clinic does not match "
-            "the authenticated user's clinic"
-        )
-
-    return current_clinic_id
+def _get_current_staff_id() -> int:
+    return _get_current_staff().id
 
 
 def _service_error_response(
     exc,
 ):
     if isinstance(exc, NotFoundError):
-        return jsonify(
-            {
-                "error": str(exc),
-            }
-        ), 404
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                }
+            ),
+            404,
+        )
 
     if isinstance(exc, ConflictError):
-        return jsonify(
-            {
-                "error": str(exc),
-            }
-        ), 409
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                }
+            ),
+            409,
+        )
 
     if isinstance(exc, ValidationError):
-        return jsonify(
-            {
-                "error": str(exc),
-            }
-        ), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                }
+            ),
+            400,
+        )
 
     raise exc
 
@@ -363,23 +386,28 @@ def list_items():
         clinic_id = _get_current_clinic_id()
 
         filters = InventoryItemFilterSchema.model_validate(
-            _query_without("clinic_id")
+            _query_params()
         )
 
-        items = list_inventory_items(
+        pagination = list_inventory_items(
             clinic_id=clinic_id,
             category=filters.category,
             low_stock_only=filters.low_stock_only,
             include_inactive=filters.include_inactive,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            InventoryItemListResponseSchema,
+            InventoryItemResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventoryItemResponseSchema,
-                    items,
-                ),
+                "data": data,
             }
         ), 200
 
@@ -401,21 +429,33 @@ def list_items():
 )
 def low_stock_items():
     try:
+        query = InventoryItemFilterSchema.model_validate(
+            _query_params()
+        )
+
         clinic_id = _get_current_clinic_id()
 
-        items = get_low_stock_items(
+        pagination = get_low_stock_items(
             clinic_id=clinic_id,
+            page=query.page,
+            per_page=query.per_page,
+        )
+
+        data = _serialize_page(
+            InventoryItemListResponseSchema,
+            InventoryItemResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventoryItemResponseSchema,
-                    items,
-                ),
+                "data": data,
             }
         ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_response(exc)
 
     except (
         ValidationError,
@@ -476,16 +516,16 @@ def create_item():
         clinic_id = _get_current_clinic_id()
         staff_id = _get_current_staff_id()
 
-        item_data = payload.model_dump(
-            exclude_unset=True
-        )
-
-        # JWT-derived tenant and actor identity are authoritative.
-        item_data["clinic_id"] = clinic_id
-        item_data["performed_by_id"] = staff_id
-
         item = create_inventory_item(
-            **item_data
+            clinic_id=clinic_id,
+            name=payload.name,
+            category=payload.category,
+            initial_quantity=payload.initial_quantity,
+            performed_by_id=staff_id,
+            sku=payload.sku,
+            barcode=payload.barcode,
+            unit=payload.unit,
+            reorder_level=payload.reorder_level,
         )
 
         return jsonify(
@@ -550,7 +590,9 @@ def update_item(
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/items/<int:item_id>/deactivate")
+@inventory_bp.post(
+    "/items/<int:item_id>/deactivate"
+)
 @role_required(Role.ADMIN)
 def deactivate_item(
     item_id: int,
@@ -581,7 +623,9 @@ def deactivate_item(
         return _service_error_response(exc)
 
 
-@inventory_bp.post("/items/<int:item_id>/reactivate")
+@inventory_bp.post(
+    "/items/<int:item_id>/reactivate"
+)
 @role_required(Role.ADMIN)
 def reactivate_item(
     item_id: int,
@@ -616,7 +660,9 @@ def reactivate_item(
 # INVENTORY BATCHES
 # ============================================================================
 
-@inventory_bp.get("/items/<int:item_id>/batches")
+@inventory_bp.get(
+    "/items/<int:item_id>/batches"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -625,25 +671,30 @@ def list_batches(
     item_id: int,
 ):
     try:
-        clinic_id = _get_current_clinic_id()
-
         filters = InventoryBatchFilterSchema.model_validate(
-            _query_without("clinic_id")
+            _query_params()
         )
 
-        batches = list_inventory_batches(
+        clinic_id = _get_current_clinic_id()
+
+        pagination = list_inventory_batches(
             item_id=item_id,
             clinic_id=clinic_id,
             include_inactive=filters.include_inactive,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            InventoryBatchListResponseSchema,
+            InventoryBatchResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventoryBatchResponseSchema,
-                    batches,
-                ),
+                "data": data,
             }
         ), 200
 
@@ -658,7 +709,9 @@ def list_batches(
         return _service_error_response(exc)
 
 
-@inventory_bp.get("/batches/<int:batch_id>")
+@inventory_bp.get(
+    "/batches/<int:batch_id>"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -708,16 +761,13 @@ def create_batch():
     try:
         clinic_id = _get_current_clinic_id()
 
-        batch_data = payload.model_dump(
-            exclude_unset=True
-        )
-
-        # InventoryBatch derives tenancy through its item.
-        # The compatibility clinic_id is forced to JWT clinic.
-        batch_data["clinic_id"] = clinic_id
-
         batch = create_inventory_batch(
-            **batch_data
+            item_id=payload.item_id,
+            batch_number=payload.batch_number,
+            unit_cost=payload.unit_cost,
+            expiry_date=payload.expiry_date,
+            supplier_id=payload.supplier_id,
+            clinic_id=clinic_id,
         )
 
         return jsonify(
@@ -738,7 +788,9 @@ def create_batch():
         return _service_error_response(exc)
 
 
-@inventory_bp.patch("/batches/<int:batch_id>")
+@inventory_bp.patch(
+    "/batches/<int:batch_id>"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -782,31 +834,38 @@ def update_batch(
         return _service_error_response(exc)
 
 
-@inventory_bp.get("/batches/expiring")
+@inventory_bp.get(
+    "/batches/expiring"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
 )
 def expiring_batches():
     try:
-        clinic_id = _get_current_clinic_id()
-
         filters = ExpiringInventoryBatchQuerySchema.model_validate(
-            _query_without("clinic_id")
+            _query_params()
         )
 
-        batches = list_expiring_inventory_batches(
+        clinic_id = _get_current_clinic_id()
+
+        pagination = list_expiring_inventory_batches(
             clinic_id=clinic_id,
             days=filters.days,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            ExpiringInventoryBatchListResponseSchema,
+            InventoryBatchResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventoryBatchResponseSchema,
-                    batches,
-                ),
+                "data": data,
             }
         ), 200
 
@@ -825,7 +884,9 @@ def expiring_batches():
 # STOCK MOVEMENTS
 # ============================================================================
 
-@inventory_bp.get("/items/<int:item_id>/movements")
+@inventory_bp.get(
+    "/items/<int:item_id>/movements"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -834,22 +895,34 @@ def list_movements(
     item_id: int,
 ):
     try:
+        filters = StockMovementFilterSchema.model_validate(
+            _query_params()
+        )
+
         clinic_id = _get_current_clinic_id()
 
-        movements = get_stock_movements(
+        pagination = get_stock_movements(
             item_id=item_id,
             clinic_id=clinic_id,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            StockMovementListResponseSchema,
+            StockMovementResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    StockMovementResponseSchema,
-                    movements,
-                ),
+                "data": data,
             }
         ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_response(exc)
 
     except (
         ValidationError,
@@ -876,16 +949,16 @@ def create_movement():
         clinic_id = _get_current_clinic_id()
         staff_id = _get_current_staff_id()
 
-        movement_data = payload.model_dump(
-            exclude_unset=True
-        )
-
-        # JWT-derived tenant and actor identity are authoritative.
-        movement_data["clinic_id"] = clinic_id
-        movement_data["performed_by_id"] = staff_id
-
         movement = record_stock_movement(
-            **movement_data
+            item_id=payload.item_id,
+            movement_type=payload.movement_type,
+            quantity=payload.quantity,
+            performed_by_id=staff_id,
+            batch_id=payload.batch_id,
+            reason=payload.reason,
+            reference_type=payload.reference_type,
+            reference_id=payload.reference_id,
+            clinic_id=clinic_id,
         )
 
         return jsonify(
@@ -917,24 +990,29 @@ def create_movement():
 )
 def list_inventory_suppliers():
     try:
-        clinic_id = _get_current_clinic_id()
-
         filters = InventorySupplierFilterSchema.model_validate(
-            _query_without("clinic_id")
+            _query_params()
         )
 
-        suppliers = list_suppliers(
+        clinic_id = _get_current_clinic_id()
+
+        pagination = list_suppliers(
             clinic_id=clinic_id,
             include_inactive=filters.include_inactive,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            InventorySupplierListResponseSchema,
+            InventorySupplierResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventorySupplierResponseSchema,
-                    suppliers,
-                ),
+                "data": data,
             }
         ), 200
 
@@ -949,7 +1027,9 @@ def list_inventory_suppliers():
         return _service_error_response(exc)
 
 
-@inventory_bp.get("/suppliers/<int:supplier_id>")
+@inventory_bp.get(
+    "/suppliers/<int:supplier_id>"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -997,47 +1077,19 @@ def create_inventory_supplier():
         return error
 
     try:
-        supplier_data = payload.model_dump(
-            exclude_unset=True
-        )
-
-        current_clinic_id = _get_current_clinic_id()
-
-        if "clinic_id" in payload.model_fields_set:
-            requested_clinic_id = payload.clinic_id
-
-            # Explicit null means global supplier.
-            # Only ADMIN may create one.
-            if requested_clinic_id is None:
-                user = _get_current_user()
-
-                if getattr(user, "role", None) != Role.ADMIN:
-                    raise ValidationError(
-                        "Only administrators can create "
-                        "global suppliers"
-                    )
-
-                supplier_data["clinic_id"] = None
-
-            elif requested_clinic_id != current_clinic_id:
-                raise ValidationError(
-                    "Requested clinic does not match "
-                    "the authenticated user's clinic"
-                )
-
-            else:
-                supplier_data["clinic_id"] = (
-                    current_clinic_id
-                )
-
-        else:
-            # Omitted clinic_id means the authenticated clinic.
-            supplier_data["clinic_id"] = (
-                current_clinic_id
-            )
+        clinic_id = _get_current_clinic_id()
 
         supplier = create_supplier(
-            **supplier_data
+            name=payload.name,
+            clinic_id=clinic_id,
+            contact_person=payload.contact_person,
+            phone=payload.phone,
+            email=(
+                str(payload.email)
+                if payload.email is not None
+                else None
+            ),
+            address=payload.address,
         )
 
         return jsonify(
@@ -1058,7 +1110,9 @@ def create_inventory_supplier():
         return _service_error_response(exc)
 
 
-@inventory_bp.patch("/suppliers/<int:supplier_id>")
+@inventory_bp.patch(
+    "/suppliers/<int:supplier_id>"
+)
 @role_required(Role.ADMIN)
 def update_inventory_supplier(
     supplier_id: int,
@@ -1073,12 +1127,21 @@ def update_inventory_supplier(
         if error:
             return error
 
+        fields = payload.model_dump(
+            exclude_unset=True
+        )
+
+        if "email" in fields:
+            fields["email"] = (
+                str(fields["email"])
+                if fields["email"] is not None
+                else None
+            )
+
         supplier = update_supplier(
             supplier_id=supplier_id,
             clinic_id=clinic_id,
-            **payload.model_dump(
-                exclude_unset=True
-            ),
+            **fields,
         )
 
         return jsonify(
@@ -1176,24 +1239,29 @@ def reactivate_inventory_supplier(
 )
 def list_transfers():
     try:
-        clinic_id = _get_current_clinic_id()
-
         filters = InventoryTransferFilterSchema.model_validate(
-            _query_without("clinic_id")
+            _query_params()
         )
 
-        transfers = list_inventory_transfers(
+        clinic_id = _get_current_clinic_id()
+
+        pagination = list_inventory_transfers(
             clinic_id=clinic_id,
             status=filters.status,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+        data = _serialize_page(
+            InventoryTransferListResponseSchema,
+            InventoryTransferResponseSchema,
+            pagination,
         )
 
         return jsonify(
             {
                 "success": True,
-                "data": _serialize_many(
-                    InventoryTransferResponseSchema,
-                    transfers,
-                ),
+                "data": data,
             }
         ), 200
 
@@ -1261,31 +1329,16 @@ def create_transfer():
         clinic_id = _get_current_clinic_id()
         staff_id = _get_current_staff_id()
 
-        transfer_data = payload.model_dump(
-            exclude_unset=True
-        )
-
-        supplied_source_clinic_id = (
-            transfer_data.get(
-                "source_clinic_id"
-            )
-        )
-
-        if supplied_source_clinic_id != clinic_id:
-            raise ValidationError(
-                "Source clinic does not match "
-                "the authenticated user's clinic"
-            )
-
-        transfer_data["source_clinic_id"] = (
-            clinic_id
-        )
-        transfer_data["requested_by_id"] = (
-            staff_id
-        )
-
         transfer = create_inventory_transfer(
-            **transfer_data
+            item_id=payload.item_id,
+            source_clinic_id=clinic_id,
+            destination_clinic_id=(
+                payload.destination_clinic_id
+            ),
+            quantity=payload.quantity,
+            requested_by_id=staff_id,
+            batch_id=payload.batch_id,
+            reason=payload.reason,
         )
 
         return jsonify(
@@ -1323,8 +1376,6 @@ def approve_transfer(
     if error:
         return error
 
-    # Compatibility field is intentionally ignored.
-    # Actor identity comes from JWT.
     del payload
 
     try:
@@ -1333,8 +1384,8 @@ def approve_transfer(
 
         transfer = approve_inventory_transfer(
             transfer_id=transfer_id,
-            clinic_id=clinic_id,
             approved_by_id=staff_id,
+            clinic_id=clinic_id,
         )
 
         return jsonify(
@@ -1372,8 +1423,6 @@ def complete_transfer(
     if error:
         return error
 
-    # Compatibility field is intentionally ignored.
-    # Actor identity comes from JWT.
     del payload
 
     try:
@@ -1382,8 +1431,8 @@ def complete_transfer(
 
         transfer = complete_inventory_transfer(
             transfer_id=transfer_id,
-            clinic_id=clinic_id,
             performed_by_id=staff_id,
+            clinic_id=clinic_id,
         )
 
         return jsonify(
@@ -1427,9 +1476,9 @@ def cancel_transfer(
 
         transfer = cancel_inventory_transfer(
             transfer_id=transfer_id,
-            clinic_id=clinic_id,
             cancelled_by_id=staff_id,
             reason=payload.reason,
+            clinic_id=clinic_id,
         )
 
         return jsonify(

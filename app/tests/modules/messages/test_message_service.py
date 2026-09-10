@@ -16,16 +16,7 @@ from app.modules.messages.models.message_model import Message
 from app.modules.messages.services import message_service as service
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def create_message_users(make_user, clinic):
-    """
-    Create distinct sender and recipient users in the same clinic.
-    """
-
     sender = make_user(
         clinic,
         email=f"sender-{clinic.id}@test.com",
@@ -40,18 +31,35 @@ def create_message_users(make_user, clinic):
 
 
 def assert_same_datetime(actual, expected):
-    """
-    Compare datetimes independent of timezone-awareness.
-
-    SQLite may return timezone-aware DateTime(timezone=True)
-    columns as naive datetime objects during tests.
-    """
-    assert actual.replace(tzinfo=None) == expected.replace(tzinfo=None)
+    assert actual.replace(tzinfo=None) == expected.replace(
+        tzinfo=None
+    )
 
 
-# ============================================================================
-# CREATE MESSAGE
-# ============================================================================
+def make_page(
+    items,
+    *,
+    total=None,
+    page=1,
+    per_page=50,
+):
+    return type(
+        "Pagination",
+        (),
+        {
+            "items": list(items),
+            "total": (
+                len(items)
+                if total is None
+                else total
+            ),
+            "page": page,
+            "per_page": per_page,
+        },
+    )()
+
+
+# CREATE
 
 
 def test_create_message_success(
@@ -137,6 +145,9 @@ def test_create_message_normalizes_body(
         ("clinic_id", True),
         ("sender_id", True),
         ("recipient_id", True),
+        ("clinic_id", "1"),
+        ("sender_id", "1"),
+        ("recipient_id", "1"),
     ],
 )
 def test_create_message_rejects_invalid_ids(
@@ -225,12 +236,8 @@ def test_create_message_rejects_cross_clinic_sender(
     make_clinic,
     make_user,
 ):
-    clinic_one = make_clinic(
-        name="Clinic One",
-    )
-    clinic_two = make_clinic(
-        name="Clinic Two",
-    )
+    clinic_one = make_clinic(name="Clinic One")
+    clinic_two = make_clinic(name="Clinic Two")
 
     sender = make_user(
         clinic_two,
@@ -255,12 +262,8 @@ def test_create_message_rejects_cross_clinic_recipient(
     make_clinic,
     make_user,
 ):
-    clinic_one = make_clinic(
-        name="Clinic One",
-    )
-    clinic_two = make_clinic(
-        name="Clinic Two",
-    )
+    clinic_one = make_clinic(name="Clinic One")
+    clinic_two = make_clinic(name="Clinic Two")
 
     sender = make_user(
         clinic_one,
@@ -354,6 +357,7 @@ def test_create_message_rejects_self_message(
         "",
         "   ",
         None,
+        123,
     ],
 )
 def test_create_message_rejects_invalid_subject(
@@ -382,6 +386,7 @@ def test_create_message_rejects_invalid_subject(
         "",
         "   ",
         None,
+        123,
     ],
 )
 def test_create_message_rejects_invalid_body(
@@ -533,9 +538,7 @@ def test_create_message_accepts_all_priorities(
     assert message.priority == priority
 
 
-# ============================================================================
 # REPLIES
-# ============================================================================
 
 
 def test_create_message_reply_success(
@@ -662,9 +665,7 @@ def test_create_message_rejects_reply_to_deleted_parent(
         )
 
 
-# ============================================================================
 # UPDATE
-# ============================================================================
 
 
 def test_update_message_subject(
@@ -949,9 +950,7 @@ def test_update_message_without_fields_returns_same_message(
     assert result.subject == message.subject
 
 
-# ============================================================================
 # INBOX
-# ============================================================================
 
 
 def test_get_inbox_returns_recipient_messages(
@@ -983,14 +982,17 @@ def test_get_inbox_returns_recipient_messages(
         subject="Other message",
     )
 
-    messages = service.get_inbox(
+    result = service.get_inbox(
         user_id=recipient.id,
         clinic_id=clinic.id,
     )
 
-    assert len(messages) == 1
-    assert messages[0].recipient_id == recipient.id
-    assert messages[0].subject == "Inbox message"
+    assert result.total == 1
+    assert result.page == 1
+    assert result.per_page == service.DEFAULT_PER_PAGE
+    assert len(result.items) == 1
+    assert result.items[0].recipient_id == recipient.id
+    assert result.items[0].subject == "Inbox message"
 
 
 def test_get_inbox_unread_only(
@@ -1019,14 +1021,15 @@ def test_get_inbox_unread_only(
         read_at=datetime.now(timezone.utc),
     )
 
-    messages = service.get_inbox(
+    result = service.get_inbox(
         user_id=recipient.id,
         clinic_id=clinic.id,
         unread_only=True,
     )
 
-    assert len(messages) == 1
-    assert messages[0].subject == "Unread"
+    assert result.total == 1
+    assert len(result.items) == 1
+    assert result.items[0].subject == "Unread"
 
 
 def test_get_inbox_excludes_deleted_messages(
@@ -1054,13 +1057,14 @@ def test_get_inbox_excludes_deleted_messages(
         deleted_at=datetime.now(timezone.utc),
     )
 
-    messages = service.get_inbox(
+    result = service.get_inbox(
         user_id=recipient.id,
         clinic_id=clinic.id,
     )
 
-    assert len(messages) == 1
-    assert messages[0].subject == "Visible"
+    assert result.total == 1
+    assert len(result.items) == 1
+    assert result.items[0].subject == "Visible"
 
 
 def test_get_inbox_is_tenant_isolated(
@@ -1095,18 +1099,204 @@ def test_get_inbox_is_tenant_isolated(
         subject="Clinic Two",
     )
 
-    messages = service.get_inbox(
+    result = service.get_inbox(
         user_id=recipient_one.id,
         clinic_id=clinic_one.id,
     )
 
-    assert len(messages) == 1
-    assert messages[0].subject == "Clinic One"
+    assert result.total == 1
+    assert result.items[0].subject == "Clinic One"
 
 
-# ============================================================================
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (1, 1),
+        (2, 2),
+        (3, 10),
+        (1, service.MAX_PER_PAGE),
+    ],
+)
+def test_get_inbox_accepts_valid_pagination(
+    clinic,
+    make_user,
+    make_message,
+    page,
+    per_page,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(4):
+        make_message(
+            clinic,
+            sender,
+            recipient,
+            subject=f"Message {index}",
+        )
+
+    result = service.get_inbox(
+        user_id=recipient.id,
+        clinic_id=clinic.id,
+        page=page,
+        per_page=per_page,
+    )
+
+    assert result.page == page
+    assert result.per_page == per_page
+    assert result.total == 4
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_get_inbox_rejects_invalid_pagination(
+    clinic,
+    make_user,
+    page,
+    per_page,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    with pytest.raises(ValidationError):
+        service.get_inbox(
+            user_id=recipient.id,
+            clinic_id=clinic.id,
+            page=page,
+            per_page=per_page,
+        )
+
+
+def test_get_inbox_returns_empty_last_page(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(3):
+        make_message(
+            clinic,
+            sender,
+            recipient,
+            subject=f"Message {index}",
+        )
+
+    result = service.get_inbox(
+        user_id=recipient.id,
+        clinic_id=clinic.id,
+        page=2,
+        per_page=5,
+    )
+
+    assert result.total == 3
+    assert result.page == 2
+    assert result.per_page == 5
+    assert result.items == []
+
+
+def test_get_inbox_orders_newest_first(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    older = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Older",
+        created_at=now,
+    )
+
+    newer = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Newer",
+        created_at=now + timedelta(minutes=1),
+    )
+
+    result = service.get_inbox(
+        user_id=recipient.id,
+        clinic_id=clinic.id,
+    )
+
+    assert [
+        message.id
+        for message in result.items
+    ] == [
+        newer.id,
+        older.id,
+    ]
+
+
+def test_get_inbox_uses_id_as_deterministic_tiebreaker(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    timestamp = datetime.now(timezone.utc)
+
+    first = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="First",
+        created_at=timestamp,
+    )
+
+    second = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Second",
+        created_at=timestamp,
+    )
+
+    result = service.get_inbox(
+        user_id=recipient.id,
+        clinic_id=clinic.id,
+    )
+
+    assert [
+        message.id
+        for message in result.items
+    ] == sorted(
+        [first.id, second.id],
+        reverse=True,
+    )
+
+
 # SENT
-# ============================================================================
 
 
 def test_get_sent_messages_returns_sender_messages(
@@ -1138,14 +1328,15 @@ def test_get_sent_messages_returns_sender_messages(
         subject="Other",
     )
 
-    messages = service.get_sent_messages(
+    result = service.get_sent_messages(
         user_id=sender.id,
         clinic_id=clinic.id,
     )
 
-    assert len(messages) == 1
-    assert messages[0].sender_id == sender.id
-    assert messages[0].subject == "Sent"
+    assert result.total == 1
+    assert len(result.items) == 1
+    assert result.items[0].sender_id == sender.id
+    assert result.items[0].subject == "Sent"
 
 
 def test_get_sent_messages_excludes_deleted(
@@ -1173,18 +1364,163 @@ def test_get_sent_messages_excludes_deleted(
         deleted_at=datetime.now(timezone.utc),
     )
 
-    messages = service.get_sent_messages(
+    result = service.get_sent_messages(
         user_id=sender.id,
         clinic_id=clinic.id,
     )
 
-    assert len(messages) == 1
-    assert messages[0].subject == "Visible"
+    assert result.total == 1
+    assert len(result.items) == 1
+    assert result.items[0].subject == "Visible"
 
 
-# ============================================================================
-# SINGLE MESSAGE ACCESS
-# ============================================================================
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (1, 1),
+        (2, 2),
+        (3, 10),
+        (1, service.MAX_PER_PAGE),
+    ],
+)
+def test_get_sent_messages_accepts_valid_pagination(
+    clinic,
+    make_user,
+    make_message,
+    page,
+    per_page,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(4):
+        make_message(
+            clinic,
+            sender,
+            recipient,
+            subject=f"Message {index}",
+        )
+
+    result = service.get_sent_messages(
+        user_id=sender.id,
+        clinic_id=clinic.id,
+        page=page,
+        per_page=per_page,
+    )
+
+    assert result.page == page
+    assert result.per_page == per_page
+    assert result.total == 4
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_get_sent_messages_rejects_invalid_pagination(
+    clinic,
+    make_user,
+    page,
+    per_page,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    with pytest.raises(ValidationError):
+        service.get_sent_messages(
+            user_id=sender.id,
+            clinic_id=clinic.id,
+            page=page,
+            per_page=per_page,
+        )
+
+
+def test_get_sent_messages_returns_empty_last_page(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(3):
+        make_message(
+            clinic,
+            sender,
+            recipient,
+            subject=f"Message {index}",
+        )
+
+    result = service.get_sent_messages(
+        user_id=sender.id,
+        clinic_id=clinic.id,
+        page=2,
+        per_page=5,
+    )
+
+    assert result.total == 3
+    assert result.page == 2
+    assert result.per_page == 5
+    assert result.items == []
+
+
+def test_get_sent_messages_orders_newest_first(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    older = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Older",
+        created_at=now,
+    )
+
+    newer = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Newer",
+        created_at=now + timedelta(minutes=1),
+    )
+
+    result = service.get_sent_messages(
+        user_id=sender.id,
+        clinic_id=clinic.id,
+    )
+
+    assert [
+        message.id
+        for message in result.items
+    ] == [
+        newer.id,
+        older.id,
+    ]
+
+
+# SINGLE MESSAGE
 
 
 def test_get_message_for_sender(
@@ -1291,9 +1627,7 @@ def test_get_message_for_user_rejects_deleted_message(
         )
 
 
-# ============================================================================
 # MARK READ
-# ============================================================================
 
 
 def test_mark_message_read_success(
@@ -1376,9 +1710,7 @@ def test_mark_message_read_is_idempotent(
     )
 
 
-# ============================================================================
 # ARCHIVE
-# ============================================================================
 
 
 def test_archive_message_success(
@@ -1522,9 +1854,7 @@ def test_archive_message_rejects_deleted_message(
         )
 
 
-# ============================================================================
-# SOFT DELETE
-# ============================================================================
+# DELETE
 
 
 def test_delete_message_soft_deletes_record(
@@ -1646,9 +1976,7 @@ def test_delete_message_is_idempotent(
     )
 
 
-# ============================================================================
 # THREADS
-# ============================================================================
 
 
 def test_get_message_thread_returns_root(
@@ -1668,13 +1996,19 @@ def test_get_message_thread_returns_root(
         subject="Root",
     )
 
-    thread = service.get_message_thread(
+    result = service.get_message_thread(
         root.id,
         sender.id,
         clinic.id,
     )
 
-    assert [message.id for message in thread] == [
+    assert result.total == 1
+    assert result.page == 1
+    assert result.per_page == service.DEFAULT_PER_PAGE
+    assert [
+        message.id
+        for message in result.items
+    ] == [
         root.id,
     ]
 
@@ -1712,13 +2046,17 @@ def test_get_message_thread_returns_full_chain(
         parent_message=reply_one,
     )
 
-    thread = service.get_message_thread(
+    result = service.get_message_thread(
         reply_two.id,
         sender.id,
         clinic.id,
     )
 
-    assert [message.id for message in thread] == [
+    assert result.total == 3
+    assert [
+        message.id
+        for message in result.items
+    ] == [
         root.id,
         reply_one.id,
         reply_two.id,
@@ -1759,13 +2097,16 @@ def test_get_message_thread_excludes_deleted_messages(
         parent_message=root,
     )
 
-    thread = service.get_message_thread(
+    result = service.get_message_thread(
         root.id,
         sender.id,
         clinic.id,
     )
 
-    ids = [message.id for message in thread]
+    ids = [
+        message.id
+        for message in result.items
+    ]
 
     assert root.id in ids
     assert visible_reply.id in ids
@@ -1833,12 +2174,7 @@ def test_get_message_thread_rejects_cross_clinic_access(
         )
 
 
-# ============================================================================
-# ORDERING
-# ============================================================================
-
-
-def test_get_inbox_orders_newest_first(
+def test_get_message_thread_supports_pagination(
     clinic,
     make_user,
     make_message,
@@ -1848,30 +2184,225 @@ def test_get_inbox_orders_newest_first(
         clinic,
     )
 
-    now = datetime.now(timezone.utc)
-
-    older = make_message(
+    root = make_message(
         clinic,
         sender,
         recipient,
-        subject="Older",
-        created_at=now,
+        subject="Root",
     )
 
-    newer = make_message(
+    previous = root
+
+    for index in range(1, 5):
+        current_sender = (
+            recipient
+            if index % 2
+            else sender
+        )
+        current_recipient = (
+            sender
+            if index % 2
+            else recipient
+        )
+
+        previous = make_message(
+            clinic,
+            current_sender,
+            current_recipient,
+            subject=f"Reply {index}",
+            parent_message=previous,
+        )
+
+    result = service.get_message_thread(
+        root.id,
+        sender.id,
+        clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result.total == 5
+    assert result.page == 2
+    assert result.per_page == 2
+    assert len(result.items) == 2
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_get_message_thread_rejects_invalid_pagination(
+    clinic,
+    make_user,
+    make_message,
+    page,
+    per_page,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    root = make_message(
         clinic,
         sender,
         recipient,
-        subject="Newer",
-        created_at=now + timedelta(minutes=1),
     )
 
-    messages = service.get_inbox(
-        user_id=recipient.id,
-        clinic_id=clinic.id,
+    with pytest.raises(ValidationError):
+        service.get_message_thread(
+            root.id,
+            sender.id,
+            clinic.id,
+            page=page,
+            per_page=per_page,
+        )
+
+
+def test_get_message_thread_returns_empty_last_page(
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
     )
 
-    assert [message.id for message in messages] == [
-        newer.id,
-        older.id,
-    ]
+    root = make_message(
+        clinic,
+        sender,
+        recipient,
+        subject="Root",
+    )
+
+    make_message(
+        clinic,
+        recipient,
+        sender,
+        subject="Reply",
+        parent_message=root,
+    )
+
+    result = service.get_message_thread(
+        root.id,
+        sender.id,
+        clinic.id,
+        page=2,
+        per_page=5,
+    )
+
+    assert result.total == 2
+    assert result.page == 2
+    assert result.per_page == 5
+    assert result.items == []
+
+
+# VALIDATION / HELPERS
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0,
+        -1,
+        None,
+        "1",
+        1.5,
+        True,
+        False,
+        [],
+        {},
+    ],
+)
+def test_validate_positive_id_rejects_invalid_values(
+    value,
+):
+    with pytest.raises(ValidationError):
+        service._validate_positive_id(
+            value,
+            "Message ID",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1,
+        2,
+        999,
+    ],
+)
+def test_validate_positive_id_returns_valid_value(
+    value,
+):
+    assert (
+        service._validate_positive_id(
+            value,
+            "Message ID",
+        )
+        == value
+    )
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (True, 50),
+        ("1", 50),
+        (1, 0),
+        (1, -1),
+        (1, True),
+        (1, "50"),
+        (1, service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_validate_pagination_rejects_invalid_values(
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        service._validate_pagination(
+            page,
+            per_page,
+        )
+
+
+def test_validate_pagination_returns_valid_values():
+    assert service._validate_pagination(
+        2,
+        100,
+    ) == (
+        2,
+        100,
+    )
+
+
+def test_get_message_rejects_invalid_message_id(
+    clinic,
+):
+    with pytest.raises(ValidationError):
+        service._get_message(
+            0,
+            clinic_id=clinic.id,
+        )
+
+
+def test_get_user_rejects_invalid_user_id(
+    clinic,
+):
+    with pytest.raises(ValidationError):
+        service._get_user(
+            0,
+            clinic_id=clinic.id,
+        )

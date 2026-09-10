@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
+
+from sqlalchemy import and_, func, or_, select
 
 from app.extensions import db
 
@@ -29,13 +31,107 @@ from app.modules.staff.models.staff_model import (
 )
 
 
-# ============================================================================
-# INTERNAL HELPERS
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+_EDITABLE_STAFF_FIELDS = {
+    "first_name",
+    "last_name",
+    "specialty",
+    "phone",
+    "email",
+    "hired_at",
+}
+
 
 def _utcnow() -> datetime:
-    """Return the current timezone-aware UTC datetime."""
     return datetime.now(timezone.utc)
+
+
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> int:
+    if isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        ) from exc
+
+    if value <= 0:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    return value
+
+
+def _validate_pagination(
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> tuple[int, int]:
+    page = _validate_positive_id(
+        page,
+        "page",
+    )
+
+    per_page = _validate_positive_id(
+        per_page,
+        "per_page",
+    )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+def _serialize_enum(value):
+    return (
+        value.value
+        if hasattr(value, "value")
+        else value
+    )
+
+
+def _normalize_decimal(
+    value,
+    field_name: str,
+) -> Decimal:
+    if isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a valid decimal"
+        )
+
+    if isinstance(value, Decimal):
+        result = value
+    else:
+        try:
+            result = Decimal(str(value))
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ValidationError(
+                f"{field_name} must be a valid decimal"
+            ) from exc
+
+    if not result.is_finite():
+        raise ValidationError(
+            f"{field_name} must be finite"
+        )
+
+    return result
 
 
 def _get_staff(
@@ -43,25 +139,32 @@ def _get_staff(
     clinic_id: Optional[int] = None,
     lock: bool = False,
 ) -> Staff:
-    """
-    Fetch a staff member.
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
 
-    When clinic_id is supplied, the lookup is tenant-scoped.
-    """
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
 
-    query = Staff.query.filter(
+    statement = select(Staff).where(
         Staff.id == staff_id,
     )
 
     if clinic_id is not None:
-        query = query.filter(
+        statement = statement.where(
             Staff.clinic_id == clinic_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    staff = query.first()
+    staff = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if staff is None:
         raise NotFoundError(
@@ -75,11 +178,6 @@ def get_staff(
     staff_id: int,
     clinic_id: Optional[int] = None,
 ) -> Staff:
-    """
-    Public staff lookup used by other services and routes.
-
-    Supplying clinic_id enforces tenant isolation.
-    """
     return _get_staff(
         staff_id=staff_id,
         clinic_id=clinic_id,
@@ -90,9 +188,10 @@ def _get_user(
     user_id: int,
     clinic_id: Optional[int] = None,
 ) -> User:
-    """
-    Fetch a user and optionally enforce clinic ownership.
-    """
+    user_id = _validate_positive_id(
+        user_id,
+        "user_id",
+    )
 
     user = db.session.get(
         User,
@@ -104,7 +203,10 @@ def _get_user(
             f"User {user_id} not found"
         )
 
-    if clinic_id is not None and user.clinic_id != clinic_id:
+    if (
+        clinic_id is not None
+        and user.clinic_id != clinic_id
+    ):
         raise NotFoundError(
             f"User {user_id} not found"
         )
@@ -112,13 +214,13 @@ def _get_user(
     return user
 
 
-def _ensure_active_clinic(clinic_id: int) -> None:
-    """
-    Ensure the clinic exists and is active.
-
-    Kept intentionally lightweight here so the Staff service does not
-    introduce a circular dependency on clinic_service.
-    """
+def _ensure_active_clinic(
+    clinic_id: int,
+) -> None:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     from app.modules.clinic.models.clinic_model import Clinic
 
@@ -134,72 +236,128 @@ def _ensure_active_clinic(clinic_id: int) -> None:
 
     status = clinic.status
 
-    if getattr(status, "value", status) != "active":
+    if getattr(
+        status,
+        "value",
+        status,
+    ) != "active":
         raise ConflictError(
             f"Clinic {clinic_id} is not active"
         )
 
 
-def _serialize_enum(value):
-    return (
-        value.value
-        if hasattr(value, "value")
-        else value
+def _paginate_statement(
+    statement,
+    count_statement,
+    page: int,
+    per_page: int,
+) -> dict:
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
     )
 
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
 
-# ============================================================================
-# STAFF
-# ============================================================================
+    items = list(
+        db.session.execute(
+            statement
+            .offset(
+                (page - 1) * per_page
+            )
+            .limit(per_page)
+        ).scalars()
+    )
 
-_EDITABLE_STAFF_FIELDS = {
-    "first_name",
-    "last_name",
-    "specialty",
-    "phone",
-    "email",
-    "hired_at",
-}
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 def list_staff(
     clinic_id: int,
     status: StaffStatus | None = None,
     search: str | None = None,
-) -> list[Staff]:
-    """
-    List staff belonging only to the requested clinic.
-    """
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    query = Staff.query.filter(
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = select(Staff).where(
+        Staff.clinic_id == clinic_id,
+    )
+
+    count_statement = select(
+        func.count(Staff.id)
+    ).where(
         Staff.clinic_id == clinic_id,
     )
 
     if status is not None:
-        query = query.filter(
+        if not isinstance(
+            status,
+            StaffStatus,
+        ):
+            raise ValidationError(
+                "Invalid staff status"
+            )
+
+        statement = statement.where(
             Staff.status == status,
         )
 
-    if search:
+        count_statement = count_statement.where(
+            Staff.status == status,
+        )
+
+    if search is not None:
+        if not isinstance(search, str):
+            raise ValidationError(
+                "search must be a string"
+            )
+
         search_value = search.strip()
 
         if search_value:
             like = f"%{search_value}%"
 
-            query = query.filter(
-                db.or_(
-                    Staff.first_name.ilike(like),
-                    Staff.last_name.ilike(like),
-                )
+            search_filter = or_(
+                Staff.first_name.ilike(like),
+                Staff.last_name.ilike(like),
             )
 
-    return (
-        query
-        .order_by(
-            Staff.last_name.asc(),
-            Staff.first_name.asc(),
-        )
-        .all()
+            statement = statement.where(
+                search_filter
+            )
+
+            count_statement = count_statement.where(
+                search_filter
+            )
+
+    statement = statement.order_by(
+        Staff.last_name.asc(),
+        Staff.first_name.asc(),
+        Staff.id.asc(),
+    )
+
+    return _paginate_statement(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -214,40 +372,55 @@ def create_staff(
     email=None,
     hired_at=None,
 ) -> Staff:
-    """
-    Create a staff profile inside the authenticated clinic.
-    """
+    _ensure_active_clinic(
+        clinic_id
+    )
 
-    _ensure_active_clinic(clinic_id)
-
-    if not first_name or not first_name.strip():
+    if (
+        not isinstance(first_name, str)
+        or not first_name.strip()
+    ):
         raise ValidationError(
             "First name is required"
         )
 
-    if not last_name or not last_name.strip():
+    if (
+        not isinstance(last_name, str)
+        or not last_name.strip()
+    ):
         raise ValidationError(
             "Last name is required"
         )
 
     if user_id is not None:
+        user_id = _validate_positive_id(
+            user_id,
+            "user_id",
+        )
+
         user = _get_user(
             user_id=user_id,
             clinic_id=clinic_id,
         )
 
-        if not getattr(user, "is_active", True):
+        if not getattr(
+            user,
+            "is_active",
+            True,
+        ):
             raise ValidationError(
                 "User account is inactive"
             )
 
-        existing = Staff.query.filter(
-            Staff.user_id == user_id,
-        ).first()
+        existing = db.session.execute(
+            select(Staff.id).where(
+                Staff.user_id == user_id,
+            )
+        ).scalar_one_or_none()
 
         if existing is not None:
             raise ConflictError(
-                f"User {user_id} is already linked to staff {existing.id}"
+                f"User {user_id} is already linked to staff {existing}"
             )
 
     staff = Staff(
@@ -270,7 +443,8 @@ def create_staff(
         entity_type="Staff",
         entity_id=staff.id,
         description=(
-            f"Staff '{staff.first_name} {staff.last_name}' created"
+            f"Staff '{staff.first_name} "
+            f"{staff.last_name}' created"
         ),
         user_id=None,
         new_value={
@@ -290,14 +464,9 @@ def update_staff(
     clinic_id: int,
     **fields,
 ) -> Staff:
-    """
-    Update clinic-owned staff fields.
-
-    Clinic ID is mandatory so an authenticated clinic cannot update
-    another clinic's staff member.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    _ensure_active_clinic(
+        clinic_id
+    )
 
     staff = _get_staff(
         staff_id=staff_id,
@@ -325,16 +494,15 @@ def update_staff(
             key,
         )
 
-        if current_value == new_value_raw:
-            continue
-
         if key in {
             "first_name",
             "last_name",
         }:
             if (
                 new_value_raw is None
-                or not str(new_value_raw).strip()
+                or not str(
+                    new_value_raw
+                ).strip()
             ):
                 raise ValidationError(
                     f"{key.replace('_', ' ').title()} is required"
@@ -343,6 +511,12 @@ def update_staff(
             new_value_raw = str(
                 new_value_raw
             ).strip()
+
+        if (
+            current_value
+            == new_value_raw
+        ):
+            continue
 
         old_value[key] = _serialize_enum(
             current_value
@@ -380,11 +554,17 @@ def change_staff_status(
     clinic_id: int,
     new_status: StaffStatus,
 ) -> Staff:
-    """
-    Change staff status inside the authenticated clinic.
-    """
+    _ensure_active_clinic(
+        clinic_id
+    )
 
-    _ensure_active_clinic(clinic_id)
+    if not isinstance(
+        new_status,
+        StaffStatus,
+    ):
+        raise ValidationError(
+            "Invalid staff status"
+        )
 
     staff = _get_staff(
         staff_id=staff_id,
@@ -420,40 +600,44 @@ def change_staff_status(
     return staff
 
 
-# ============================================================================
-# LEAVE REQUESTS
-# ============================================================================
-
 def _get_leave_request(
     leave_id: int,
     clinic_id: Optional[int] = None,
     lock: bool = False,
 ) -> LeaveRequest:
-    """
-    Fetch a leave request through its Staff relationship so that
-    clinic isolation is enforced.
-    """
+    leave_id = _validate_positive_id(
+        leave_id,
+        "leave_id",
+    )
 
-    query = (
-        LeaveRequest.query
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
+    statement = (
+        select(LeaveRequest)
         .join(
             Staff,
             Staff.id == LeaveRequest.staff_id,
         )
-        .filter(
+        .where(
             LeaveRequest.id == leave_id,
         )
     )
 
     if clinic_id is not None:
-        query = query.filter(
+        statement = statement.where(
             Staff.clinic_id == clinic_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    leave = query.first()
+    leave = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if leave is None:
         raise NotFoundError(
@@ -467,10 +651,6 @@ def get_leave_request(
     leave_id: int,
     clinic_id: Optional[int] = None,
 ) -> LeaveRequest:
-    """
-    Public clinic-scoped leave lookup.
-    """
-
     return _get_leave_request(
         leave_id=leave_id,
         clinic_id=clinic_id,
@@ -481,39 +661,92 @@ def list_leave_requests(
     clinic_id: int,
     staff_id: Optional[int] = None,
     status: LeaveStatus | None = None,
-) -> list[LeaveRequest]:
-    """
-    List leave requests belonging to a clinic.
-    """
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    query = (
-        LeaveRequest.query
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = (
+        select(LeaveRequest)
         .join(
             Staff,
             Staff.id == LeaveRequest.staff_id,
         )
-        .filter(
+        .where(
+            Staff.clinic_id == clinic_id,
+        )
+    )
+
+    count_statement = (
+        select(
+            func.count(
+                LeaveRequest.id
+            )
+        )
+        .join(
+            Staff,
+            Staff.id == LeaveRequest.staff_id,
+        )
+        .where(
             Staff.clinic_id == clinic_id,
         )
     )
 
     if staff_id is not None:
-        query = query.filter(
+        staff_id = _validate_positive_id(
+            staff_id,
+            "staff_id",
+        )
+
+        _get_staff(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+        )
+
+        statement = statement.where(
+            LeaveRequest.staff_id == staff_id,
+        )
+
+        count_statement = count_statement.where(
             LeaveRequest.staff_id == staff_id,
         )
 
     if status is not None:
-        query = query.filter(
+        if not isinstance(
+            status,
+            LeaveStatus,
+        ):
+            raise ValidationError(
+                "Invalid leave status"
+            )
+
+        statement = statement.where(
             LeaveRequest.status == status,
         )
 
-    return (
-        query
-        .order_by(
-            LeaveRequest.start_date.desc(),
-            LeaveRequest.created_at.desc(),
+        count_statement = count_statement.where(
+            LeaveRequest.status == status,
         )
-        .all()
+
+    statement = statement.order_by(
+        LeaveRequest.start_date.desc(),
+        LeaveRequest.created_at.desc(),
+        LeaveRequest.id.desc(),
+    )
+
+    return _paginate_statement(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -523,25 +756,35 @@ def _has_overlapping_approved_leave(
     end_date: date,
     exclude_leave_id: Optional[int] = None,
 ) -> bool:
-    """
-    Check for another approved leave period overlapping the requested
-    dates.
-    """
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
 
-    query = LeaveRequest.query.filter(
+    statement = select(
+        LeaveRequest.id
+    ).where(
         LeaveRequest.staff_id == staff_id,
-        LeaveRequest.status == LeaveStatus.APPROVED,
+        LeaveRequest.status
+        == LeaveStatus.APPROVED,
         LeaveRequest.start_date <= end_date,
         LeaveRequest.end_date >= start_date,
     )
 
     if exclude_leave_id is not None:
-        query = query.filter(
+        exclude_leave_id = _validate_positive_id(
+            exclude_leave_id,
+            "exclude_leave_id",
+        )
+
+        statement = statement.where(
             LeaveRequest.id != exclude_leave_id,
         )
 
     return (
-        query.first()
+        db.session.execute(
+            statement.limit(1)
+        ).scalar_one_or_none()
         is not None
     )
 
@@ -556,11 +799,28 @@ def request_leave(
     end_date: date,
     reason: Optional[str] = None,
 ) -> LeaveRequest:
-    """
-    Create a leave request for the authenticated staff member.
-    """
+    _ensure_active_clinic(
+        clinic_id
+    )
 
-    _ensure_active_clinic(clinic_id)
+    if not isinstance(
+        leave_type,
+        LeaveType,
+    ):
+        raise ValidationError(
+            "Invalid leave type"
+        )
+
+    if not isinstance(
+        start_date,
+        date,
+    ) or not isinstance(
+        end_date,
+        date,
+    ):
+        raise ValidationError(
+            "Leave dates must be valid dates"
+        )
 
     staff = _get_staff(
         staff_id=staff_id,
@@ -590,12 +850,19 @@ def request_leave(
             "Inactive staff members cannot request leave"
         )
 
-    overlapping_pending = LeaveRequest.query.filter(
+    pending_statement = select(
+        LeaveRequest.id
+    ).where(
         LeaveRequest.staff_id == staff.id,
-        LeaveRequest.status == LeaveStatus.PENDING,
+        LeaveRequest.status
+        == LeaveStatus.PENDING,
         LeaveRequest.start_date <= end_date,
         LeaveRequest.end_date >= start_date,
-    ).first()
+    )
+
+    overlapping_pending = db.session.execute(
+        pending_statement.limit(1)
+    ).scalar_one_or_none()
 
     if overlapping_pending is not None:
         raise ConflictError(
@@ -619,9 +886,11 @@ def request_leave(
         status=LeaveStatus.PENDING,
         start_date=start_date,
         end_date=end_date,
-        reason=reason.strip()
-        if isinstance(reason, str)
-        else reason,
+        reason=(
+            reason.strip()
+            if isinstance(reason, str)
+            else reason
+        ),
     )
 
     db.session.add(leave)
@@ -653,14 +922,9 @@ def approve_leave_request(
     clinic_id: int,
     reviewer_user_id: int,
 ) -> LeaveRequest:
-    """
-    Approve a pending leave request.
-
-    The operation is clinic-scoped and locked to prevent two
-    administrators from approving the same request concurrently.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    _ensure_active_clinic(
+        clinic_id
+    )
 
     leave = _get_leave_request(
         leave_id=leave_id,
@@ -713,7 +977,9 @@ def approve_leave_request(
     today = date.today()
 
     if (
-        leave.start_date <= today <= leave.end_date
+        leave.start_date
+        <= today
+        <= leave.end_date
     ):
         staff = _get_staff(
             staff_id=leave.staff_id,
@@ -751,11 +1017,9 @@ def reject_leave_request(
     reviewer_user_id: int,
     reason: Optional[str] = None,
 ) -> LeaveRequest:
-    """
-    Reject a pending leave request.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    _ensure_active_clinic(
+        clinic_id
+    )
 
     leave = _get_leave_request(
         leave_id=leave_id,
@@ -794,7 +1058,10 @@ def reject_leave_request(
         else reason
     )
 
-    if normalized_reason is not None and not normalized_reason:
+    if (
+        normalized_reason is not None
+        and not normalized_reason
+    ):
         raise ValidationError(
             "Rejection reason cannot be empty"
         )
@@ -806,12 +1073,17 @@ def reject_leave_request(
     leave.reviewed_at = _utcnow()
 
     if normalized_reason:
-        leave.reason = (
-            f"{leave.reason}\n"
-            f"Rejection note: {normalized_reason}"
-        ).strip() if leave.reason else (
-            f"Rejection note: {normalized_reason}"
-        )
+        if leave.reason:
+            leave.reason = (
+                f"{leave.reason}\n"
+                f"Rejection note: "
+                f"{normalized_reason}"
+            ).strip()
+        else:
+            leave.reason = (
+                f"Rejection note: "
+                f"{normalized_reason}"
+            )
 
     create_audit_log(
         action=AuditAction.STATUS_CHANGE,
@@ -836,89 +1108,94 @@ def reject_leave_request(
 
 
 def restore_staff_from_expired_leave() -> int:
-    """
-    Restore staff whose approved leave periods have ended.
-
-    Intended for scheduled execution.
-    """
-
     today = date.today()
 
-    on_leave_staff = (
-        Staff.query
-        .filter(
-            Staff.status == StaffStatus.ON_LEAVE,
+    approved_leave_exists = (
+        select(LeaveRequest.id)
+        .where(
+            LeaveRequest.staff_id == Staff.id,
+            LeaveRequest.status
+            == LeaveStatus.APPROVED,
+            LeaveRequest.start_date <= today,
+            LeaveRequest.end_date >= today,
         )
-        .all()
+        .exists()
+    )
+
+    statement = select(Staff).where(
+        Staff.status == StaffStatus.ON_LEAVE,
+        ~approved_leave_exists,
+    )
+
+    staff_list = list(
+        db.session.execute(
+            statement
+        ).scalars()
     )
 
     restored = 0
 
-    for staff in on_leave_staff:
-        still_on_leave = LeaveRequest.query.filter(
-            LeaveRequest.staff_id == staff.id,
-            LeaveRequest.status == LeaveStatus.APPROVED,
-            LeaveRequest.start_date <= today,
-            LeaveRequest.end_date >= today,
-        ).first()
+    for staff in staff_list:
+        old_status = staff.status.value
 
-        if still_on_leave is None:
-            old_status = staff.status.value
+        staff.status = StaffStatus.ACTIVE
+        restored += 1
 
-            staff.status = StaffStatus.ACTIVE
-            restored += 1
-
-            create_audit_log(
-                action=AuditAction.STATUS_CHANGE,
-                entity_type="Staff",
-                entity_id=staff.id,
-                description=(
-                    "Staff restored to active status "
-                    "after approved leave ended"
-                ),
-                old_value={
-                    "status": old_status,
-                },
-                new_value={
-                    "status": StaffStatus.ACTIVE.value,
-                },
-            )
+        create_audit_log(
+            action=AuditAction.STATUS_CHANGE,
+            entity_type="Staff",
+            entity_id=staff.id,
+            description=(
+                "Staff restored to active status "
+                "after approved leave ended"
+            ),
+            old_value={
+                "status": old_status,
+            },
+            new_value={
+                "status": StaffStatus.ACTIVE.value,
+            },
+        )
 
     db.session.commit()
 
     return restored
 
 
-# ============================================================================
-# PAYROLL
-# ============================================================================
-
 def get_payroll_record(
     record_id: int,
     clinic_id: Optional[int] = None,
 ) -> PayrollRecord:
-    """
-    Fetch payroll record through its staff member and enforce clinic
-    ownership when clinic_id is supplied.
-    """
+    record_id = _validate_positive_id(
+        record_id,
+        "record_id",
+    )
 
-    query = (
-        PayrollRecord.query
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
+    statement = (
+        select(PayrollRecord)
         .join(
             Staff,
             Staff.id == PayrollRecord.staff_id,
         )
-        .filter(
+        .where(
             PayrollRecord.id == record_id,
         )
     )
 
     if clinic_id is not None:
-        query = query.filter(
+        statement = statement.where(
             Staff.clinic_id == clinic_id,
         )
 
-    record = query.first()
+    record = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if record is None:
         raise NotFoundError(
@@ -930,49 +1207,97 @@ def get_payroll_record(
 
 def list_payroll(
     clinic_id: int,
-) -> list[PayrollRecord]:
-    """
-    List payroll records belonging to a clinic.
-    """
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    return (
-        PayrollRecord.query
+    statement = (
+        select(PayrollRecord)
         .join(
             Staff,
             Staff.id == PayrollRecord.staff_id,
         )
-        .filter(
+        .where(
             Staff.clinic_id == clinic_id,
         )
         .order_by(
             PayrollRecord.pay_period_start.desc(),
+            PayrollRecord.id.desc(),
         )
-        .all()
+    )
+
+    count_statement = (
+        select(
+            func.count(
+                PayrollRecord.id
+            )
+        )
+        .join(
+            Staff,
+            Staff.id == PayrollRecord.staff_id,
+        )
+        .where(
+            Staff.clinic_id == clinic_id,
+        )
+    )
+
+    return _paginate_statement(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
 def list_payroll_for_staff(
     clinic_id: int,
     staff_id: int,
-) -> list[PayrollRecord]:
-    """
-    List payroll records for a clinic-owned staff member.
-    """
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
 
     _get_staff(
         staff_id=staff_id,
         clinic_id=clinic_id,
     )
 
-    return (
-        PayrollRecord.query
-        .filter(
+    statement = (
+        select(PayrollRecord)
+        .where(
             PayrollRecord.staff_id == staff_id,
         )
         .order_by(
             PayrollRecord.pay_period_start.desc(),
+            PayrollRecord.id.desc(),
         )
-        .all()
+    )
+
+    count_statement = select(
+        func.count(
+            PayrollRecord.id
+        )
+    ).where(
+        PayrollRecord.staff_id == staff_id,
+    )
+
+    return _paginate_statement(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -986,11 +1311,9 @@ def create_payroll_record(
     bonuses: Decimal = Decimal("0"),
     deductions: Decimal = Decimal("0"),
 ) -> PayrollRecord:
-    """
-    Create a payroll record for clinic-owned staff.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    _ensure_active_clinic(
+        clinic_id
+    )
 
     staff = _get_staff(
         staff_id=staff_id,
@@ -998,14 +1321,36 @@ def create_payroll_record(
         lock=True,
     )
 
+    if not isinstance(
+        pay_period_start,
+        date,
+    ) or not isinstance(
+        pay_period_end,
+        date,
+    ):
+        raise ValidationError(
+            "Pay period dates must be valid dates"
+        )
+
     if pay_period_end < pay_period_start:
         raise ValidationError(
             "Pay period end cannot be before start"
         )
 
-    base_salary = Decimal(base_salary)
-    bonuses = Decimal(bonuses)
-    deductions = Decimal(deductions)
+    base_salary = _normalize_decimal(
+        base_salary,
+        "base_salary",
+    )
+
+    bonuses = _normalize_decimal(
+        bonuses,
+        "bonuses",
+    )
+
+    deductions = _normalize_decimal(
+        deductions,
+        "deductions",
+    )
 
     if base_salary < 0:
         raise ValidationError(
@@ -1033,11 +1378,19 @@ def create_payroll_record(
             "Net pay cannot be negative"
         )
 
-    duplicate = PayrollRecord.query.filter(
+    duplicate_statement = select(
+        PayrollRecord.id
+    ).where(
         PayrollRecord.staff_id == staff.id,
-        PayrollRecord.pay_period_start == pay_period_start,
-        PayrollRecord.pay_period_end == pay_period_end,
-    ).first()
+        PayrollRecord.pay_period_start
+        == pay_period_start,
+        PayrollRecord.pay_period_end
+        == pay_period_end,
+    )
+
+    duplicate = db.session.execute(
+        duplicate_statement.limit(1)
+    ).scalar_one_or_none()
 
     if duplicate is not None:
         raise ConflictError(
@@ -1092,59 +1445,106 @@ def generate_payroll_for_period(
     pay_period_end: date,
     salary_lookup: dict[int, Decimal],
 ) -> list[PayrollRecord]:
-    """
-    Generate payroll for active staff in a clinic.
+    _ensure_active_clinic(
+        clinic_id
+    )
 
-    salary_lookup maps staff IDs to base salaries.
-    Existing records for the same period are skipped.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    if not isinstance(
+        pay_period_start,
+        date,
+    ) or not isinstance(
+        pay_period_end,
+        date,
+    ):
+        raise ValidationError(
+            "Pay period dates must be valid dates"
+        )
 
     if pay_period_end < pay_period_start:
         raise ValidationError(
             "Pay period end cannot be before start"
         )
 
-    staff_list = list_staff(
-        clinic_id=clinic_id,
-        status=StaffStatus.ACTIVE,
+    if not isinstance(
+        salary_lookup,
+        dict,
+    ):
+        raise ValidationError(
+            "salary_lookup must be a dictionary"
+        )
+
+    normalized_salary_lookup: dict[
+        int,
+        Decimal,
+    ] = {}
+
+    for staff_id, salary in salary_lookup.items():
+        normalized_staff_id = _validate_positive_id(
+            staff_id,
+            "staff_id",
+        )
+
+        normalized_salary_lookup[
+            normalized_staff_id
+        ] = _normalize_decimal(
+            salary,
+            f"salary for staff {normalized_staff_id}",
+        )
+
+    staff_statement = select(Staff).where(
+        Staff.clinic_id == clinic_id,
+        Staff.status == StaffStatus.ACTIVE,
+    ).order_by(
+        Staff.id.asc()
+    )
+
+    staff_list = list(
+        db.session.execute(
+            staff_statement
+        ).scalars()
+    )
+
+    if not staff_list:
+        return []
+
+    staff_ids = [
+        staff.id
+        for staff in staff_list
+    ]
+
+    existing_statement = select(
+        PayrollRecord.staff_id
+    ).where(
+        PayrollRecord.staff_id.in_(staff_ids),
+        PayrollRecord.pay_period_start
+        == pay_period_start,
+        PayrollRecord.pay_period_end
+        == pay_period_end,
+    ).with_for_update()
+
+    existing_staff_ids = set(
+        db.session.execute(
+            existing_statement
+        ).scalars()
     )
 
     created: list[PayrollRecord] = []
-    skipped_staff_ids: list[int] = []
 
     for staff in staff_list:
-        base_salary = salary_lookup.get(
+        if staff.id in existing_staff_ids:
+            continue
+
+        base_salary = normalized_salary_lookup.get(
             staff.id
         )
 
         if base_salary is None:
-            skipped_staff_ids.append(
-                staff.id
-            )
             continue
-
-        base_salary = Decimal(
-            base_salary
-        )
 
         if base_salary < 0:
             raise ValidationError(
                 f"Base salary cannot be negative for staff {staff.id}"
             )
-
-        existing = PayrollRecord.query.filter(
-            PayrollRecord.staff_id == staff.id,
-            PayrollRecord.pay_period_start == pay_period_start,
-            PayrollRecord.pay_period_end == pay_period_end,
-        ).first()
-
-        if existing is not None:
-            skipped_staff_ids.append(
-                staff.id
-            )
-            continue
 
         record = PayrollRecord(
             staff_id=staff.id,
@@ -1191,11 +1591,9 @@ def mark_payroll_paid(
     record_id: int,
     clinic_id: int,
 ) -> PayrollRecord:
-    """
-    Mark a clinic-owned payroll record as paid.
-    """
-
-    _ensure_active_clinic(clinic_id)
+    _ensure_active_clinic(
+        clinic_id
+    )
 
     record = get_payroll_record(
         record_id=record_id,

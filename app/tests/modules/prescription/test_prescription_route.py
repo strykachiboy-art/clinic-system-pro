@@ -21,12 +21,22 @@ from app.modules.prescription.routes import prescription_routes
 # Helpers
 # ============================================================================
 
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(
+        timezone.utc
+    )
 
 
 def _future():
-    return _utcnow() + timedelta(days=30)
+    return (
+        _utcnow()
+        + timedelta(days=30)
+    )
 
 
 def _prescription_item(
@@ -75,7 +85,8 @@ def _prescription(
         notes=notes,
         issued_at=issued_at or _utcnow(),
         expires_at=expires_at,
-        items=items or [
+        items=items
+        or [
             _prescription_item(
                 prescription_id=prescription_id
             )
@@ -100,21 +111,50 @@ def _interaction(
     )
 
 
-def _json_headers(make_authenticated_staff, clinic, role):
+def _json_headers(
+    make_authenticated_staff,
+    clinic,
+    role,
+):
     staff, headers = make_authenticated_staff(
         clinic,
         role,
     )
 
-    headers = dict(headers)
-    headers["Content-Type"] = "application/json"
+    headers = dict(
+        headers
+    )
+
+    headers[
+        "Content-Type"
+    ] = "application/json"
 
     return headers, staff
+
+
+def _paginated(
+    items,
+    *,
+    total=None,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
+):
+    return {
+        "items": items,
+        "total": (
+            len(items)
+            if total is None
+            else total
+        ),
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 # ============================================================================
 # CREATE PRESCRIPTION
 # ============================================================================
+
 
 def test_create_prescription_success(
     client,
@@ -152,9 +192,7 @@ def test_create_prescription_success(
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 2,
-            "prescribed_by_id": staff.id,
             "consultation_id": 3,
             "items": [
                 {
@@ -182,8 +220,12 @@ def test_create_prescription_success(
     )
     assert body["data"]["id"] == prescription.id
     assert body["data"]["clinic_id"] == clinic.id
-    assert body["data"]["patient_id"] == prescription.patient_id
-    assert body["data"]["prescribed_by_id"] == staff.id
+    assert body["data"]["patient_id"] == (
+        prescription.patient_id
+    )
+    assert body["data"]["prescribed_by_id"] == (
+        staff.id
+    )
     assert body["data"]["status"] == "active"
     assert body["interaction_warnings"] == []
 
@@ -247,9 +289,7 @@ def test_create_prescription_returns_interaction_warnings(
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 2,
-            "prescribed_by_id": staff.id,
             "items": [
                 {"drug_id": 7},
                 {"drug_id": 8},
@@ -266,10 +306,11 @@ def test_create_prescription_returns_interaction_warnings(
     assert body["interaction_warnings"] == warnings
 
 
-def test_create_prescription_rejects_different_prescribing_staff(
+def test_create_prescription_does_not_require_client_prescriber_id(
     client,
     clinic,
     make_authenticated_staff,
+    monkeypatch,
 ):
     headers, staff = _json_headers(
         make_authenticated_staff,
@@ -277,12 +318,28 @@ def test_create_prescription_rejects_different_prescribing_staff(
         Role.DOCTOR,
     )
 
+    prescription = _prescription(
+        clinic_id=clinic.id,
+        prescribed_by_id=staff.id,
+    )
+
+    create_mock = Mock(
+        return_value=(
+            prescription,
+            [],
+        )
+    )
+
+    monkeypatch.setattr(
+        prescription_routes,
+        "create_prescription",
+        create_mock,
+    )
+
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 2,
-            "prescribed_by_id": staff.id + 999,
             "items": [
                 {"drug_id": 7},
             ],
@@ -290,14 +347,15 @@ def test_create_prescription_rejects_different_prescribing_staff(
         headers=headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
 
-    body = response.get_json()
+    create_mock.assert_called_once()
 
-    assert body["success"] is False
     assert (
-        "Authenticated doctor must be the prescribing staff member"
-        in body["error"]
+        create_mock.call_args.kwargs[
+            "prescribed_by_id"
+        ]
+        == staff.id
     )
 
 
@@ -336,6 +394,37 @@ def test_create_prescription_does_not_trust_client_clinic_id(
         json={
             "clinic_id": clinic.id + 999,
             "patient_id": 2,
+            "items": [
+                {"drug_id": 7},
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+    create_mock.assert_not_called()
+
+
+def test_create_prescription_rejects_client_prescribed_by_id(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, staff = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.post(
+        "/prescriptions",
+        json={
+            "patient_id": 2,
             "prescribed_by_id": staff.id,
             "items": [
                 {"drug_id": 7},
@@ -344,14 +433,41 @@ def test_create_prescription_does_not_trust_client_clinic_id(
         headers=headers,
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 422
 
-    create_mock.assert_called_once()
+    body = response.get_json()
 
-    assert (
-        create_mock.call_args.kwargs["clinic_id"]
-        == clinic.id
+    assert body["success"] is False
+
+
+def test_create_prescription_rejects_client_clinic_id(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
     )
+
+    response = client.post(
+        "/prescriptions",
+        json={
+            "clinic_id": clinic.id,
+            "patient_id": 2,
+            "items": [
+                {"drug_id": 7},
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
 
 
 def test_create_prescription_requires_object_json(
@@ -382,12 +498,12 @@ def test_create_prescription_requires_object_json(
     assert body["success"] is False
 
 
-def test_create_prescription_rejects_extra_fields(
+def test_create_prescription_rejects_extra_item_fields(
     client,
     clinic,
     make_authenticated_staff,
 ):
-    headers, staff = _json_headers(
+    headers, _ = _json_headers(
         make_authenticated_staff,
         clinic,
         Role.DOCTOR,
@@ -396,9 +512,7 @@ def test_create_prescription_rejects_extra_fields(
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 2,
-            "prescribed_by_id": staff.id,
             "items": [
                 {
                     "drug_id": 7,
@@ -416,9 +530,40 @@ def test_create_prescription_rejects_extra_fields(
     assert body["success"] is False
 
 
+def test_create_prescription_rejects_top_level_extra_fields(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.post(
+        "/prescriptions",
+        json={
+            "patient_id": 2,
+            "items": [
+                {"drug_id": 7},
+            ],
+            "unexpected": "forbidden",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+
 # ============================================================================
 # GET PRESCRIPTION
 # ============================================================================
+
 
 def test_get_prescription_success(
     client,
@@ -576,6 +721,7 @@ def test_get_prescription_not_found(
 # LIST PATIENT PRESCRIPTIONS
 # ============================================================================
 
+
 def test_list_patient_prescriptions_success(
     client,
     clinic,
@@ -601,7 +747,10 @@ def test_list_patient_prescriptions_success(
     ]
 
     list_mock = Mock(
-        return_value=prescriptions
+        return_value=_paginated(
+            prescriptions,
+            total=2,
+        )
     )
 
     monkeypatch.setattr(
@@ -620,12 +769,19 @@ def test_list_patient_prescriptions_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert len(body["data"]) == 2
+    assert len(
+        body["data"]["items"]
+    ) == 2
+    assert body["data"]["total"] == 2
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
 
     list_mock.assert_called_once_with(
         patient_id=2,
         clinic_id=clinic.id,
         active_only=False,
+        page=1,
+        per_page=50,
     )
 
 
@@ -642,7 +798,10 @@ def test_list_patient_prescriptions_active_only(
     )
 
     list_mock = Mock(
-        return_value=[]
+        return_value=_paginated(
+            [],
+            total=0,
+        )
     )
 
     monkeypatch.setattr(
@@ -658,14 +817,22 @@ def test_list_patient_prescriptions_active_only(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["items"] == []
+    assert body["data"]["total"] == 0
+
     list_mock.assert_called_once_with(
         patient_id=2,
         clinic_id=clinic.id,
         active_only=True,
+        page=1,
+        per_page=50,
     )
 
 
-def test_list_patient_prescriptions_active_only_is_case_insensitive(
+def test_list_patient_prescriptions_active_only_false(
     client,
     clinic,
     make_authenticated_staff,
@@ -678,7 +845,10 @@ def test_list_patient_prescriptions_active_only_is_case_insensitive(
     )
 
     list_mock = Mock(
-        return_value=[]
+        return_value=_paginated(
+            [],
+            total=0,
+        )
     )
 
     monkeypatch.setattr(
@@ -688,7 +858,113 @@ def test_list_patient_prescriptions_active_only_is_case_insensitive(
     )
 
     response = client.get(
-        "/prescriptions/patients/2?active_only=TRUE",
+        "/prescriptions/patients/2?active_only=false",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    list_mock.assert_called_once_with(
+        patient_id=2,
+        clinic_id=clinic.id,
+        active_only=False,
+        page=1,
+        per_page=50,
+    )
+
+
+def test_list_patient_prescriptions_supports_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    prescriptions = [
+        _prescription(
+            prescription_id=11,
+            clinic_id=clinic.id,
+        ),
+        _prescription(
+            prescription_id=12,
+            clinic_id=clinic.id,
+        ),
+    ]
+
+    list_mock = Mock(
+        return_value=_paginated(
+            prescriptions,
+            total=10,
+            page=3,
+            per_page=2,
+        )
+    )
+
+    monkeypatch.setattr(
+        prescription_routes,
+        "list_prescriptions_for_patient",
+        list_mock,
+    )
+
+    response = client.get(
+        "/prescriptions/patients/2?page=3&per_page=2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["items"]
+    assert body["data"]["total"] == 10
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 2
+
+    list_mock.assert_called_once_with(
+        patient_id=2,
+        clinic_id=clinic.id,
+        active_only=False,
+        page=3,
+        per_page=2,
+    )
+
+
+def test_list_patient_prescriptions_supports_combined_filters_and_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    list_mock = Mock(
+        return_value=_paginated(
+            [],
+            total=0,
+            page=4,
+            per_page=25,
+        )
+    )
+
+    monkeypatch.setattr(
+        prescription_routes,
+        "list_prescriptions_for_patient",
+        list_mock,
+    )
+
+    response = client.get(
+        "/prescriptions/patients/2"
+        "?active_only=true&page=4&per_page=25",
         headers=headers,
     )
 
@@ -698,12 +974,71 @@ def test_list_patient_prescriptions_active_only_is_case_insensitive(
         patient_id=2,
         clinic_id=clinic.id,
         active_only=True,
+        page=4,
+        per_page=25,
     )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "?page=0",
+        "?page=-1",
+        "?per_page=0",
+        "?per_page=501",
+    ],
+)
+def test_list_patient_prescriptions_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_authenticated_staff,
+    query,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.get(
+        f"/prescriptions/patients/2{query}",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+
+def test_list_patient_prescriptions_rejects_unknown_query_fields(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.get(
+        "/prescriptions/patients/2?unknown=value",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
 
 
 # ============================================================================
 # CANCEL
 # ============================================================================
+
 
 def test_cancel_prescription_success(
     client,
@@ -749,7 +1084,9 @@ def test_cancel_prescription_success(
     assert body["message"] == (
         "Prescription cancelled successfully"
     )
-    assert body["data"]["id"] == prescription.id
+    assert body["data"]["id"] == (
+        prescription.id
+    )
 
     cancel_mock.assert_called_once_with(
         prescription_id=prescription.id,
@@ -827,9 +1164,38 @@ def test_cancel_prescription_rejects_extra_fields(
     assert body["success"] is False
 
 
+def test_cancel_prescription_rejects_non_object_json(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.post(
+        "/prescriptions/1/cancel",
+        json=[
+            {
+                "reason": "Invalid body"
+            }
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+
 # ============================================================================
 # COMPLETE
 # ============================================================================
+
 
 def test_complete_prescription_success(
     client,
@@ -871,8 +1237,12 @@ def test_complete_prescription_success(
     assert body["message"] == (
         "Prescription completed successfully"
     )
-    assert body["data"]["id"] == prescription.id
-    assert body["data"]["status"] == "completed"
+    assert body["data"]["id"] == (
+        prescription.id
+    )
+    assert body["data"]["status"] == (
+        "completed"
+    )
 
     complete_mock.assert_called_once_with(
         prescription_id=prescription.id,
@@ -883,6 +1253,7 @@ def test_complete_prescription_success(
 # ============================================================================
 # DRUG INTERACTION CHECK
 # ============================================================================
+
 
 def test_check_drug_interactions_success(
     client,
@@ -918,7 +1289,10 @@ def test_check_drug_interactions_success(
     response = client.post(
         "/prescriptions/interactions/check",
         json={
-            "drug_ids": [7, 8],
+            "drug_ids": [
+                7,
+                8,
+            ],
         },
         headers=headers,
     )
@@ -928,12 +1302,20 @@ def test_check_drug_interactions_success(
     body = response.get_json()
 
     assert body["success"] is True
-    assert body["data"]["drug_ids"] == [7, 8]
+    assert body["data"]["drug_ids"] == [
+        7,
+        8,
+    ]
     assert body["data"]["has_interactions"] is True
-    assert body["data"]["interaction_warnings"] == warnings
+    assert body["data"]["interaction_warnings"] == (
+        warnings
+    )
 
     check_mock.assert_called_once_with(
-        drug_ids=[7, 8],
+        drug_ids=[
+            7,
+            8,
+        ],
         clinic_id=clinic.id,
     )
 
@@ -963,7 +1345,10 @@ def test_check_drug_interactions_no_interactions(
     response = client.post(
         "/prescriptions/interactions/check",
         json={
-            "drug_ids": [7, 8],
+            "drug_ids": [
+                7,
+                8,
+            ],
         },
         headers=headers,
     )
@@ -990,7 +1375,9 @@ def test_check_drug_interactions_requires_at_least_two_drugs(
     response = client.post(
         "/prescriptions/interactions/check",
         json={
-            "drug_ids": [7],
+            "drug_ids": [
+                7
+            ],
         },
         headers=headers,
     )
@@ -1016,7 +1403,10 @@ def test_check_drug_interactions_rejects_duplicate_drugs(
     response = client.post(
         "/prescriptions/interactions/check",
         json={
-            "drug_ids": [7, 7],
+            "drug_ids": [
+                7,
+                7,
+            ],
         },
         headers=headers,
     )
@@ -1042,7 +1432,40 @@ def test_check_drug_interactions_rejects_zero_id(
     response = client.post(
         "/prescriptions/interactions/check",
         json={
-            "drug_ids": [0, 7],
+            "drug_ids": [
+                0,
+                7,
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+
+def test_check_drug_interactions_rejects_extra_fields(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    response = client.post(
+        "/prescriptions/interactions/check",
+        json={
+            "drug_ids": [
+                7,
+                8,
+            ],
+            "clinic_id": clinic.id,
         },
         headers=headers,
     )
@@ -1057,6 +1480,7 @@ def test_check_drug_interactions_rejects_zero_id(
 # ============================================================================
 # CREATE DRUG INTERACTION
 # ============================================================================
+
 
 def test_create_drug_interaction_success(
     client,
@@ -1101,7 +1525,9 @@ def test_create_drug_interaction_success(
     assert body["message"] == (
         "Drug interaction created successfully"
     )
-    assert body["data"]["id"] == interaction.id
+    assert body["data"]["id"] == (
+        interaction.id
+    )
     assert body["data"]["drug_a_id"] == 7
     assert body["data"]["drug_b_id"] == 8
     assert body["data"]["severity"] == "severe"
@@ -1202,9 +1628,39 @@ def test_create_drug_interaction_rejects_extra_fields(
     assert body["success"] is False
 
 
+def test_create_drug_interaction_rejects_client_clinic_id(
+    client,
+    clinic,
+    make_authenticated_staff,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.ADMIN,
+    )
+
+    response = client.post(
+        "/prescriptions/interactions",
+        json={
+            "drug_a_id": 7,
+            "drug_b_id": 8,
+            "severity": "severe",
+            "clinic_id": clinic.id,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+
+
 # ============================================================================
 # ERROR PROPAGATION
 # ============================================================================
+
 
 def test_create_prescription_service_validation_error(
     client,
@@ -1212,7 +1668,7 @@ def test_create_prescription_service_validation_error(
     make_authenticated_staff,
     monkeypatch,
 ):
-    headers, staff = _json_headers(
+    headers, _ = _json_headers(
         make_authenticated_staff,
         clinic,
         Role.DOCTOR,
@@ -1231,9 +1687,7 @@ def test_create_prescription_service_validation_error(
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 999,
-            "prescribed_by_id": staff.id,
             "items": [
                 {"drug_id": 7},
             ],
@@ -1258,7 +1712,7 @@ def test_create_prescription_unexpected_exception_is_generic_500(
     make_authenticated_staff,
     monkeypatch,
 ):
-    headers, staff = _json_headers(
+    headers, _ = _json_headers(
         make_authenticated_staff,
         clinic,
         Role.DOCTOR,
@@ -1277,9 +1731,7 @@ def test_create_prescription_unexpected_exception_is_generic_500(
     response = client.post(
         "/prescriptions",
         json={
-            "clinic_id": clinic.id,
             "patient_id": 2,
-            "prescribed_by_id": staff.id,
             "items": [
                 {"drug_id": 7},
             ],
@@ -1292,7 +1744,9 @@ def test_create_prescription_unexpected_exception_is_generic_500(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"] == "Internal server error"
+    assert body["error"] == (
+        "Internal server error"
+    )
 
     assert (
         "SECRET INTERNAL PRESCRIPTION DETAIL"
@@ -1305,6 +1759,7 @@ def test_create_prescription_unexpected_exception_is_generic_500(
 # ============================================================================
 # SERIALIZATION
 # ============================================================================
+
 
 def test_serialize_prescription_includes_items(
     client,
@@ -1327,7 +1782,9 @@ def test_serialize_prescription_includes_items(
     prescription = _prescription(
         prescription_id=10,
         clinic_id=clinic.id,
-        items=[item],
+        items=[
+            item
+        ],
     )
 
     monkeypatch.setattr(
@@ -1345,7 +1802,13 @@ def test_serialize_prescription_includes_items(
 
     assert response.status_code == 200
 
-    item_data = response.get_json()["data"]["items"][0]
+    item_data = (
+        response.get_json()[
+            "data"
+        ][
+            "items"
+        ][0]
+    )
 
     assert item_data == {
         "id": 55,
@@ -1394,26 +1857,115 @@ def test_serialize_prescription_handles_nullable_dates(
 
     assert response.status_code == 200
 
-    data = response.get_json()["data"]
+    data = response.get_json()[
+        "data"
+    ]
 
-    assert data["issued_at"] == issued_at.isoformat()
+    assert data["issued_at"] == (
+        issued_at.isoformat()
+    )
     assert data["expires_at"] is None
+
+
+def test_list_prescriptions_response_shape(
+    client,
+    clinic,
+    make_authenticated_staff,
+    monkeypatch,
+):
+    headers, _ = _json_headers(
+        make_authenticated_staff,
+        clinic,
+        Role.DOCTOR,
+    )
+
+    prescription = _prescription(
+        clinic_id=clinic.id
+    )
+
+    monkeypatch.setattr(
+        prescription_routes,
+        "list_prescriptions_for_patient",
+        Mock(
+            return_value=_paginated(
+                [prescription],
+                total=1,
+                page=1,
+                per_page=50,
+            )
+        ),
+    )
+
+    response = client.get(
+        "/prescriptions/patients/2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.get_json()[
+        "data"
+    ]
+
+    assert set(
+        data.keys()
+    ) == {
+        "items",
+        "total",
+        "page",
+        "per_page",
+    }
+
+    assert isinstance(
+        data["items"],
+        list,
+    )
+
+    assert isinstance(
+        data["total"],
+        int,
+    )
+
+    assert data["page"] == 1
+    assert data["per_page"] == 50
 
 
 # ============================================================================
 # ROUTE EXISTENCE
 # ============================================================================
 
+
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("GET", "/prescriptions/1"),
-        ("GET", "/prescriptions/patients/1"),
-        ("POST", "/prescriptions"),
-        ("POST", "/prescriptions/1/cancel"),
-        ("POST", "/prescriptions/1/complete"),
-        ("POST", "/prescriptions/interactions/check"),
-        ("POST", "/prescriptions/interactions"),
+        (
+            "GET",
+            "/prescriptions/1",
+        ),
+        (
+            "GET",
+            "/prescriptions/patients/1",
+        ),
+        (
+            "POST",
+            "/prescriptions",
+        ),
+        (
+            "POST",
+            "/prescriptions/1/cancel",
+        ),
+        (
+            "POST",
+            "/prescriptions/1/complete",
+        ),
+        (
+            "POST",
+            "/prescriptions/interactions/check",
+        ),
+        (
+            "POST",
+            "/prescriptions/interactions",
+        ),
     ],
 )
 def test_prescription_routes_exist(
@@ -1422,8 +1974,12 @@ def test_prescription_routes_exist(
     path,
 ):
     if method == "GET":
-        response = client.get(path)
+        response = client.get(
+            path
+        )
     else:
-        response = client.post(path)
+        response = client.post(
+            path
+        )
 
     assert response.status_code != 404

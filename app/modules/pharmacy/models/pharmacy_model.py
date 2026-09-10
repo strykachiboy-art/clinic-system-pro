@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.extensions import db
 from app.core.enums.pharmacy_enums import (
-    DrugCategory,
     DispenseStatus,
+    DrugCategory,
 )
 
 
-def _utcnow():
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -29,6 +31,17 @@ class Drug(db.Model):
         db.CheckConstraint(
             "unit_price IS NULL OR unit_price >= 0",
             name="ck_drugs_unit_price_non_negative",
+        ),
+        db.CheckConstraint(
+            "length(trim(name)) > 0",
+            name="ck_drugs_name_non_empty",
+        ),
+        db.Index(
+            "ix_drugs_clinic_active_name",
+            "clinic_id",
+            "is_active",
+            "name",
+            "id",
         ),
     )
 
@@ -108,13 +121,14 @@ class Drug(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -136,7 +150,7 @@ class Drug(db.Model):
         back_populates="drug",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Drug {self.name} {self.strength or ''}>"
 
 
@@ -164,6 +178,24 @@ class DrugBatch(db.Model):
         db.CheckConstraint(
             "reorder_level >= 0",
             name="ck_drug_batches_reorder_level_non_negative",
+        ),
+        db.CheckConstraint(
+            "length(trim(batch_number)) > 0",
+            name="ck_drug_batches_batch_number_non_empty",
+        ),
+        db.Index(
+            "ix_drug_batches_clinic_drug_expiry",
+            "clinic_id",
+            "drug_id",
+            "expiry_date",
+            "id",
+        ),
+        db.Index(
+            "ix_drug_batches_clinic_expiry_stock",
+            "clinic_id",
+            "expiry_date",
+            "quantity_on_hand",
+            "id",
         ),
     )
 
@@ -217,20 +249,21 @@ class DrugBatch(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
     )
 
     received_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
@@ -255,7 +288,7 @@ class DrugBatch(db.Model):
         back_populates="batch",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<DrugBatch {self.batch_number} - "
             f"Clinic {self.clinic_id} - "
@@ -285,6 +318,21 @@ class DispenseRecord(db.Model):
 
     __tablename__ = "dispense_records"
 
+    __table_args__ = (
+        db.Index(
+            "ix_dispense_records_prescription_created",
+            "prescription_id",
+            "created_at",
+            "id",
+        ),
+        db.Index(
+            "ix_dispense_records_status_created",
+            "status",
+            "created_at",
+            "id",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
@@ -312,22 +360,23 @@ class DispenseRecord(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
     )
 
-    # NULL until medication is actually dispensed.
     dispensed_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
+        index=True,
     )
 
     notes = db.Column(
@@ -351,7 +400,7 @@ class DispenseRecord(db.Model):
         cascade="all, delete-orphan",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<DispenseRecord {self.id} - "
             f"Prescription {self.prescription_id} "
@@ -375,6 +424,21 @@ class DispenseItem(db.Model):
             "quantity_dispensed > 0",
             name="ck_dispense_items_quantity_positive",
         ),
+        db.Index(
+            "ix_dispense_items_record_id",
+            "dispense_record_id",
+            "id",
+        ),
+        db.Index(
+            "ix_dispense_items_prescription_item",
+            "prescription_item_id",
+            "id",
+        ),
+        db.Index(
+            "ix_dispense_items_batch_id",
+            "batch_id",
+            "id",
+        ),
     )
 
     id = db.Column(
@@ -386,21 +450,18 @@ class DispenseItem(db.Model):
         db.Integer,
         db.ForeignKey("dispense_records.id"),
         nullable=False,
-        index=True,
     )
 
     batch_id = db.Column(
         db.Integer,
         db.ForeignKey("drug_batches.id"),
         nullable=False,
-        index=True,
     )
 
     prescription_item_id = db.Column(
         db.Integer,
         db.ForeignKey("prescription_items.id"),
         nullable=True,
-        index=True,
     )
 
     quantity_dispensed = db.Column(
@@ -423,7 +484,7 @@ class DispenseItem(db.Model):
         back_populates="dispense_items",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<DispenseItem Batch {self.batch_id} "
             f"x{self.quantity_dispensed}>"

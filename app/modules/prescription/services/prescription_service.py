@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from itertools import combinations
+
+from sqlalchemy import func, select
 
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
@@ -25,6 +29,45 @@ from app.modules.staff.models.staff_model import Staff
 
 
 # =====================================================================
+# Pagination
+# =====================================================================
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
+def _validate_pagination(
+    page: int,
+    per_page: int,
+) -> tuple[int, int]:
+    if (
+        not isinstance(page, int)
+        or isinstance(page, bool)
+        or page < 1
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        not isinstance(per_page, int)
+        or isinstance(per_page, bool)
+        or per_page < 1
+    ):
+        raise ValidationError(
+            "per_page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page must not exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+# =====================================================================
 # Date/time helpers
 # =====================================================================
 
@@ -45,9 +88,13 @@ def _normalize_datetime(
         return None
 
     if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(
+            tzinfo=timezone.utc
+        )
 
-    return value.astimezone(timezone.utc)
+    return value.astimezone(
+        timezone.utc
+    )
 
 
 # =====================================================================
@@ -321,12 +368,8 @@ def _validate_items(
         if (
             not isinstance(drug_id, int)
             or isinstance(drug_id, bool)
+            or drug_id <= 0
         ):
-            raise ValidationError(
-                f"Prescription item {index} has an invalid drug_id"
-            )
-
-        if drug_id <= 0:
             raise ValidationError(
                 f"Prescription item {index} has an invalid drug_id"
             )
@@ -375,6 +418,24 @@ def _normalize_interaction_pair(
     drug_a_id: int,
     drug_b_id: int,
 ) -> tuple[int, int]:
+    if (
+        not isinstance(drug_a_id, int)
+        or isinstance(drug_a_id, bool)
+        or drug_a_id <= 0
+    ):
+        raise ValidationError(
+            "drug_a_id must be greater than zero"
+        )
+
+    if (
+        not isinstance(drug_b_id, int)
+        or isinstance(drug_b_id, bool)
+        or drug_b_id <= 0
+    ):
+        raise ValidationError(
+            "drug_b_id must be greater than zero"
+        )
+
     if drug_a_id == drug_b_id:
         raise ValidationError(
             "A drug cannot interact with itself"
@@ -399,14 +460,17 @@ def find_interaction(
         drug_b_id,
     )
 
-    return (
-        DrugInteraction.query
-        .filter(
+    statement = (
+        select(DrugInteraction)
+        .where(
             DrugInteraction.drug_a_id == drug_a_id,
             DrugInteraction.drug_b_id == drug_b_id,
         )
-        .first()
     )
+
+    return db.session.execute(
+        statement
+    ).scalars().first()
 
 
 def _validate_interaction_drugs_for_clinic(
@@ -443,7 +507,6 @@ def create_drug_interaction(
     Drug interactions are global because DrugInteraction has no clinic_id.
     Therefore only global drugs can participate.
     """
-
     drug_a_id, drug_b_id = _normalize_interaction_pair(
         drug_a_id,
         drug_b_id,
@@ -479,21 +542,27 @@ def create_drug_interaction(
             f"Drug {drug_b_id} is inactive"
         )
 
-    existing = (
-        DrugInteraction.query
-        .filter(
+    statement = (
+        select(DrugInteraction)
+        .where(
             DrugInteraction.drug_a_id == drug_a_id,
             DrugInteraction.drug_b_id == drug_b_id,
         )
         .with_for_update()
-        .first()
     )
+
+    existing = db.session.execute(
+        statement
+    ).scalars().first()
 
     if existing is not None:
         raise ConflictError(
             f"An interaction between drugs "
             f"{drug_a_id} and {drug_b_id} already exists"
         )
+
+    if description is not None:
+        description = description.strip() or None
 
     interaction = DrugInteraction(
         drug_a_id=drug_a_id,
@@ -628,14 +697,17 @@ def _get_prescription_for_update(
     """
     Retrieve a prescription with a row lock for lifecycle mutation.
     """
-    prescription = (
-        Prescription.query
-        .filter(
+    statement = (
+        select(Prescription)
+        .where(
             Prescription.id == prescription_id
         )
         .with_for_update()
-        .first()
     )
+
+    prescription = db.session.execute(
+        statement
+    ).scalars().first()
 
     if prescription is None:
         raise NotFoundError(
@@ -663,33 +735,71 @@ def list_prescriptions_for_patient(
     patient_id: int,
     clinic_id: int,
     active_only: bool = False,
-) -> list[Prescription]:
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
     """
-    Clinic-scoped historical prescription lookup.
+    Clinic-scoped prescription lookup with bounded pagination.
+
+    Ordering is deterministic:
+    newest issued_at first, then highest prescription ID first.
     """
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
     _validate_patient_for_clinic(
         patient_id=patient_id,
         clinic_id=clinic_id,
     )
 
-    query = Prescription.query.filter(
+    filters = [
         Prescription.patient_id == patient_id,
         Prescription.clinic_id == clinic_id,
-    )
+    ]
 
     if active_only:
-        query = query.filter(
+        filters.append(
             Prescription.status
             == PrescriptionStatus.ACTIVE
         )
 
-    return (
-        query
-        .order_by(
-            Prescription.issued_at.desc()
-        )
-        .all()
+    count_statement = (
+        select(func.count())
+        .select_from(Prescription)
+        .where(*filters)
     )
+
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
+
+    statement = (
+        select(Prescription)
+        .where(*filters)
+        .order_by(
+            Prescription.issued_at.desc(),
+            Prescription.id.desc(),
+        )
+        .offset(
+            (page - 1) * per_page
+        )
+        .limit(
+            per_page
+        )
+    )
+
+    items = db.session.execute(
+        statement
+    ).scalars().all()
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 # =====================================================================
@@ -709,10 +819,12 @@ def create_prescription(
     """
     Create a prescription for a patient.
 
+    clinic_id and prescribed_by_id must come from authenticated
+    route/service context rather than untrusted client input.
+
     Returns:
         (prescription, interaction_warnings)
     """
-
     _ensure_clinic_active(
         clinic_id
     )
@@ -751,6 +863,9 @@ def create_prescription(
         drug_ids=drug_ids,
         clinic_id=clinic_id,
     )
+
+    if notes is not None:
+        notes = notes.strip() or None
 
     prescription = Prescription(
         clinic_id=clinic_id,
@@ -863,7 +978,6 @@ def cancel_prescription(
     """
     Cancel a prescription belonging to the authenticated clinic.
     """
-
     _ensure_clinic_active(
         clinic_id
     )
@@ -885,6 +999,9 @@ def cancel_prescription(
     _assert_not_expired(
         prescription
     )
+
+    if reason is not None:
+        reason = reason.strip() or None
 
     old_status = prescription.status.value
     old_notes = prescription.notes
@@ -937,7 +1054,6 @@ def complete_prescription(
     """
     Complete a prescription belonging to the authenticated clinic.
     """
-
     _ensure_clinic_active(
         clinic_id
     )
@@ -993,22 +1109,24 @@ def expire_stale_prescriptions() -> int:
     """
     Expire active prescriptions whose expiry time has passed.
 
-    This operation is transactional. The transactional decorator owns
-    the commit/rollback lifecycle.
+    The transactional decorator owns the commit/rollback lifecycle.
     """
     now = _utcnow()
 
-    stale = (
-        Prescription.query
-        .filter(
+    statement = (
+        select(Prescription)
+        .where(
             Prescription.status
             == PrescriptionStatus.ACTIVE,
             Prescription.expires_at.isnot(None),
             Prescription.expires_at <= now,
         )
         .with_for_update()
-        .all()
     )
+
+    stale = db.session.execute(
+        statement
+    ).scalars().all()
 
     for prescription in stale:
         old_status = prescription.status.value

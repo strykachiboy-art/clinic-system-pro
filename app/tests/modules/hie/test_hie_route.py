@@ -13,11 +13,6 @@ from app.core.exceptions import ValidationError
 from app.modules.hie.routes import hie_route
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
 def make_integration(
     *,
     integration_id=1,
@@ -97,11 +92,6 @@ def make_pagination(
     )
 
 
-# ============================================================================
-# CREATE HIE INTEGRATION
-# ============================================================================
-
-
 def test_create_integration_success(
     app,
     clinic,
@@ -118,6 +108,7 @@ def test_create_integration_success(
         clinic_id=clinic.id,
         provider="malaffi",
         status=HIEIntegrationStatus.PENDING,
+        endpoint_url="https://hie.example.com/",
     )
 
     called = {}
@@ -154,9 +145,15 @@ def test_create_integration_success(
     assert body["data"]["status"] == (
         HIEIntegrationStatus.PENDING.value
     )
+    assert body["data"]["endpoint_url"] == (
+        "https://hie.example.com/"
+    )
 
     assert called["clinic_id"] == clinic.id
     assert called["provider"] == "malaffi"
+    assert called["endpoint_url"] == (
+        "https://hie.example.com/"
+    )
     assert called["organization_id"] == "ORG-001"
     assert called["facility_id"] == "FAC-001"
 
@@ -193,14 +190,34 @@ def test_create_integration_uses_authenticated_clinic(
         "/api/hie/integrations",
         json={
             "provider": "malaffi",
-            "clinic_id": 999999,
         },
         headers=headers,
     )
 
     assert response.status_code == 201
     assert called["clinic_id"] == clinic.id
-    assert called["clinic_id"] != 999999
+
+
+def test_create_integration_rejects_client_clinic_id(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = app.test_client().post(
+        "/api/hie/integrations",
+        json={
+            "provider": "malaffi",
+            "clinic_id": 999999,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_create_integration_defaults_provider_to_malaffi(
@@ -242,25 +259,26 @@ def test_create_integration_defaults_provider_to_malaffi(
     assert called["provider"] == "malaffi"
 
 
-def test_create_integration_forbidden_for_doctor(
+def test_create_integration_rejects_unknown_field(
     app,
     auth_headers_for,
     user,
 ):
     headers = auth_headers_for(
         user,
-        role=Role.DOCTOR,
+        role=Role.ADMIN,
     )
 
     response = app.test_client().post(
         "/api/hie/integrations",
         json={
             "provider": "malaffi",
+            "unknown_field": "bad",
         },
         headers=headers,
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 def test_create_integration_rejects_invalid_provider(
@@ -284,7 +302,7 @@ def test_create_integration_rejects_invalid_provider(
     assert response.status_code == 422
 
 
-def test_create_integration_rejects_unknown_field(
+def test_create_integration_rejects_invalid_endpoint(
     app,
     auth_headers_for,
     user,
@@ -297,20 +315,54 @@ def test_create_integration_rejects_unknown_field(
     response = app.test_client().post(
         "/api/hie/integrations",
         json={
-            "provider": "malaffi",
-            "unknown_field": "bad",
+            "endpoint_url": "not-a-url",
         },
         headers=headers,
     )
 
-    # Current schema does not use extra="forbid", so this field
-    # is expected to be ignored rather than rejected.
-    assert response.status_code in (201, 422)
+    assert response.status_code == 422
 
 
-# ============================================================================
-# GET HIE INTEGRATION
-# ============================================================================
+def test_create_integration_rejects_empty_identifier(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = app.test_client().post(
+        "/api/hie/integrations",
+        json={
+            "organization_id": "   ",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_integration_forbidden_for_doctor(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/hie/integrations",
+        json={
+            "provider": "malaffi",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
 
 
 def test_get_integration_success(
@@ -403,11 +455,6 @@ def test_get_integration_uses_authenticated_clinic(
     assert called["clinic_id"] == clinic.id
 
 
-# ============================================================================
-# UPDATE HIE INTEGRATION
-# ============================================================================
-
-
 def test_update_integration_success(
     app,
     clinic,
@@ -425,6 +472,7 @@ def test_update_integration_success(
         clinic_id=clinic.id,
         provider="malaffi",
         status=HIEIntegrationStatus.ACTIVE,
+        endpoint_url="https://hie.example.com/",
         organization_id="ORG-NEW",
         facility_id="FAC-NEW",
     )
@@ -468,6 +516,9 @@ def test_update_integration_success(
     assert called["integration_id"] == 5
     assert called["provider"] == "malaffi"
     assert called["status"] == HIEIntegrationStatus.ACTIVE
+    assert called["endpoint_url"] == (
+        "https://hie.example.com/"
+    )
     assert called["organization_id"] == "ORG-NEW"
     assert called["facility_id"] == "FAC-NEW"
 
@@ -534,9 +585,25 @@ def test_update_integration_normalizes_provider(
     assert called["provider"] == "malaffi"
 
 
-# ============================================================================
-# SUBMISSION LISTING
-# ============================================================================
+def test_update_integration_rejects_unknown_field(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = app.test_client().patch(
+        "/api/hie/integrations/1",
+        json={
+            "unknown_field": "bad",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_get_submissions_success(
@@ -730,10 +797,15 @@ def test_get_submissions_rejects_invalid_patient_id(
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "page",
+    ["0", "-1", "abc"],
+)
 def test_get_submissions_rejects_invalid_page(
     app,
     auth_headers_for,
     user,
+    page,
 ):
     headers = auth_headers_for(
         user,
@@ -741,17 +813,22 @@ def test_get_submissions_rejects_invalid_page(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?page=0",
+        f"/api/hie/submissions?page={page}",
         headers=headers,
     )
 
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "per_page",
+    ["0", "-1", "101", "abc"],
+)
 def test_get_submissions_rejects_invalid_per_page(
     app,
     auth_headers_for,
     user,
+    per_page,
 ):
     headers = auth_headers_for(
         user,
@@ -759,11 +836,49 @@ def test_get_submissions_rejects_invalid_per_page(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?per_page=101",
+        f"/api/hie/submissions?per_page={per_page}",
         headers=headers,
     )
 
     assert response.status_code == 422
+
+
+def test_get_submissions_accepts_maximum_per_page(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    called = {}
+
+    def fake_list_hie_submissions(**kwargs):
+        called.update(kwargs)
+        return make_pagination(
+            [],
+            total=0,
+            page=1,
+            per_page=100,
+        )
+
+    monkeypatch.setattr(
+        hie_route,
+        "list_hie_submissions",
+        fake_list_hie_submissions,
+    )
+
+    response = app.test_client().get(
+        "/api/hie/submissions?per_page=100",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert called["per_page"] == 100
 
 
 def test_get_submissions_rejects_invalid_operation(
@@ -802,9 +917,97 @@ def test_get_submissions_rejects_invalid_status(
     assert response.status_code == 422
 
 
-# ============================================================================
-# AUTHENTICATION
-# ============================================================================
+def test_get_submissions_rejects_unknown_field(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = app.test_client().get(
+        "/api/hie/submissions?unknown_field=bad",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_get_submissions_serializes_submission_fields(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    submitted_at = datetime.now(timezone.utc)
+
+    submission = make_submission(
+        submission_id=55,
+        integration_id=8,
+        clinic_id=clinic.id,
+        patient_id=12,
+        operation=HIEOperation.PATIENT_QUERY,
+        status=HIESubmissionStatus.SUCCESS,
+        external_reference="EXT-55",
+        request_data={
+            "patient_identifier": "MRN-55",
+        },
+        response_data={
+            "status_code": 200,
+        },
+        status_code=200,
+        retry_count=1,
+        submitted_at=submitted_at,
+    )
+
+    monkeypatch.setattr(
+        hie_route,
+        "list_hie_submissions",
+        lambda **kwargs: make_pagination(
+            [submission],
+            total=1,
+            page=1,
+            per_page=20,
+        ),
+    )
+
+    response = app.test_client().get(
+        "/api/hie/submissions",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    item = response.get_json()["data"]["items"][0]
+
+    assert item["id"] == 55
+    assert item["integration_id"] == 8
+    assert item["clinic_id"] == clinic.id
+    assert item["patient_id"] == 12
+    assert item["operation"] == (
+        HIEOperation.PATIENT_QUERY.value
+    )
+    assert item["status"] == (
+        HIESubmissionStatus.SUCCESS.value
+    )
+    assert item["external_reference"] == "EXT-55"
+    assert item["request_data"] == {
+        "patient_identifier": "MRN-55",
+    }
+    assert item["response_data"] == {
+        "status_code": 200,
+    }
+    assert item["status_code"] == 200
+    assert item["retry_count"] == 1
+    assert item["submitted_at"] is not None
 
 
 @pytest.mark.parametrize(
@@ -823,14 +1026,11 @@ def test_hie_routes_require_authentication(
 ):
     client = app.test_client()
 
-    response = getattr(client, method)(path)
+    response = getattr(client, method)(
+        path
+    )
 
     assert response.status_code in (401, 422)
-
-
-# ============================================================================
-# ROLE COVERAGE
-# ============================================================================
 
 
 @pytest.mark.parametrize(
@@ -879,27 +1079,20 @@ def test_get_integration_allowed_for_hie_view_roles(
     assert response.status_code == 200
 
 
-@pytest.mark.parametrize(
-    "role",
-    [
-        Role.PATIENT,
-    ],
-)
-def test_get_integration_forbidden_for_unauthorized_roles(
+def test_get_integration_forbidden_for_patient(
     app,
     clinic,
     auth_headers_for,
     make_user,
-    role,
 ):
-    unauthorized_user = make_user(
+    patient_user = make_user(
         clinic,
-        role=role,
+        role=Role.PATIENT,
     )
 
     headers = auth_headers_for(
-        unauthorized_user,
-        role=role,
+        patient_user,
+        role=Role.PATIENT,
     )
 
     response = app.test_client().get(
@@ -910,12 +1103,7 @@ def test_get_integration_forbidden_for_unauthorized_roles(
     assert response.status_code == 403
 
 
-# ============================================================================
-# DOMAIN ERROR HANDLING
-# ============================================================================
-
-
-def test_get_integration_returns_domain_error_status(
+def test_domain_validation_error_is_handled(
     app,
     clinic,
     auth_headers_for,
@@ -943,8 +1131,6 @@ def test_get_integration_returns_domain_error_status(
         headers=headers,
     )
 
-    # Depending on your global error handler, this may be
-    # 422 or another mapped DomainError response.
     assert response.status_code == 422
 
     body = response.get_json()

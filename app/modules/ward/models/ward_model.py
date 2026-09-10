@@ -11,7 +11,7 @@ from app.core.enums.ward_enums import (
 )
 
 
-def _utcnow():
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -27,6 +27,12 @@ class Ward(db.Model):
             "clinic_id",
             "name",
             name="uq_wards_clinic_name",
+        ),
+        db.Index(
+            "ix_wards_clinic_type_name",
+            "clinic_id",
+            "ward_type",
+            "name",
         ),
     )
 
@@ -84,7 +90,7 @@ class Ward(db.Model):
         cascade="all, delete-orphan",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<Ward {self.name} "
             f"({self.ward_type.value})>"
@@ -99,6 +105,12 @@ class Bed(db.Model):
             "ward_id",
             "bed_number",
             name="uq_beds_ward_bed_number",
+        ),
+        db.Index(
+            "ix_beds_ward_status_number",
+            "ward_id",
+            "status",
+            "bed_number",
         ),
     )
 
@@ -167,7 +179,7 @@ class Bed(db.Model):
         back_populates="to_bed",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<Bed {self.bed_number} "
             f"- {self.status.value}>"
@@ -188,6 +200,18 @@ class BedReservation(db.Model):
         db.CheckConstraint(
             "expires_at IS NULL OR expires_at > reserved_at",
             name="ck_bed_reservations_valid_expiry",
+        ),
+        db.Index(
+            "ix_bed_reservations_bed_status_expiry",
+            "bed_id",
+            "status",
+            "expires_at",
+        ),
+        db.Index(
+            "ix_bed_reservations_patient_status_reserved",
+            "patient_id",
+            "status",
+            "reserved_at",
         ),
     )
 
@@ -278,7 +302,7 @@ class BedReservation(db.Model):
         back_populates="bed_reservations",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<BedReservation "
             f"Patient {self.patient_id} "
@@ -289,6 +313,21 @@ class BedReservation(db.Model):
 
 class Admission(db.Model):
     __tablename__ = "admissions"
+
+    __table_args__ = (
+        db.Index(
+            "ix_admissions_patient_status_admitted",
+            "patient_id",
+            "status",
+            "admitted_at",
+        ),
+        db.Index(
+            "ix_admissions_bed_status_admitted",
+            "bed_id",
+            "status",
+            "admitted_at",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -393,7 +432,7 @@ class Admission(db.Model):
         cascade="all, delete-orphan",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<Admission Patient {self.patient_id} "
             f"- Bed {self.bed_id} "
@@ -414,6 +453,16 @@ class WardTransfer(db.Model):
             "from_bed_id IS NULL "
             "OR from_bed_id != to_bed_id",
             name="ck_ward_transfers_distinct_beds",
+        ),
+        db.Index(
+            "ix_ward_transfers_admission_created",
+            "admission_id",
+            "created_at",
+        ),
+        db.Index(
+            "ix_ward_transfers_to_bed_created",
+            "to_bed_id",
+            "created_at",
         ),
     )
 
@@ -477,7 +526,7 @@ class WardTransfer(db.Model):
         back_populates="to_transfers",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<WardTransfer "
             f"Admission {self.admission_id} "

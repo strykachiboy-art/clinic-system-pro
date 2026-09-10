@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from flask_jwt_extended import create_access_token
@@ -13,19 +16,10 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.modules.messages.models.message_model import Message
 from app.modules.messages.routes import message_routes
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def auth_headers(user):
-    """
-    Build JWT Authorization headers for a real application user.
-    """
     token = create_access_token(
         identity=str(user.id),
     )
@@ -36,9 +30,6 @@ def auth_headers(user):
 
 
 def assert_success(response, status_code=200):
-    """
-    Assert standard successful API response.
-    """
     assert response.status_code == status_code
 
     data = response.get_json()
@@ -51,9 +42,6 @@ def assert_success(response, status_code=200):
 
 
 def assert_error(response, status_code):
-    """
-    Assert standard error API response.
-    """
     assert response.status_code == status_code
 
     data = response.get_json()
@@ -69,9 +57,6 @@ def create_message_users(
     make_user,
     clinic,
 ):
-    """
-    Create a sender and recipient inside the same clinic.
-    """
     sender = make_user(
         clinic=clinic,
         email="message-route-sender@example.com",
@@ -85,9 +70,23 @@ def create_message_users(
     return sender, recipient
 
 
-# ============================================================================
-# AUTHENTICATION
-# ============================================================================
+def make_page(
+    items,
+    *,
+    total=None,
+    page=1,
+    per_page=50,
+):
+    return SimpleNamespace(
+        items=list(items),
+        total=(
+            len(items)
+            if total is None
+            else total
+        ),
+        page=page,
+        per_page=per_page,
+    )
 
 
 def test_create_requires_authentication(client):
@@ -179,11 +178,6 @@ def test_thread_requires_authentication(client):
     assert response.status_code == 401
 
 
-# ============================================================================
-# CREATE MESSAGE
-# ============================================================================
-
-
 def test_create_message_success(
     client,
     clinic,
@@ -227,7 +221,7 @@ def test_create_message_success(
     assert message["updated_at"] is not None
 
 
-def test_create_message_does_not_accept_sender_id_from_payload(
+def test_create_message_rejects_client_controlled_identity(
     client,
     clinic,
     make_user,
@@ -254,15 +248,41 @@ def test_create_message_does_not_accept_sender_id_from_payload(
         },
     )
 
-    # Current schema does not declare extra="forbid", so the route may
-    # accept the extra fields at schema level. The service call should
-    # nevertheless use the authenticated sender and clinic.
-    assert response.status_code == 201
+    data = assert_error(
+        response,
+        422,
+    )
 
-    data = response.get_json()["data"]
+    assert data["error"] == "Validation failed"
+    assert isinstance(data["details"], list)
+    assert data["details"]
 
-    assert data["sender_id"] == sender.id
-    assert data["clinic_id"] == clinic.id
+
+def test_create_message_rejects_unknown_field(
+    client,
+    clinic,
+    make_user,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/messages/",
+        headers=auth_headers(sender),
+        json={
+            "recipient_id": recipient.id,
+            "subject": "Test",
+            "body": "Body",
+            "unknown_field": "bad",
+        },
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_create_message_missing_recipient_returns_422(
@@ -289,7 +309,34 @@ def test_create_message_missing_recipient_returns_422(
         422,
     )
 
-    assert isinstance(data["error"], list)
+    assert data["error"] == "Validation failed"
+    assert isinstance(data["details"], list)
+
+
+def test_create_message_invalid_recipient_returns_422(
+    client,
+    clinic,
+    make_user,
+):
+    sender, _ = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    response = client.post(
+        "/api/messages/",
+        headers=auth_headers(sender),
+        json={
+            "recipient_id": 0,
+            "subject": "Invalid recipient",
+            "body": "Body",
+        },
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_create_message_empty_subject_returns_422(
@@ -436,7 +483,7 @@ def test_create_message_service_not_found_becomes_404(
     assert data["error"] == "Recipient not found"
 
 
-def test_create_message_service_conflict_becomes_400(
+def test_create_message_service_conflict_becomes_409(
     client,
     clinic,
     make_user,
@@ -448,7 +495,9 @@ def test_create_message_service_conflict_becomes_400(
     )
 
     def fake_create_message(**kwargs):
-        raise ConflictError("Sender cannot message recipient")
+        raise ConflictError(
+            "Sender cannot message recipient"
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -468,15 +517,10 @@ def test_create_message_service_conflict_becomes_400(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
     assert data["error"] == "Sender cannot message recipient"
-
-
-# ============================================================================
-# INBOX
-# ============================================================================
 
 
 def test_inbox_success(
@@ -508,15 +552,132 @@ def test_inbox_success(
         200,
     )
 
-    assert len(data["data"]) == 1
+    page = data["data"]
 
-    item = data["data"][0]
+    assert page["total"] == 1
+    assert page["page"] == 1
+    assert page["per_page"] == 50
+    assert len(page["items"]) == 1
+
+    item = page["items"][0]
 
     assert item["id"] == message.id
     assert item["recipient_id"] == recipient.id
     assert item["sender_id"] == sender.id
     assert item["subject"] == "Inbox message"
     assert item["status"] == "sent"
+
+
+def test_inbox_forwards_pagination(
+    client,
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(3):
+        make_message(
+            clinic=clinic,
+            sender=sender,
+            recipient=recipient,
+            subject=f"Message {index}",
+        )
+
+    response = client.get(
+        "/api/messages/inbox?page=2&per_page=2",
+        headers=auth_headers(recipient),
+    )
+
+    data = assert_success(
+        response,
+        200,
+    )
+
+    page = data["data"]
+
+    assert page["total"] == 3
+    assert page["page"] == 2
+    assert page["per_page"] == 2
+    assert len(page["items"]) == 1
+
+
+def test_inbox_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="invalid-pagination@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/inbox?page=0",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=-1",
+        "per_page=0",
+        "per_page=-1",
+        "per_page=501",
+        "page=true",
+    ],
+)
+def test_inbox_rejects_pagination_boundaries(
+    client,
+    clinic,
+    make_user,
+    query,
+):
+    user = make_user(
+        clinic=clinic,
+        email=f"pagination-{query.replace('=', '-')}"
+        "@example.com",
+    )
+
+    response = client.get(
+        f"/api/messages/inbox?{query}",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
+
+
+def test_inbox_rejects_unknown_query_parameter(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="inbox-unknown-query@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/inbox?unknown=value",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_inbox_excludes_deleted_messages(
@@ -548,7 +709,47 @@ def test_inbox_excludes_deleted_messages(
         200,
     )
 
-    assert data["data"] == []
+    page = data["data"]
+
+    assert page["total"] == 0
+    assert page["items"] == []
+
+
+def test_inbox_empty_last_page(
+    client,
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(2):
+        make_message(
+            clinic=clinic,
+            sender=sender,
+            recipient=recipient,
+            subject=f"Message {index}",
+        )
+
+    response = client.get(
+        "/api/messages/inbox?page=2&per_page=5",
+        headers=auth_headers(recipient),
+    )
+
+    data = assert_success(
+        response,
+        200,
+    )
+
+    page = data["data"]
+
+    assert page["total"] == 2
+    assert page["page"] == 2
+    assert page["per_page"] == 5
+    assert page["items"] == []
 
 
 def test_inbox_service_not_found_becomes_404(
@@ -582,11 +783,6 @@ def test_inbox_service_not_found_becomes_404(
     )
 
     assert data["error"] == "User not found"
-
-
-# ============================================================================
-# UNREAD INBOX
-# ============================================================================
 
 
 def test_unread_inbox_returns_only_unread(
@@ -625,12 +821,15 @@ def test_unread_inbox_returns_only_unread(
         200,
     )
 
-    assert len(data["data"]) == 1
-    assert data["data"][0]["id"] == unread.id
-    assert data["data"][0]["read_at"] is None
+    page = data["data"]
+
+    assert page["total"] == 1
+    assert len(page["items"]) == 1
+    assert page["items"][0]["id"] == unread.id
+    assert page["items"][0]["read_at"] is None
 
 
-def test_unread_inbox_calls_service_with_unread_only(
+def test_unread_inbox_forwards_pagination(
     client,
     clinic,
     make_user,
@@ -638,14 +837,20 @@ def test_unread_inbox_calls_service_with_unread_only(
 ):
     user = make_user(
         clinic=clinic,
-        email="unread-service@example.com",
+        email="unread-pagination@example.com",
     )
 
     captured = {}
 
     def fake_get_inbox(**kwargs):
         captured.update(kwargs)
-        return []
+
+        return make_page(
+            [],
+            total=20,
+            page=3,
+            per_page=10,
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -654,23 +859,46 @@ def test_unread_inbox_calls_service_with_unread_only(
     )
 
     response = client.get(
-        "/api/messages/inbox/unread",
+        "/api/messages/inbox/unread"
+        "?page=3&per_page=10",
         headers=auth_headers(user),
     )
 
-    assert_success(
+    data = assert_success(
         response,
         200,
     )
 
+    assert data["data"]["page"] == 3
+    assert data["data"]["per_page"] == 10
+    assert data["data"]["total"] == 20
+
     assert captured["user_id"] == user.id
     assert captured["clinic_id"] == clinic.id
     assert captured["unread_only"] is True
+    assert captured["page"] == 3
+    assert captured["per_page"] == 10
 
 
-# ============================================================================
-# SENT
-# ============================================================================
+def test_unread_inbox_rejects_unknown_query(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="unread-unknown@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/inbox/unread?bad=value",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_sent_messages_success(
@@ -702,14 +930,56 @@ def test_sent_messages_success(
         200,
     )
 
-    assert len(data["data"]) == 1
+    page = data["data"]
 
-    item = data["data"][0]
+    assert page["total"] == 1
+    assert page["page"] == 1
+    assert page["per_page"] == 50
+    assert len(page["items"]) == 1
+
+    item = page["items"][0]
 
     assert item["id"] == message.id
     assert item["sender_id"] == sender.id
     assert item["recipient_id"] == recipient.id
     assert item["subject"] == "Sent message"
+
+
+def test_sent_messages_forwards_pagination(
+    client,
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    for index in range(4):
+        make_message(
+            clinic=clinic,
+            sender=sender,
+            recipient=recipient,
+            subject=f"Message {index}",
+        )
+
+    response = client.get(
+        "/api/messages/sent?page=2&per_page=2",
+        headers=auth_headers(sender),
+    )
+
+    data = assert_success(
+        response,
+        200,
+    )
+
+    page = data["data"]
+
+    assert page["total"] == 4
+    assert page["page"] == 2
+    assert page["per_page"] == 2
+    assert len(page["items"]) == 2
 
 
 def test_sent_messages_excludes_deleted_messages(
@@ -740,12 +1010,50 @@ def test_sent_messages_excludes_deleted_messages(
         200,
     )
 
-    assert data["data"] == []
+    assert data["data"]["total"] == 0
+    assert data["data"]["items"] == []
 
 
-# ============================================================================
-# GET MESSAGE
-# ============================================================================
+def test_sent_messages_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="sent-invalid-pagination@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/sent?per_page=501",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
+
+
+def test_sent_messages_rejects_unknown_query(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="sent-unknown-query@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/sent?unknown=value",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_get_message_success_as_recipient(
@@ -868,9 +1176,29 @@ def test_get_nonexistent_message_returns_404(
     )
 
 
-# ============================================================================
-# UPDATE
-# ============================================================================
+def test_get_message_rejects_invalid_message_id(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="message-invalid-id@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/0",
+        headers=auth_headers(user),
+    )
+
+    data = assert_error(
+        response,
+        422,
+    )
+
+    assert data["error"] == (
+        "Message ID must be a positive integer"
+    )
 
 
 def test_update_message_success(
@@ -953,6 +1281,38 @@ def test_update_message_uses_only_supplied_fields(
     assert item["subject"] == "Only subject changed"
     assert item["body"] == "Original body"
     assert item["priority"] == "normal"
+
+
+def test_update_message_rejects_unknown_field(
+    client,
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    message = make_message(
+        clinic=clinic,
+        sender=sender,
+        recipient=recipient,
+    )
+
+    response = client.patch(
+        f"/api/messages/{message.id}",
+        headers=auth_headers(sender),
+        json={
+            "subject": "Updated",
+            "sender_id": 999,
+        },
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_update_message_invalid_subject_returns_422(
@@ -1053,7 +1413,7 @@ def test_update_message_not_found_becomes_404(
     assert data["error"] == "Message not found"
 
 
-def test_update_message_conflict_becomes_400(
+def test_update_message_conflict_becomes_409(
     client,
     clinic,
     make_user,
@@ -1065,7 +1425,9 @@ def test_update_message_conflict_becomes_400(
     )
 
     def fake_update_message(**kwargs):
-        raise ConflictError("Archived messages cannot be updated")
+        raise ConflictError(
+            "Archived messages cannot be updated"
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -1083,15 +1445,50 @@ def test_update_message_conflict_becomes_400(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
-    assert data["error"] == "Archived messages cannot be updated"
+    assert data["error"] == (
+        "Archived messages cannot be updated"
+    )
 
 
-# ============================================================================
-# MARK READ
-# ============================================================================
+def test_update_message_validation_error_becomes_422(
+    client,
+    clinic,
+    make_user,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        email="update-validation@example.com",
+    )
+
+    def fake_update_message(**kwargs):
+        raise ValidationError(
+            "Invalid message update"
+        )
+
+    monkeypatch.setattr(
+        message_routes,
+        "update_message",
+        fake_update_message,
+    )
+
+    response = client.patch(
+        "/api/messages/1",
+        headers=auth_headers(user),
+        json={
+            "subject": "Updated",
+        },
+    )
+
+    data = assert_error(
+        response,
+        422,
+    )
+
+    assert data["error"] == "Invalid message update"
 
 
 def test_mark_message_read_success(
@@ -1157,7 +1554,38 @@ def test_mark_message_read_by_sender_returns_404(
     )
 
 
-def test_mark_message_read_validation_error_becomes_400(
+def test_mark_message_read_rejects_unknown_payload(
+    client,
+    clinic,
+    make_user,
+    make_message,
+):
+    sender, recipient = create_message_users(
+        make_user,
+        clinic,
+    )
+
+    message = make_message(
+        clinic=clinic,
+        sender=sender,
+        recipient=recipient,
+    )
+
+    response = client.post(
+        f"/api/messages/{message.id}/read",
+        headers=auth_headers(recipient),
+        json={
+            "user_id": 999,
+        },
+    )
+
+    assert_error(
+        response,
+        422,
+    )
+
+
+def test_mark_message_read_validation_error_becomes_422(
     client,
     clinic,
     make_user,
@@ -1169,7 +1597,9 @@ def test_mark_message_read_validation_error_becomes_400(
     )
 
     def fake_mark_message_read(**kwargs):
-        raise ValidationError("Invalid message")
+        raise ValidationError(
+            "Invalid message"
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -1185,15 +1615,10 @@ def test_mark_message_read_validation_error_becomes_400(
 
     data = assert_error(
         response,
-        400,
+        422,
     )
 
     assert data["error"] == "Invalid message"
-
-
-# ============================================================================
-# ARCHIVE
-# ============================================================================
 
 
 def test_archive_message_success(
@@ -1263,7 +1688,7 @@ def test_archive_message_not_found_becomes_404(
     assert data["error"] == "Message not found"
 
 
-def test_archive_message_conflict_becomes_400(
+def test_archive_message_conflict_becomes_409(
     client,
     clinic,
     make_user,
@@ -1275,7 +1700,9 @@ def test_archive_message_conflict_becomes_400(
     )
 
     def fake_archive_message(**kwargs):
-        raise ConflictError("Message cannot be archived")
+        raise ConflictError(
+            "Message cannot be archived"
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -1290,15 +1717,10 @@ def test_archive_message_conflict_becomes_400(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
     assert data["error"] == "Message cannot be archived"
-
-
-# ============================================================================
-# DELETE
-# ============================================================================
 
 
 def test_delete_message_success(
@@ -1405,9 +1827,39 @@ def test_delete_message_not_found_becomes_404(
     assert data["error"] == "Message not found"
 
 
-# ============================================================================
-# THREAD
-# ============================================================================
+def test_delete_message_conflict_becomes_409(
+    client,
+    clinic,
+    make_user,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        email="delete-conflict@example.com",
+    )
+
+    def fake_delete_message(**kwargs):
+        raise ConflictError(
+            "Message cannot be deleted"
+        )
+
+    monkeypatch.setattr(
+        message_routes,
+        "delete_message",
+        fake_delete_message,
+    )
+
+    response = client.delete(
+        "/api/messages/1",
+        headers=auth_headers(user),
+    )
+
+    data = assert_error(
+        response,
+        409,
+    )
+
+    assert data["error"] == "Message cannot be deleted"
 
 
 def test_get_message_thread_success(
@@ -1448,13 +1900,111 @@ def test_get_message_thread_success(
         200,
     )
 
+    page = data["data"]
+
+    assert page["total"] == 2
+    assert page["page"] == 1
+    assert page["per_page"] == 50
+
     ids = [
         item["id"]
-        for item in data["data"]
+        for item in page["items"]
     ]
 
     assert parent.id in ids
     assert reply.id in ids
+
+
+def test_get_message_thread_forwards_pagination(
+    client,
+    clinic,
+    make_user,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        email="thread-pagination@example.com",
+    )
+
+    captured = {}
+
+    def fake_get_message_thread(**kwargs):
+        captured.update(kwargs)
+
+        return make_page(
+            [],
+            total=40,
+            page=3,
+            per_page=10,
+        )
+
+    monkeypatch.setattr(
+        message_routes,
+        "get_message_thread",
+        fake_get_message_thread,
+    )
+
+    response = client.get(
+        "/api/messages/1/thread?page=3&per_page=10",
+        headers=auth_headers(user),
+    )
+
+    data = assert_success(
+        response,
+        200,
+    )
+
+    assert data["data"]["total"] == 40
+    assert data["data"]["page"] == 3
+    assert data["data"]["per_page"] == 10
+
+    assert captured["message_id"] == 1
+    assert captured["user_id"] == user.id
+    assert captured["clinic_id"] == clinic.id
+    assert captured["page"] == 3
+    assert captured["per_page"] == 10
+
+
+def test_get_message_thread_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="thread-invalid-pagination@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/1/thread?per_page=501",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
+
+
+def test_get_message_thread_rejects_unknown_query(
+    client,
+    clinic,
+    make_user,
+):
+    user = make_user(
+        clinic=clinic,
+        email="thread-unknown-query@example.com",
+    )
+
+    response = client.get(
+        "/api/messages/1/thread?unknown=value",
+        headers=auth_headers(user),
+    )
+
+    assert_error(
+        response,
+        422,
+    )
 
 
 def test_get_message_thread_not_found_becomes_404(
@@ -1490,7 +2040,7 @@ def test_get_message_thread_not_found_becomes_404(
     assert data["error"] == "Message not found"
 
 
-def test_get_message_thread_conflict_becomes_400(
+def test_get_message_thread_conflict_becomes_409(
     client,
     clinic,
     make_user,
@@ -1502,7 +2052,9 @@ def test_get_message_thread_conflict_becomes_400(
     )
 
     def fake_get_message_thread(**kwargs):
-        raise ConflictError("Message thread contains a cycle")
+        raise ConflictError(
+            "Message thread contains a cycle"
+        )
 
     monkeypatch.setattr(
         message_routes,
@@ -1517,15 +2069,12 @@ def test_get_message_thread_conflict_becomes_400(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
-    assert data["error"] == "Message thread contains a cycle"
-
-
-# ============================================================================
-# SERIALIZATION
-# ============================================================================
+    assert data["error"] == (
+        "Message thread contains a cycle"
+    )
 
 
 def test_message_response_serializes_enums_and_datetimes(
@@ -1567,24 +2116,40 @@ def test_message_response_serializes_enums_and_datetimes(
 
     item = data["data"]
 
-    assert isinstance(item["message_type"], str)
+    assert isinstance(
+        item["message_type"],
+        str,
+    )
     assert item["message_type"] == "clinical"
 
-    assert isinstance(item["status"], str)
+    assert isinstance(
+        item["status"],
+        str,
+    )
     assert item["status"] == "sent"
 
-    assert isinstance(item["priority"], str)
+    assert isinstance(
+        item["priority"],
+        str,
+    )
     assert item["priority"] == "high"
 
-    assert isinstance(item["sent_at"], str)
-    assert isinstance(item["read_at"], str)
-    assert isinstance(item["created_at"], str)
-    assert isinstance(item["updated_at"], str)
-
-
-# ============================================================================
-# TENANT ISOLATION
-# ============================================================================
+    assert isinstance(
+        item["sent_at"],
+        str,
+    )
+    assert isinstance(
+        item["read_at"],
+        str,
+    )
+    assert isinstance(
+        item["created_at"],
+        str,
+    )
+    assert isinstance(
+        item["updated_at"],
+        str,
+    )
 
 
 def test_message_from_another_clinic_is_not_accessible(
@@ -1680,12 +2245,8 @@ def test_message_does_not_appear_in_other_clinic_inbox(
         200,
     )
 
-    assert data["data"] == []
-
-
-# ============================================================================
-# AUTHENTICATED USER RESOLUTION
-# ============================================================================
+    assert data["data"]["total"] == 0
+    assert data["data"]["items"] == []
 
 
 def test_inactive_authenticated_user_is_rejected(
@@ -1706,10 +2267,12 @@ def test_inactive_authenticated_user_is_rejected(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
-    assert data["error"] == "Authenticated user is inactive"
+    assert data["error"] == (
+        "Authenticated user is inactive"
+    )
 
 
 def test_authenticated_user_without_clinic_is_rejected(
@@ -1728,19 +2291,17 @@ def test_authenticated_user_without_clinic_is_rejected(
 
     data = assert_error(
         response,
-        400,
+        409,
     )
 
-    assert (
-        data["error"]
-        == "Authenticated user is not assigned to a clinic"
+    assert data["error"] == (
+        "Authenticated user is not assigned to a clinic"
     )
 
 
 def test_authenticated_user_that_does_not_exist_returns_404(
     client,
 ):
-
     with client.application.app_context():
         token = create_access_token(
             identity="999999",
@@ -1758,4 +2319,6 @@ def test_authenticated_user_that_does_not_exist_returns_404(
         404,
     )
 
-    assert data["error"] == "Authenticated user not found"
+    assert data["error"] == (
+        "Authenticated user not found"
+    )

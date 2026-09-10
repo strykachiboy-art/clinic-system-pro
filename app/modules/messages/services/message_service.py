@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+from sqlalchemy.orm import aliased
+
 from app.extensions import db
 
 from app.core.audit.services.audit_service import (
@@ -27,9 +30,9 @@ from app.modules.clinic.services.clinic_service import (
 )
 
 
-# ============================================================================
-# UTILITIES
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 
 def _utcnow() -> datetime:
@@ -39,7 +42,7 @@ def _utcnow() -> datetime:
 def _validate_positive_id(
     value,
     field_name,
-):
+) -> int:
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
@@ -48,6 +51,56 @@ def _validate_positive_id(
         raise ValidationError(
             f"{field_name} must be a positive integer"
         )
+
+    return value
+
+
+def _validate_pagination(
+    page,
+    per_page,
+) -> tuple[int, int]:
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page < 1
+    ):
+        raise ValidationError(
+            "page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page < 1
+    ):
+        raise ValidationError(
+            "per_page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+def _paginate(
+    statement,
+    page,
+    per_page,
+):
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
 
 
 def _normalize_required_string(
@@ -160,32 +213,37 @@ def _normalize_message_status(
         )
 
 
-# ============================================================================
-# USER / CLINIC HELPERS
-# ============================================================================
-
-
 def _get_user(
     user_id,
     *,
     clinic_id=None,
     field_name="User ID",
 ):
-    _validate_positive_id(
+    user_id = _validate_positive_id(
         user_id,
         field_name,
     )
 
-    query = User.query.filter(
+    conditions = [
         User.id == user_id,
-    )
+    ]
 
     if clinic_id is not None:
-        query = query.filter(
-            User.clinic_id == clinic_id,
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        conditions.append(
+            User.clinic_id == clinic_id
         )
 
-    user = query.first()
+    statement = select(User).where(
+        *conditions
+    )
+
+    user = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if user is None:
         raise NotFoundError(
@@ -200,32 +258,22 @@ def _validate_message_participants(
     sender_id,
     recipient_id,
 ):
-    """
-    Ensure the sender and recipient both belong to
-    the same clinic.
-
-    This is the primary tenant-isolation boundary
-    for messages.
-    """
-
-    _validate_positive_id(
+    clinic_id = _validate_positive_id(
         clinic_id,
         "Clinic ID",
     )
 
-    _validate_positive_id(
+    sender_id = _validate_positive_id(
         sender_id,
         "Sender ID",
     )
 
-    _validate_positive_id(
+    recipient_id = _validate_positive_id(
         recipient_id,
         "Recipient ID",
     )
 
-    clinic = get_clinic(
-        clinic_id,
-    )
+    clinic = get_clinic(clinic_id)
 
     sender = _get_user(
         sender_id,
@@ -257,35 +305,40 @@ def _validate_message_participants(
     return clinic, sender, recipient
 
 
-# ============================================================================
-# MESSAGE HELPERS
-# ============================================================================
-
-
 def _get_message(
     message_id,
     *,
     clinic_id=None,
     lock=False,
 ):
-    _validate_positive_id(
+    message_id = _validate_positive_id(
         message_id,
         "Message ID",
     )
 
-    query = Message.query.filter(
+    conditions = [
         Message.id == message_id,
-    )
+    ]
 
     if clinic_id is not None:
-        query = query.filter(
-            Message.clinic_id == clinic_id,
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+        conditions.append(
+            Message.clinic_id == clinic_id
         )
 
-    if lock:
-        query = query.with_for_update()
+    statement = select(Message).where(
+        *conditions
+    )
 
-    message = query.first()
+    if lock:
+        statement = statement.with_for_update()
+
+    message = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if message is None:
         raise NotFoundError(
@@ -319,6 +372,11 @@ def _ensure_message_access(
     message,
     user_id,
 ):
+    user_id = _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
     if user_id not in (
         message.sender_id,
         message.recipient_id,
@@ -337,11 +395,6 @@ def _ensure_not_deleted(
         )
 
 
-# ============================================================================
-# CREATE MESSAGE
-# ============================================================================
-
-
 @transactional
 def create_message(
     clinic_id,
@@ -353,15 +406,6 @@ def create_message(
     priority=MessagePriority.NORMAL,
     parent_message_id=None,
 ):
-    """
-    Create and send a message.
-
-    The sender is supplied by the authenticated route layer.
-
-    clinic_id and sender_id must never be accepted directly
-    from an untrusted request body.
-    """
-
     (
         clinic,
         sender,
@@ -453,11 +497,6 @@ def create_message(
     return message
 
 
-# ============================================================================
-# UPDATE MESSAGE
-# ============================================================================
-
-
 @transactional
 def update_message(
     message_id,
@@ -465,13 +504,6 @@ def update_message(
     clinic_id,
     **fields,
 ):
-    """
-    Update editable message content.
-
-    Sender, recipient, clinic and thread relationships
-    cannot be modified.
-    """
-
     message = _get_message(
         message_id,
         clinic_id=clinic_id,
@@ -483,9 +515,7 @@ def update_message(
         user_id,
     )
 
-    _ensure_not_deleted(
-        message,
-    )
+    _ensure_not_deleted(message)
 
     if message.status != MessageStatus.SENT:
         raise ConflictError(
@@ -549,17 +579,20 @@ def update_message(
         if current_value == new_value_raw:
             continue
 
-        old_value[key] = (
-            current_value.value
-            if hasattr(current_value, "value")
-            else current_value
-        )
-
-        new_value[key] = (
-            new_value_raw.value
-            if hasattr(new_value_raw, "value")
-            else new_value_raw
-        )
+        if key == "body":
+            old_value[key] = "[changed]"
+            new_value[key] = "[changed]"
+        else:
+            old_value[key] = (
+                current_value.value
+                if hasattr(current_value, "value")
+                else current_value
+            )
+            new_value[key] = (
+                new_value_raw.value
+                if hasattr(new_value_raw, "value")
+                else new_value_raw
+            )
 
         setattr(
             message,
@@ -580,68 +613,91 @@ def update_message(
     return message
 
 
-# ============================================================================
-# INBOX
-# ============================================================================
-
-
 def get_inbox(
     user_id,
     clinic_id,
     *,
     unread_only=False,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
 ):
-    """
-    Return messages received by a clinic-owned user.
-    """
+    user_id = _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     _get_user(
         user_id,
         clinic_id=clinic_id,
     )
 
-    query = Message.query.filter(
+    conditions = [
         Message.clinic_id == clinic_id,
         Message.recipient_id == user_id,
         Message.deleted_at.is_(None),
-    )
+    ]
 
     if unread_only:
-        query = query.filter(
-            Message.read_at.is_(None),
+        conditions.append(
+            Message.read_at.is_(None)
         )
 
-    return (
-        query
+    statement = (
+        select(Message)
+        .where(*conditions)
         .order_by(
             Message.created_at.desc(),
             Message.id.desc(),
         )
-        .all()
     )
 
-
-# ============================================================================
-# SENT MESSAGES
-# ============================================================================
+    return _paginate(
+        statement,
+        page,
+        per_page,
+    )
 
 
 def get_sent_messages(
     user_id,
     clinic_id,
+    *,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
 ):
-    """
-    Return messages sent by a clinic-owned user.
-    """
+    user_id = _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     _get_user(
         user_id,
         clinic_id=clinic_id,
     )
 
-    return (
-        Message.query
-        .filter(
+    statement = (
+        select(Message)
+        .where(
             Message.clinic_id == clinic_id,
             Message.sender_id == user_id,
             Message.deleted_at.is_(None),
@@ -650,13 +706,13 @@ def get_sent_messages(
             Message.created_at.desc(),
             Message.id.desc(),
         )
-        .all()
     )
 
-
-# ============================================================================
-# GET SINGLE MESSAGE
-# ============================================================================
+    return _paginate(
+        statement,
+        page,
+        per_page,
+    )
 
 
 def get_message_for_user(
@@ -664,11 +720,6 @@ def get_message_for_user(
     user_id,
     clinic_id,
 ):
-    """
-    Retrieve a message only when the authenticated
-    user is either sender or recipient.
-    """
-
     message = _get_message(
         message_id,
         clinic_id=clinic_id,
@@ -679,16 +730,9 @@ def get_message_for_user(
         user_id,
     )
 
-    _ensure_not_deleted(
-        message,
-    )
+    _ensure_not_deleted(message)
 
     return message
-
-
-# ============================================================================
-# MARK READ
-# ============================================================================
 
 
 @transactional
@@ -697,20 +741,17 @@ def mark_message_read(
     user_id,
     clinic_id,
 ):
-    """
-    Mark a received message as read.
-
-    Only the recipient may perform this operation.
-    """
-
     message = _get_message(
         message_id,
         clinic_id=clinic_id,
         lock=True,
     )
 
-    _ensure_not_deleted(
-        message,
+    _ensure_not_deleted(message)
+
+    user_id = _validate_positive_id(
+        user_id,
+        "User ID",
     )
 
     if message.recipient_id != user_id:
@@ -739,24 +780,12 @@ def mark_message_read(
     return message
 
 
-# ============================================================================
-# ARCHIVE
-# ============================================================================
-
-
 @transactional
 def archive_message(
     message_id,
     user_id,
     clinic_id,
 ):
-    """
-    Archive a message for the participating user.
-
-    The current schema has one status field, so this is a
-    shared message state rather than a per-user mailbox state.
-    """
-
     message = _get_message(
         message_id,
         clinic_id=clinic_id,
@@ -768,9 +797,7 @@ def archive_message(
         user_id,
     )
 
-    _ensure_not_deleted(
-        message,
-    )
+    _ensure_not_deleted(message)
 
     if message.status == MessageStatus.ARCHIVED:
         return message
@@ -800,23 +827,12 @@ def archive_message(
     return message
 
 
-# ============================================================================
-# SOFT DELETE
-# ============================================================================
-
-
 @transactional
 def delete_message(
     message_id,
     user_id,
     clinic_id,
 ):
-    """
-    Soft-delete a message.
-
-    The database record is retained for audit/history.
-    """
-
     message = _get_message(
         message_id,
         clinic_id=clinic_id,
@@ -849,28 +865,28 @@ def delete_message(
     return message
 
 
-# ============================================================================
-# THREAD
-# ============================================================================
-
-
 def get_message_thread(
     message_id,
     user_id,
     clinic_id,
+    *,
+    page=DEFAULT_PAGE,
+    per_page=DEFAULT_PER_PAGE,
 ):
-    """
-    Return the complete message thread containing
-    the specified message.
-
-    The thread is reconstructed from the parent chain
-    and replies.
-    """
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     message = get_message_for_user(
         message_id,
         user_id,
         clinic_id,
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
     )
 
     root = message
@@ -890,9 +906,17 @@ def get_message_thread(
             clinic_id=clinic_id,
         )
 
-    thread = (
-        Message.query
-        .filter(
+    thread_ids = _build_thread_cte(
+        root.id,
+        clinic_id,
+    )
+
+    statement = (
+        select(Message)
+        .where(
+            Message.id.in_(
+                select(thread_ids.c.id)
+            ),
             Message.clinic_id == clinic_id,
             Message.deleted_at.is_(None),
         )
@@ -900,38 +924,54 @@ def get_message_thread(
             Message.created_at.asc(),
             Message.id.asc(),
         )
-        .all()
     )
 
-    return [
-        item
-        for item in thread
-        if _belongs_to_thread(
-            item,
-            root.id,
-        )
-    ]
+    return _paginate(
+        statement,
+        page,
+        per_page,
+    )
 
 
-def _belongs_to_thread(
-    message,
+def _build_thread_cte(
     root_id,
+    clinic_id,
 ):
-    current = message
-    visited = set()
+    root_id = _validate_positive_id(
+        root_id,
+        "Root Message ID",
+    )
 
-    while current is not None:
-        if current.id in visited:
-            return False
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
-        visited.add(current.id)
+    thread_ids = (
+        select(
+            Message.id.label("id")
+        )
+        .where(
+            Message.id == root_id,
+            Message.clinic_id == clinic_id,
+        )
+        .cte(
+            "message_thread",
+            recursive=True,
+        )
+    )
 
-        if current.id == root_id:
-            return True
+    child = aliased(Message)
 
-        if current.parent_message_id is None:
-            return False
+    thread_ids = thread_ids.union_all(
+        select(
+            child.id
+        ).where(
+            child.parent_message_id
+            == thread_ids.c.id,
+            child.clinic_id == clinic_id,
+            child.deleted_at.is_(None),
+        )
+    )
 
-        current = current.parent_message
-
-    return False
+    return thread_ids

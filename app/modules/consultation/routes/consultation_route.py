@@ -1,16 +1,18 @@
+from __future__ import annotations
+
 from flask import Blueprint, jsonify, request, g
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
-from app.core.exceptions import DomainError, ValidationError
-from app.extensions import db
+from app.core.auth.user.models.user_model import User
 from app.core.enums.consultation_enums import (
     ConsultationStatus,
     ConsultationType,
 )
 from app.core.enums.role_enums import Role
+from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
-from app.core.auth.user.models.user_model import User
+from app.extensions import db
 
 from app.modules.consultation.schemas.consultation_schema import (
     ConsultationCancelSchema,
@@ -39,11 +41,6 @@ consultation_bp = Blueprint(
     url_prefix="/api/consultations",
 )
 
-
-# ---------------------------------------------------------------------------
-# Role groups
-# ---------------------------------------------------------------------------
-
 CONSULTATION_READ_ROLES = (
     Role.ADMIN,
     Role.DOCTOR,
@@ -61,19 +58,12 @@ CONSULTATION_TEMPLATE_ROLES = (
     Role.DOCTOR,
 )
 
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _payload(schema, data=None):
-    """
-    Validate request payload using the supplied Pydantic schema.
-
-    Validation errors are converted into a clean JSON-safe 422 response.
-    Pydantic's default errors may contain ValueError objects inside `ctx`,
-    which are not directly JSON serializable by Flask.
-    """
     try:
         payload_data = (
             request.get_json(silent=True)
@@ -90,68 +80,11 @@ def _payload(schema, data=None):
         }), 422
 
 
-def _query_status():
-    """
-    Parse the optional consultation status query parameter.
-    """
-    raw_status = request.args.get("status")
-
-    if raw_status is None:
-        return None
-
-    try:
-        return ConsultationStatus(raw_status)
-
-    except ValueError:
-        return jsonify({
-            "success": False,
-            "error": (
-                "Invalid consultation status. "
-                "Allowed values: in_progress, completed, cancelled"
-            ),
-        }), 422
-
-
-def _query_consultation_type():
-    """
-    Parse the optional consultation type query parameter.
-    """
-    raw_type = request.args.get("consultation_type")
-
-    if raw_type is None:
-        return None
-
-    try:
-        return ConsultationType(raw_type)
-
-    except ValueError:
-        return jsonify({
-            "success": False,
-            "error": (
-                "Invalid consultation type. "
-                "Allowed values: general, follow_up, specialist, emergency"
-            ),
-        }), 422
-
-
-def _is_admin():
-    role = getattr(g, "current_user_role", None)
-
-    if isinstance(role, Role):
-        return role == Role.ADMIN
-
-    return role == Role.ADMIN.value
-
-
 def _get_current_user():
-    """
-    Return the authenticated user.
-    """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-
     except (TypeError, ValueError):
         raise ValidationError(
             "Invalid authentication identity"
@@ -173,30 +106,17 @@ def _get_current_user():
 
 
 def _get_authenticated_clinic_id():
-    """
-    Resolve the authenticated user's clinic.
-
-    Consultation operations are clinic-scoped. The client must
-    never be trusted to provide the tenant clinic_id.
-    """
     user = _get_current_user()
-
-    if user is None:
-        return None, (
-            jsonify({
-                "success": False,
-                "error": "Authenticated user not found",
-            }),
-            401,
-        )
-
     clinic_id = getattr(user, "clinic_id", None)
 
     if clinic_id is None:
         return None, (
             jsonify({
                 "success": False,
-                "error": "Authenticated user is not assigned to a clinic",
+                "error": (
+                    "Authenticated user is not assigned "
+                    "to a clinic"
+                ),
             }),
             403,
         )
@@ -204,13 +124,16 @@ def _get_authenticated_clinic_id():
     return clinic_id, None
 
 
-def _resolve_template_clinic_id():
-    """
-    Resolve the clinic used when creating a consultation template.
+def _is_admin():
+    role = getattr(g, "current_user_role", None)
 
-    ADMIN may create a global template.
-    Non-admin users are always restricted to their own clinic.
-    """
+    if isinstance(role, Role):
+        return role == Role.ADMIN
+
+    return role == Role.ADMIN.value
+
+
+def _resolve_template_clinic_id():
     clinic_id, error = _get_authenticated_clinic_id()
 
     if error is not None:
@@ -220,6 +143,128 @@ def _resolve_template_clinic_id():
         return None, error
 
     return clinic_id, None
+
+
+def _parse_positive_int(
+    parameter_name: str,
+    *,
+    default: int | None = None,
+    maximum: int | None = None,
+):
+    raw_value = request.args.get(parameter_name)
+
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "error": f"{parameter_name} must be an integer",
+        }), 422
+
+    if value <= 0:
+        return jsonify({
+            "success": False,
+            "error": f"{parameter_name} must be greater than 0",
+        }), 422
+
+    if maximum is not None and value > maximum:
+        return jsonify({
+            "success": False,
+            "error": (
+                f"{parameter_name} must be less than "
+                f"or equal to {maximum}"
+            ),
+        }), 422
+
+    return value
+
+
+def _pagination_params():
+    page = _parse_positive_int(
+        "page",
+        default=DEFAULT_PAGE,
+    )
+
+    if not isinstance(page, int):
+        return None, None, page
+
+    per_page = _parse_positive_int(
+        "per_page",
+        default=DEFAULT_PER_PAGE,
+        maximum=MAX_PER_PAGE,
+    )
+
+    if not isinstance(per_page, int):
+        return None, None, per_page
+
+    return page, per_page, None
+
+
+def _query_status():
+    raw_status = request.args.get("status")
+
+    if raw_status is None:
+        return None
+
+    try:
+        return ConsultationStatus(raw_status)
+
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Invalid consultation status. "
+                "Allowed values: "
+                "in_progress, completed, cancelled"
+            ),
+        }), 422
+
+
+def _query_consultation_type():
+    raw_type = request.args.get("consultation_type")
+
+    if raw_type is None:
+        return None
+
+    try:
+        return ConsultationType(raw_type)
+
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Invalid consultation type. "
+                "Allowed values: "
+                "general, follow_up, "
+                "specialist, emergency"
+            ),
+        }), 422
+
+
+def _parse_optional_clinic_id():
+    raw_clinic_id = request.args.get("clinic_id")
+
+    if raw_clinic_id is None:
+        return None
+
+    try:
+        clinic_id = int(raw_clinic_id)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "error": "clinic_id must be an integer",
+        }), 422
+
+    if clinic_id <= 0:
+        return jsonify({
+            "success": False,
+            "error": "clinic_id must be greater than 0",
+        }), 422
+
+    return clinic_id
 
 
 def _serialize_consultation(consultation):
@@ -279,25 +324,21 @@ def _serialize_template(template):
     }
 
 
-# ---------------------------------------------------------------------------
-# Consultation lifecycle
-# ---------------------------------------------------------------------------
+def _paginated_response(items, pagination, serializer):
+    return jsonify({
+        "success": True,
+        "data": [
+            serializer(item)
+            for item in items
+        ],
+        "pagination": pagination,
+    }), 200
+
 
 @consultation_bp.post("/")
 @role_required(*CONSULTATION_WRITE_ROLES)
 def start():
-    """
-    Start a consultation.
-
-    The clinic is always derived from the authenticated user.
-    A client-supplied clinic_id is ignored.
-
-    POST /api/consultations/
-    """
     raw_payload = request.get_json(silent=True) or {}
-
-    # Never trust client-supplied clinic_id.
-    # The clinic comes from the authenticated user.
     raw_payload.pop("clinic_id", None)
 
     payload = _payload(
@@ -327,11 +368,6 @@ def start():
 @consultation_bp.get("/<int:consultation_id>")
 @role_required(*CONSULTATION_READ_ROLES)
 def get(consultation_id: int):
-    """
-    Get a consultation belonging to the authenticated user's clinic.
-
-    GET /api/consultations/<consultation_id>
-    """
     clinic_id, error = _get_authenticated_clinic_id()
 
     if error is not None:
@@ -351,11 +387,6 @@ def get(consultation_id: int):
 @consultation_bp.patch("/<int:consultation_id>")
 @role_required(*CONSULTATION_WRITE_ROLES)
 def update(consultation_id: int):
-    """
-    Update clinical documentation for a consultation.
-
-    PATCH /api/consultations/<consultation_id>
-    """
     raw_payload = request.get_json(silent=True) or {}
 
     payload = _payload(
@@ -390,13 +421,6 @@ def update(consultation_id: int):
 @consultation_bp.post("/<int:consultation_id>/complete")
 @role_required(*CONSULTATION_WRITE_ROLES)
 def complete(consultation_id: int):
-    """
-    Complete a consultation.
-
-    Diagnosis is required to complete the consultation.
-
-    POST /api/consultations/<consultation_id>/complete
-    """
     raw_payload = request.get_json(silent=True) or {}
 
     payload = _payload(
@@ -429,11 +453,6 @@ def complete(consultation_id: int):
 @consultation_bp.post("/<int:consultation_id>/cancel")
 @role_required(*CONSULTATION_WRITE_ROLES)
 def cancel(consultation_id: int):
-    """
-    Cancel a consultation.
-
-    POST /api/consultations/<consultation_id>/cancel
-    """
     payload = _payload(
         ConsultationCancelSchema
     )
@@ -460,97 +479,81 @@ def cancel(consultation_id: int):
     }), 200
 
 
-# ---------------------------------------------------------------------------
-# Patient consultation history
-# ---------------------------------------------------------------------------
-
 @consultation_bp.get("/patient/<int:patient_id>")
 @role_required(*CONSULTATION_READ_ROLES)
 def patient_consultations(patient_id: int):
-    """
-    Get consultations for a patient belonging to the authenticated clinic.
+    page, per_page, error = _pagination_params()
 
-    GET /api/consultations/patient/<patient_id>
-    """
+    if error is not None:
+        return error
+
+    consultation_type = _query_consultation_type()
+
+    if isinstance(consultation_type, tuple):
+        return consultation_type
+
     clinic_id, error = _get_authenticated_clinic_id()
 
     if error is not None:
         return error
 
-    consultations = get_consultations_for_patient(
+    consultations, pagination = get_consultations_for_patient(
         patient_id=patient_id,
         clinic_id=clinic_id,
+        consultation_type=consultation_type,
+        page=page,
+        per_page=per_page,
     )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            _serialize_consultation(item)
-            for item in consultations
-        ],
-    }), 200
+    return _paginated_response(
+        consultations,
+        pagination,
+        _serialize_consultation,
+    )
 
-
-# ---------------------------------------------------------------------------
-# Staff consultation history
-# ---------------------------------------------------------------------------
 
 @consultation_bp.get("/staff/<int:staff_id>")
 @role_required(*CONSULTATION_READ_ROLES)
 def staff_consultations(staff_id: int):
-    """
-    Get consultations belonging to a staff member in the
-    authenticated user's clinic.
-
-    Optional query parameter:
-
-        ?status=in_progress
-        ?status=completed
-        ?status=cancelled
-
-    GET /api/consultations/staff/<staff_id>
-    """
     status = _query_status()
 
     if isinstance(status, tuple):
         return status
 
+    consultation_type = _query_consultation_type()
+
+    if isinstance(consultation_type, tuple):
+        return consultation_type
+
+    page, per_page, error = _pagination_params()
+
+    if error is not None:
+        return error
+
     clinic_id, error = _get_authenticated_clinic_id()
 
     if error is not None:
         return error
 
-    consultations = get_consultations_for_staff(
+    consultations, pagination = get_consultations_for_staff(
         staff_id=staff_id,
         clinic_id=clinic_id,
         status=status,
+        consultation_type=consultation_type,
+        page=page,
+        per_page=per_page,
     )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            _serialize_consultation(item)
-            for item in consultations
-        ],
-    }), 200
+    return _paginated_response(
+        consultations,
+        pagination,
+        _serialize_consultation,
+    )
 
-
-# ---------------------------------------------------------------------------
-# Consultation templates
-# ---------------------------------------------------------------------------
 
 @consultation_bp.post("/templates")
 @role_required(*CONSULTATION_TEMPLATE_ROLES)
 def create_template():
-    """
-    Create a consultation template.
-
-    Non-admin users create templates for their authenticated clinic.
-
-    ADMIN may create a global template.
-
-    POST /api/consultations/templates
-    """
     payload = _payload(
         ConsultationTemplateCreateSchema
     )
@@ -577,76 +580,45 @@ def create_template():
 @consultation_bp.get("/templates")
 @role_required(*CONSULTATION_READ_ROLES)
 def active_templates():
-    """
-    Get active templates available to the authenticated clinic.
+    raw_clinic_id = _parse_optional_clinic_id()
 
-    Global templates may be included by the service for the clinic.
+    if isinstance(raw_clinic_id, tuple):
+        return raw_clinic_id
 
-    ADMIN may optionally query a specific clinic.
-    Non-admin users cannot query another clinic.
+    page, per_page, error = _pagination_params()
 
-    GET /api/consultations/templates
-    """
-    raw_clinic_id = request.args.get("clinic_id")
+    if error is not None:
+        return error
 
-    authenticated_clinic_id, error = _get_authenticated_clinic_id()
+    authenticated_clinic_id, error = (
+        _get_authenticated_clinic_id()
+    )
 
     if _is_admin():
-        if raw_clinic_id is None:
-            clinic_id = None
-
-        else:
-            try:
-                clinic_id = int(raw_clinic_id)
-
-            except (TypeError, ValueError):
-                return jsonify({
-                    "success": False,
-                    "error": "clinic_id must be an integer",
-                }), 422
-
-            if clinic_id <= 0:
-                return jsonify({
-                    "success": False,
-                    "error": "clinic_id must be greater than 0",
-                }), 422
-
+        clinic_id = raw_clinic_id
     else:
         if error is not None:
             return error
 
-        if raw_clinic_id is not None:
-            try:
-                requested_clinic_id = int(raw_clinic_id)
-
-            except (TypeError, ValueError):
-                return jsonify({
-                    "success": False,
-                    "error": "clinic_id must be an integer",
-                }), 422
-
-            if requested_clinic_id <= 0:
-                return jsonify({
-                    "success": False,
-                    "error": "clinic_id must be greater than 0",
-                }), 422
-
-            if requested_clinic_id != authenticated_clinic_id:
-                return jsonify({
-                    "success": False,
-                    "error": "Access denied",
-                }), 403
+        if (
+            raw_clinic_id is not None
+            and raw_clinic_id != authenticated_clinic_id
+        ):
+            return jsonify({
+                "success": False,
+                "error": "Access denied",
+            }), 403
 
         clinic_id = authenticated_clinic_id
 
-    templates = get_active_templates(
+    templates, pagination = get_active_templates(
         clinic_id=clinic_id,
+        page=page,
+        per_page=per_page,
     )
 
-    return jsonify({
-        "success": True,
-        "data": [
-            _serialize_template(item)
-            for item in templates
-        ],
-    }), 200
+    return _paginated_response(
+        templates,
+        pagination,
+        _serialize_template,
+    )

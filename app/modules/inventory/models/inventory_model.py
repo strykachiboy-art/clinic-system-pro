@@ -15,6 +15,10 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ============================================================================
+# INVENTORY ITEMS
+# ============================================================================
+
 class InventoryItem(db.Model):
     __tablename__ = "inventory_items"
 
@@ -26,6 +30,23 @@ class InventoryItem(db.Model):
         db.CheckConstraint(
             "reorder_level >= 0",
             name="ck_inventory_item_reorder_level_nonnegative",
+        ),
+        db.UniqueConstraint(
+            "clinic_id",
+            "name",
+            "category",
+            name="uq_inventory_item_clinic_name_category",
+        ),
+        db.Index(
+            "ix_inventory_items_clinic_active_category",
+            "clinic_id",
+            "is_active",
+            "category",
+        ),
+        db.Index(
+            "ix_inventory_items_clinic_name",
+            "clinic_id",
+            "name",
         ),
     )
 
@@ -93,13 +114,13 @@ class InventoryItem(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -131,7 +152,7 @@ class InventoryItem(db.Model):
         lazy="select",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<InventoryItem "
             f"{self.name} "
@@ -139,8 +160,21 @@ class InventoryItem(db.Model):
         )
 
 
+# ============================================================================
+# INVENTORY SUPPLIERS
+# ============================================================================
+
 class InventorySupplier(db.Model):
     __tablename__ = "inventory_suppliers"
+
+    __table_args__ = (
+        db.Index(
+            "ix_inventory_suppliers_clinic_active_name",
+            "clinic_id",
+            "is_active",
+            "name",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -190,13 +224,13 @@ class InventorySupplier(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -220,9 +254,13 @@ class InventorySupplier(db.Model):
         lazy="select",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<InventorySupplier {self.name}>"
 
+
+# ============================================================================
+# INVENTORY BATCHES
+# ============================================================================
 
 class InventoryBatch(db.Model):
     __tablename__ = "inventory_batches"
@@ -231,6 +269,21 @@ class InventoryBatch(db.Model):
         db.CheckConstraint(
             "quantity_on_hand >= 0",
             name="ck_inventory_batch_quantity_nonnegative",
+        ),
+        db.CheckConstraint(
+            "unit_cost IS NULL OR unit_cost >= 0",
+            name="ck_inventory_batch_unit_cost_nonnegative",
+        ),
+        db.UniqueConstraint(
+            "item_id",
+            "batch_number",
+            name="uq_inventory_batch_item_batch_number",
+        ),
+        db.Index(
+            "ix_inventory_batches_item_active_expiry",
+            "item_id",
+            "is_active",
+            "expiry_date",
         ),
     )
 
@@ -277,7 +330,7 @@ class InventoryBatch(db.Model):
     )
 
     received_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
@@ -290,13 +343,13 @@ class InventoryBatch(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -320,7 +373,7 @@ class InventoryBatch(db.Model):
         lazy="select",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<InventoryBatch "
             f"{self.batch_number} "
@@ -329,8 +382,36 @@ class InventoryBatch(db.Model):
         )
 
 
+# ============================================================================
+# STOCK MOVEMENTS
+# ============================================================================
+
 class StockMovement(db.Model):
     __tablename__ = "stock_movements"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "quantity > 0",
+            name="ck_stock_movement_quantity_positive",
+        ),
+        db.Index(
+            "ix_stock_movements_item_created_id",
+            "item_id",
+            "created_at",
+            "id",
+        ),
+        db.Index(
+            "ix_stock_movements_batch_created_id",
+            "batch_id",
+            "created_at",
+            "id",
+        ),
+        db.Index(
+            "ix_stock_movements_performed_by_created",
+            "performed_by_id",
+            "created_at",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -363,10 +444,9 @@ class StockMovement(db.Model):
         index=True,
     )
 
-    # This remains without a positive CHECK constraint because
-    # adjustment requests may legitimately be signed at the
-    # service layer. The service converts adjustments to an
-    # effective positive quantity before persistence.
+    # Adjustments may be supplied as signed values at the API/service
+    # boundary, but the persisted movement quantity is always the
+    # positive effective quantity.
     quantity = db.Column(
         db.Integer,
         nullable=False,
@@ -397,7 +477,7 @@ class StockMovement(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
         index=True,
@@ -418,7 +498,7 @@ class StockMovement(db.Model):
         back_populates="stock_movements",
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<StockMovement "
             f"{self.movement_type.value} "
@@ -427,6 +507,10 @@ class StockMovement(db.Model):
             f"Item={self.item_id}>"
         )
 
+
+# ============================================================================
+# INVENTORY TRANSFERS
+# ============================================================================
 
 class InventoryTransfer(db.Model):
     __tablename__ = "inventory_transfers"
@@ -439,6 +523,18 @@ class InventoryTransfer(db.Model):
         db.CheckConstraint(
             "source_clinic_id <> destination_clinic_id",
             name="ck_inventory_transfer_distinct_clinics",
+        ),
+        db.Index(
+            "ix_inventory_transfers_source_status_created",
+            "source_clinic_id",
+            "status",
+            "created_at",
+        ),
+        db.Index(
+            "ix_inventory_transfers_destination_status_created",
+            "destination_clinic_id",
+            "status",
+            "created_at",
         ),
     )
 
@@ -507,34 +603,34 @@ class InventoryTransfer(db.Model):
     )
 
     requested_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     approved_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
     completed_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
     cancelled_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=True,
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -571,7 +667,7 @@ class InventoryTransfer(db.Model):
         foreign_keys=[approved_by_id],
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<InventoryTransfer "
             f"{self.source_clinic_id} -> "

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from sqlalchemy import or_, select
 
@@ -29,9 +30,13 @@ from app.modules.patient.models.patient_model import Patient
 from app.modules.staff.models.staff_model import Staff
 
 
-# ---------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 _EDITABLE_LAB_TEST_FIELDS = {
     "name",
@@ -47,10 +52,9 @@ _EDITABLE_LAB_TEST_FIELDS = {
 }
 
 
-# ---------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# INTERNAL HELPERS
+# ============================================================================
 
 def _utcnow() -> datetime:
     """
@@ -59,11 +63,10 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _serialize_value(value):
+def _serialize_value(value: Any) -> Any:
     """
     Convert common SQLAlchemy/Python values into audit-safe values.
     """
-
     if value is None:
         return None
 
@@ -91,6 +94,90 @@ def _serialize_value(value):
     return value
 
 
+def _validate_positive_id(
+    value: int,
+    field_name: str,
+) -> int:
+    """
+    Validate and return a strict positive integer identifier.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    if value <= 0:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    return value
+
+
+def _validate_pagination(
+    page: int,
+    per_page: int,
+) -> tuple[int, int]:
+    """
+    Validate pagination parameters and return them unchanged.
+    """
+    if isinstance(page, bool) or not isinstance(page, int):
+        raise ValidationError(
+            "Page must be an integer"
+        )
+
+    if isinstance(per_page, bool) or not isinstance(per_page, int):
+        raise ValidationError(
+            "per_page must be an integer"
+        )
+
+    if page < 1:
+        raise ValidationError(
+            "Page must be greater than or equal to 1"
+        )
+
+    if per_page < 1:
+        raise ValidationError(
+            "per_page must be greater than zero"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+def _paginate(
+    statement,
+    *,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+):
+    """
+    Execute a SQLAlchemy statement using bounded pagination.
+
+    error_out=False intentionally allows an empty final/out-of-range
+    page rather than raising a 404.
+    """
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+
+# ============================================================================
+# PATIENT / STAFF HELPERS
+# ============================================================================
+
 def _get_patient(
     patient_id: int,
     clinic_id: int,
@@ -98,11 +185,15 @@ def _get_patient(
     """
     Retrieve a patient strictly within the authenticated clinic.
     """
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
-        )
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     statement = (
         select(Patient)
@@ -135,11 +226,15 @@ def _get_staff(
     """
     Retrieve staff strictly within the authenticated clinic.
     """
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
-        )
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     statement = (
         select(Staff)
@@ -170,6 +265,11 @@ def _validate_patient_clinic(
     patient: Patient,
     clinic_id: int,
 ) -> None:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
     if patient.clinic_id != clinic_id:
         raise ValidationError(
             f"Patient {patient.id} does not belong "
@@ -181,6 +281,11 @@ def _validate_staff_clinic(
     staff: Staff,
     clinic_id: int,
 ) -> None:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
     if staff.clinic_id != clinic_id:
         raise ValidationError(
             f"Staff {staff.id} does not belong "
@@ -188,7 +293,9 @@ def _validate_staff_clinic(
         )
 
 
-def _validate_staff_active(staff: Staff) -> None:
+def _validate_staff_active(
+    staff: Staff,
+) -> None:
     from app.core.enums.staff_enums import StaffStatus
 
     if staff.status != StaffStatus.ACTIVE:
@@ -197,6 +304,10 @@ def _validate_staff_active(staff: Staff) -> None:
         )
 
 
+# ============================================================================
+# CONSULTATION HELPERS
+# ============================================================================
+
 def _get_consultation(
     consultation_id: int,
     clinic_id: int,
@@ -204,6 +315,15 @@ def _get_consultation(
     """
     Retrieve consultation strictly within the authenticated clinic.
     """
+    consultation_id = _validate_positive_id(
+        consultation_id,
+        "consultation_id",
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     from app.modules.consultation.models.consultation_model import (
         Consultation,
@@ -236,6 +356,16 @@ def _validate_consultation(
     clinic_id: int,
     patient_id: int,
 ) -> None:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
+
     if consultation.clinic_id != clinic_id:
         raise ValidationError(
             f"Consultation {consultation.id} does not belong "
@@ -248,6 +378,10 @@ def _validate_consultation(
             f"to patient {patient_id}"
         )
 
+
+# ============================================================================
+# LAB TEST HELPERS
+# ============================================================================
 
 def _get_lab_test(
     test_id: int,
@@ -263,6 +397,10 @@ def _get_lab_test(
     When clinic_id is None:
         - only global catalog tests are allowed
     """
+    test_id = _validate_positive_id(
+        test_id,
+        "test_id",
+    )
 
     statement = (
         select(LabTest)
@@ -272,10 +410,10 @@ def _get_lab_test(
     )
 
     if clinic_id is not None:
-        if clinic_id <= 0:
-            raise ValidationError(
-                "clinic_id must be a positive integer"
-            )
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
 
         statement = statement.where(
             or_(
@@ -314,11 +452,15 @@ def _get_lab_order(
     Write operations should use for_update=True to prevent
     concurrent state transitions.
     """
+    order_id = _validate_positive_id(
+        order_id,
+        "order_id",
+    )
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
-        )
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     statement = (
         select(LabOrder)
@@ -355,11 +497,15 @@ def _get_lab_order_item(
     Retrieve an order item only when its parent order belongs
     to the authenticated clinic.
     """
+    order_item_id = _validate_positive_id(
+        order_item_id,
+        "order_item_id",
+    )
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
-        )
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
     statement = (
         select(LabOrderItem)
@@ -401,7 +547,6 @@ def _validate_actor_for_order(
     - belongs to the order's clinic
     - is active
     """
-
     actor = _get_staff(
         actor_id,
         order.clinic_id,
@@ -436,7 +581,6 @@ def _validate_actor_pair(
     """
     Ensure actor/timestamp fields are synchronized.
     """
-
     actor_id = getattr(order, actor_field)
     timestamp = getattr(order, timestamp_field)
 
@@ -447,10 +591,9 @@ def _validate_actor_pair(
         )
 
 
-# ---------------------------------------------------------------------
-# Lab test catalog
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# LAB TEST CATALOG
+# ============================================================================
 
 def get_lab_test(
     test_id: int,
@@ -465,23 +608,33 @@ def get_lab_test(
 def list_lab_tests(
     clinic_id: int | None = None,
     active_only: bool = True,
-) -> list[LabTest]:
+    *,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+):
     """
     clinic_id=None:
         Return global catalog entries only.
 
     clinic_id=<id>:
         Return global entries plus clinic-specific entries.
+
+    Results are deterministically ordered and paginated.
     """
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     statement = select(LabTest)
 
     if clinic_id is not None:
-        if clinic_id <= 0:
-            raise ValidationError(
-                "clinic_id must be a positive integer"
-            )
-
         statement = statement.where(
             or_(
                 LabTest.clinic_id == clinic_id,
@@ -499,13 +652,14 @@ def list_lab_tests(
         )
 
     statement = statement.order_by(
-        LabTest.name
+        LabTest.name.asc(),
+        LabTest.id.asc(),
     )
 
-    return list(
-        db.session.execute(statement)
-        .scalars()
-        .all()
+    return _paginate(
+        statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -529,10 +683,10 @@ def create_lab_test(
         )
 
     if clinic_id is not None:
-        if clinic_id <= 0:
-            raise ValidationError(
-                "clinic_id must be a positive integer"
-            )
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
 
         ensure_clinic_active(clinic_id)
 
@@ -619,6 +773,17 @@ def update_lab_test(
     clinic_id: int | None = None,
     **fields,
 ) -> LabTest:
+    test_id = _validate_positive_id(
+        test_id,
+        "test_id",
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
     test = _get_lab_test(
         test_id,
         clinic_id,
@@ -749,10 +914,9 @@ def update_lab_test(
     return test
 
 
-# ---------------------------------------------------------------------
-# Lab orders
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# LAB ORDERS
+# ============================================================================
 
 def get_lab_order(
     order_id: int,
@@ -767,17 +931,31 @@ def get_lab_order(
 def list_orders_for_patient(
     patient_id: int,
     clinic_id: int,
-) -> list[LabOrder]:
+    *,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+):
     """
     Tenant-scoped patient order lookup.
 
     clinic_id is mandatory.
-    """
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
-        )
+    Results are deterministically ordered and paginated.
+    """
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     _get_patient(
         patient_id,
@@ -791,16 +969,21 @@ def list_orders_for_patient(
             LabOrder.clinic_id == clinic_id,
         )
         .order_by(
-            LabOrder.created_at.desc()
+            LabOrder.created_at.desc(),
+            LabOrder.id.desc(),
         )
     )
 
-    return list(
-        db.session.execute(statement)
-        .scalars()
-        .all()
+    return _paginate(
+        statement,
+        page=page,
+        per_page=per_page,
     )
 
+
+# ============================================================================
+# QR CODE HELPERS
+# ============================================================================
 
 def _generate_qr_code() -> str:
     return generate_tracking_code(
@@ -815,7 +998,6 @@ def _generate_unique_qr_code() -> str:
     The database unique constraint remains the final
     protection against concurrent collisions.
     """
-
     for _ in range(10):
         qr_code = _generate_qr_code()
 
@@ -841,6 +1023,10 @@ def _generate_unique_qr_code() -> str:
     )
 
 
+# ============================================================================
+# CREATE LAB ORDER
+# ============================================================================
+
 @transactional
 def create_lab_order(
     clinic_id: int,
@@ -849,22 +1035,30 @@ def create_lab_order(
     test_ids: list[int],
     consultation_id: int | None = None,
 ) -> LabOrder:
-    # -------------------------------------------------------------
-    # Clinic lifecycle
-    # -------------------------------------------------------------
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    if clinic_id <= 0:
-        raise ValidationError(
-            "clinic_id must be a positive integer"
+    patient_id = _validate_positive_id(
+        patient_id,
+        "patient_id",
+    )
+
+    ordered_by_id = _validate_positive_id(
+        ordered_by_id,
+        "ordered_by_id",
+    )
+
+    if consultation_id is not None:
+        consultation_id = _validate_positive_id(
+            consultation_id,
+            "consultation_id",
         )
 
     ensure_clinic_active(
         clinic_id
     )
-
-    # -------------------------------------------------------------
-    # Basic validation
-    # -------------------------------------------------------------
 
     if not test_ids:
         raise ValidationError(
@@ -877,18 +1071,14 @@ def create_lab_order(
         )
 
     if any(
-        not isinstance(test_id, int)
-        or isinstance(test_id, bool)
+        isinstance(test_id, bool)
+        or not isinstance(test_id, int)
         or test_id <= 0
         for test_id in test_ids
     ):
         raise ValidationError(
             "All test IDs must be positive integers"
         )
-
-    # -------------------------------------------------------------
-    # Patient validation
-    # -------------------------------------------------------------
 
     patient = _get_patient(
         patient_id,
@@ -899,10 +1089,6 @@ def create_lab_order(
         patient,
         clinic_id,
     )
-
-    # -------------------------------------------------------------
-    # Ordering staff validation
-    # -------------------------------------------------------------
 
     staff = _get_staff(
         ordered_by_id,
@@ -915,18 +1101,9 @@ def create_lab_order(
         clinic_id,
     )
 
-    # -------------------------------------------------------------
-    # Consultation validation
-    # -------------------------------------------------------------
-
     consultation = None
 
     if consultation_id is not None:
-        if consultation_id <= 0:
-            raise ValidationError(
-                "consultation_id must be a positive integer"
-            )
-
         consultation = _get_consultation(
             consultation_id,
             clinic_id,
@@ -937,10 +1114,6 @@ def create_lab_order(
             clinic_id,
             patient_id,
         )
-
-    # -------------------------------------------------------------
-    # Test validation
-    # -------------------------------------------------------------
 
     statement = (
         select(LabTest)
@@ -995,15 +1168,7 @@ def create_lab_order(
             "and cannot be ordered"
         )
 
-    # -------------------------------------------------------------
-    # QR code
-    # -------------------------------------------------------------
-
     qr_code = _generate_unique_qr_code()
-
-    # -------------------------------------------------------------
-    # Create order
-    # -------------------------------------------------------------
 
     order = LabOrder(
         clinic_id=clinic_id,
@@ -1046,10 +1211,9 @@ def create_lab_order(
     return order
 
 
-# ---------------------------------------------------------------------
-# Sample collection
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# SAMPLE COLLECTION
+# ============================================================================
 
 @transactional
 def collect_sample(
@@ -1070,7 +1234,6 @@ def collect_sample(
         - collector
         - collection timestamp
     """
-
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -1149,10 +1312,9 @@ def collect_sample(
     return order
 
 
-# ---------------------------------------------------------------------
-# Equipment
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# EQUIPMENT
+# ============================================================================
 
 @transactional
 def link_equipment(
@@ -1172,7 +1334,6 @@ def link_equipment(
                 ↓
           IN_PROGRESS
     """
-
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -1248,10 +1409,9 @@ def link_equipment(
     return order
 
 
-# ---------------------------------------------------------------------
-# Sample processing
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# SAMPLE PROCESSING
+# ============================================================================
 
 @transactional
 def process_sample(
@@ -1279,7 +1439,6 @@ def process_sample(
 
     Processing cannot happen twice.
     """
-
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -1382,10 +1541,9 @@ def process_sample(
     return order
 
 
-# ---------------------------------------------------------------------
-# Cancellation
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# CANCELLATION
+# ============================================================================
 
 @transactional
 def cancel_order(
@@ -1399,7 +1557,6 @@ def cancel_order(
 
     Cancellation is actor-controlled and tenant-scoped.
     """
-
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -1474,10 +1631,9 @@ def cancel_order(
     return order
 
 
-# ---------------------------------------------------------------------
-# Result flagging
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESULT FLAGGING
+# ============================================================================
 
 _RANGE_PATTERN = re.compile(
     r"^\s*"
@@ -1486,7 +1642,6 @@ _RANGE_PATTERN = re.compile(
     r"(?P<high>-?\d+(?:\.\d+)?)"
     r"\s*$"
 )
-
 
 _BOUND_PATTERN = re.compile(
     r"^\s*"
@@ -1515,7 +1670,6 @@ def _auto_flag(
     Unsupported/non-numeric ranges are intentionally left
     unflagged rather than guessed.
     """
-
     if not isinstance(result_value, str):
         return None
 
@@ -1534,10 +1688,6 @@ def _auto_flag(
     ):
         return None
 
-    # -------------------------------------------------------------
-    # Critical thresholds
-    # -------------------------------------------------------------
-
     if (
         test.critical_low is not None
         and value <= Decimal(
@@ -1554,18 +1704,10 @@ def _auto_flag(
     ):
         return LabResultFlag.CRITICAL
 
-    # -------------------------------------------------------------
-    # Reference range
-    # -------------------------------------------------------------
-
     reference_range = test.reference_range
 
     if not reference_range:
         return None
-
-    # -------------------------------------------------------------
-    # Numeric range: "10 - 20"
-    # -------------------------------------------------------------
 
     range_match = _RANGE_PATTERN.match(
         reference_range
@@ -1592,10 +1734,6 @@ def _auto_flag(
             if low <= value <= high
             else LabResultFlag.ABNORMAL
         )
-
-    # -------------------------------------------------------------
-    # Numeric bound: "< 10", ">= 5", etc.
-    # -------------------------------------------------------------
 
     bound_match = _BOUND_PATTERN.match(
         reference_range
@@ -1633,7 +1771,10 @@ def _resolve_result_flag(
     test: LabTest,
     result_value: str,
     supplied_flag: LabResultFlag | None,
-) -> tuple[LabResultFlag | None, bool]:
+) -> tuple[
+    LabResultFlag | None,
+    bool,
+]:
     """
     Resolve the final result flag.
 
@@ -1643,7 +1784,6 @@ def _resolve_result_flag(
     cannot determine a numerical flag from the configured
     laboratory reference information.
     """
-
     automatic_flag = _auto_flag(
         test,
         result_value,
@@ -1658,10 +1798,9 @@ def _resolve_result_flag(
     return None, False
 
 
-# ---------------------------------------------------------------------
-# Result entry
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESULT ENTRY
+# ============================================================================
 
 @transactional
 def enter_result(
@@ -1679,7 +1818,6 @@ def enter_result(
 
     Results become immutable after order verification.
     """
-
     if not isinstance(result_value, str):
         raise ValidationError(
             "Result value must be a string"
@@ -1839,10 +1977,9 @@ def enter_result(
     return item
 
 
-# ---------------------------------------------------------------------
-# Result verification
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESULT VERIFICATION
+# ============================================================================
 
 @transactional
 def verify_results(
@@ -1852,8 +1989,10 @@ def verify_results(
 ) -> LabOrder:
     """
     Verify every result on a laboratory order.
-    """
 
+    This intentionally loads ALL order items because verification
+    must establish that no result is missing.
+    """
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -1968,10 +2107,9 @@ def verify_results(
     return order
 
 
-# ---------------------------------------------------------------------
-# Order completion
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# ORDER COMPLETION
+# ============================================================================
 
 @transactional
 def complete_order(
@@ -1980,8 +2118,10 @@ def complete_order(
 ) -> LabOrder:
     """
     Finalize a verified laboratory order.
-    """
 
+    This intentionally loads ALL order items because completion
+    must establish that no result is missing.
+    """
     order = _get_lab_order(
         order_id,
         clinic_id,
@@ -2085,10 +2225,9 @@ def complete_order(
     return order
 
 
-# ---------------------------------------------------------------------
-# Consistency / integrity helpers
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# CONSISTENCY / INTEGRITY HELPERS
+# ============================================================================
 
 def validate_lab_order_integrity(
     order: LabOrder,
@@ -2096,7 +2235,6 @@ def validate_lab_order_integrity(
     """
     Validate the actor/timestamp lifecycle of an existing order.
     """
-
     _validate_actor_pair(
         order,
         "collected_by_id",
@@ -2115,9 +2253,9 @@ def validate_lab_order_integrity(
         "verified_at",
     )
 
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Processing requires collection
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if order.processed_at is not None:
         if order.sample_collected_at is None:
@@ -2145,9 +2283,9 @@ def validate_lab_order_integrity(
                 "a recorded collector"
             )
 
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Verification requires processing
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if order.verified_at is not None:
         if order.processed_at is None:
@@ -2175,9 +2313,9 @@ def validate_lab_order_integrity(
                 "a recorded processor"
             )
 
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Completion requires verification
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if order.completed_at is not None:
         if order.verified_at is None:
@@ -2192,9 +2330,9 @@ def validate_lab_order_integrity(
                 "a recorded verifier"
             )
 
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Status consistency
-    # -------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     if order.status == LabOrderStatus.ORDERED:
         if order.sample_collected_at is not None:

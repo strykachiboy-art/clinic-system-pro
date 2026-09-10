@@ -17,12 +17,77 @@ from app.core.enums.reports_enums import (
 )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Pagination
+# ============================================================================
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 100
+
+
+class PaginationSchema(BaseModel):
+    """
+    Shared pagination request contract for report listing.
+    """
+
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+        description="1-based page number",
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description=(
+            f"Number of records per page "
+            f"(maximum {MAX_PER_PAGE})"
+        ),
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class PaginationResponseSchema(BaseModel):
+    """
+    Shared pagination response contract.
+    """
+
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+# ============================================================================
 # Report filters
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
 class ReportFiltersSchema(BaseModel):
+    """
+    Filters applied while generating a report.
+    """
+
     date_from: Optional[date] = Field(
         default=None,
         description="Start date for the report data range",
@@ -59,12 +124,19 @@ class ReportFiltersSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Report generation
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
 class ReportGenerateSchema(BaseModel):
+    """
+    Request schema for generating a report.
+
+    Clinic and requester identity must come from the authenticated
+    route/service context and are intentionally excluded here.
+    """
+
     report_type: ReportType = Field(
         ...,
         description="Type of report to generate",
@@ -85,42 +157,43 @@ class ReportGenerateSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Report query
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
-class ReportQuerySchema(BaseModel):
+class ReportQuerySchema(PaginationSchema):
+    """
+    Query parameters for generated-report listing.
+
+    Clinic scope is resolved from authentication and therefore must
+    not be supplied by non-admin clients through this schema.
+    """
+
     report_type: Optional[ReportType] = Field(
         default=None,
+        description="Filter by report type",
     )
 
     report_format: Optional[ReportFormat] = Field(
         default=None,
+        description="Filter by report format",
     )
 
     date_from: Optional[date] = Field(
         default=None,
+        description="Filter reports created on/after this date",
     )
 
     date_to: Optional[date] = Field(
         default=None,
+        description="Filter reports created up to this date",
     )
 
     generated_by_id: Optional[int] = Field(
         default=None,
         gt=0,
-    )
-
-    page: int = Field(
-        default=1,
-        ge=1,
-    )
-
-    per_page: int = Field(
-        default=20,
-        ge=1,
-        le=100,
+        description="Filter by report generator staff ID",
     )
 
     @model_validator(mode="after")
@@ -136,25 +209,42 @@ class ReportQuerySchema(BaseModel):
 
         return self
 
-    model_config = ConfigDict(
-        extra="forbid",
-    )
 
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Generated report response
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
 class GeneratedReportResponseSchema(BaseModel):
-    id: int
-    clinic_id: Optional[int]
-    generated_by_id: Optional[int]
+    """
+    Serialized generated-report response.
+    """
+
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    clinic_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
+    generated_by_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
     report_type: ReportType
+
     report_format: ReportFormat
-    filters: Optional[dict]
-    file_url: Optional[str]
+
+    filters: Optional[dict] = None
+
+    file_url: Optional[str] = None
+
     created_at: datetime
+
     updated_at: datetime
 
     model_config = ConfigDict(
@@ -162,17 +252,25 @@ class GeneratedReportResponseSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Generated report list response
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 
-class GeneratedReportListResponseSchema(BaseModel):
-    items: list[GeneratedReportResponseSchema]
-    total: int
-    page: int
-    per_page: int
+class GeneratedReportListResponseSchema(
+    PaginationResponseSchema
+):
+    """
+    Paginated generated-report response.
+    """
+
+    items: list[
+        GeneratedReportResponseSchema
+    ] = Field(
+        default_factory=list,
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
     )

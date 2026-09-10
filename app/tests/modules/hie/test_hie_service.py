@@ -13,11 +13,6 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.modules.hie.services import hie_service
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
 def make_clinic(*, clinic_id=1):
     return SimpleNamespace(
         id=clinic_id,
@@ -116,10 +111,6 @@ class FakeIntegration:
 
 @pytest.fixture
 def no_transaction(monkeypatch):
-    """
-    Prevent transactional wrappers from performing real commit/rollback
-    work while exercising service behavior.
-    """
     monkeypatch.setattr(
         hie_service.db.session,
         "commit",
@@ -132,37 +123,43 @@ def no_transaction(monkeypatch):
     )
 
 
-# ============================================================================
-# _GET_CLINIC
-# ============================================================================
-
-
 def test_get_clinic_rejects_none():
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic ID",
+    ):
         hie_service._get_clinic(None)
 
 
 def test_get_clinic_rejects_non_positive_id():
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic ID",
+    ):
         hie_service._get_clinic(0)
 
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic ID",
+    ):
         hie_service._get_clinic(-1)
 
 
 def test_get_clinic_returns_clinic(monkeypatch):
     clinic = make_clinic(clinic_id=4)
 
+    getter = Mock(return_value=clinic)
+
     monkeypatch.setattr(
         hie_service.db.session,
         "get",
-        Mock(return_value=clinic),
+        getter,
     )
 
     result = hie_service._get_clinic(4)
 
     assert result is clinic
-    hie_service.db.session.get.assert_called_once_with(
+    getter.assert_called_once_with(
         hie_service.Clinic,
         4,
     )
@@ -182,18 +179,22 @@ def test_get_clinic_raises_not_found(monkeypatch):
         hie_service._get_clinic(99)
 
 
-# ============================================================================
-# _GET_PATIENT
-# ============================================================================
-
-
 def test_get_patient_none_returns_none():
     assert hie_service._get_patient(1, None) is None
 
 
 def test_get_patient_rejects_invalid_id():
-    with pytest.raises(ValidationError, match="Invalid patient ID"):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid patient ID",
+    ):
         hie_service._get_patient(1, 0)
+
+    with pytest.raises(
+        ValidationError,
+        match="Invalid patient ID",
+    ):
+        hie_service._get_patient(1, -1)
 
 
 def test_get_patient_returns_patient(monkeypatch):
@@ -249,13 +250,11 @@ def test_get_patient_rejects_wrong_clinic(monkeypatch):
         hie_service._get_patient(99, 5)
 
 
-# ============================================================================
-# _GET_INTEGRATION
-# ============================================================================
-
-
 def test_get_integration_rejects_invalid_clinic():
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic ID",
+    ):
         hie_service._get_integration(0)
 
 
@@ -364,16 +363,14 @@ def test_get_integration_requires_active_malaffi(monkeypatch):
 
     with pytest.raises(
         ValidationError,
-        match="No active Malaffi integration is configured for this clinic",
+        match=(
+            "No active Malaffi integration is configured "
+            "for this clinic"
+        ),
     ):
         hie_service._get_integration(
             clinic_id=4,
         )
-
-
-# ============================================================================
-# _VALIDATE_INTEGRATION
-# ============================================================================
 
 
 def test_validate_integration_requires_integration():
@@ -428,11 +425,6 @@ def test_validate_integration_accepts_malaffi():
     hie_service._validate_integration(integration)
 
 
-# ============================================================================
-# _GET_PROVIDER
-# ============================================================================
-
-
 def test_get_provider_returns_malaffi(monkeypatch):
     provider = object()
 
@@ -469,11 +461,6 @@ def test_get_provider_rejects_unsupported_provider():
         hie_service._get_provider(integration)
 
 
-# ============================================================================
-# _VALIDATE_PATIENT_IDENTIFIER
-# ============================================================================
-
-
 def test_validate_patient_identifier_requires_value():
     with pytest.raises(
         ValidationError,
@@ -497,11 +484,6 @@ def test_validate_patient_identifier_strips_whitespace():
         )
         == "MRN-123"
     )
-
-
-# ============================================================================
-# _VALIDATE_SUBMISSION_CONTEXT
-# ============================================================================
 
 
 def test_validate_submission_context_requires_integration():
@@ -544,6 +526,38 @@ def test_validate_submission_context_accepts_no_patient():
     )
 
 
+def test_validate_submission_context_accepts_valid_patient(
+    monkeypatch,
+):
+    integration = make_integration(
+        clinic_id=1,
+    )
+
+    patient = make_patient(
+        patient_id=7,
+        clinic_id=1,
+    )
+
+    get_patient = Mock(return_value=patient)
+
+    monkeypatch.setattr(
+        hie_service,
+        "_get_patient",
+        get_patient,
+    )
+
+    hie_service._validate_submission_context(
+        integration=integration,
+        clinic_id=1,
+        patient_id=7,
+    )
+
+    get_patient.assert_called_once_with(
+        1,
+        7,
+    )
+
+
 def test_validate_submission_context_rejects_wrong_patient_clinic(
     monkeypatch,
 ):
@@ -573,9 +587,86 @@ def test_validate_submission_context_rejects_wrong_patient_clinic(
         )
 
 
-# ============================================================================
-# _CREATE_SUBMISSION
-# ============================================================================
+def test_validate_pagination_accepts_defaults():
+    assert hie_service._validate_pagination(
+        1,
+        20,
+    ) == (1, 20)
+
+
+def test_validate_pagination_accepts_maximum():
+    assert hie_service._validate_pagination(
+        1,
+        100,
+    ) == (1, 100)
+
+
+@pytest.mark.parametrize(
+    "page",
+    [0, -1],
+)
+def test_validate_pagination_rejects_invalid_page(
+    page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Page must be greater than or equal to 1",
+    ):
+        hie_service._validate_pagination(
+            page,
+            20,
+        )
+
+
+@pytest.mark.parametrize(
+    "page",
+    [None, "1", 1.5, True, False],
+)
+def test_validate_pagination_rejects_non_integer_page(
+    page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Page must be an integer",
+    ):
+        hie_service._validate_pagination(
+            page,
+            20,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [0, -1, 101],
+)
+def test_validate_pagination_rejects_invalid_per_page(
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="per_page must be between 1 and 100",
+    ):
+        hie_service._validate_pagination(
+            1,
+            per_page,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [None, "20", 20.5, True, False],
+)
+def test_validate_pagination_rejects_non_integer_per_page(
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="per_page must be an integer",
+    ):
+        hie_service._validate_pagination(
+            1,
+            per_page,
+        )
 
 
 def test_create_submission_success(
@@ -746,11 +837,6 @@ def test_create_submission_rejects_non_dict_request_data(
         )
 
 
-# ============================================================================
-# SUBMISSION STATUS HELPERS
-# ============================================================================
-
-
 def test_mark_submission_success(
     monkeypatch,
     no_transaction,
@@ -863,7 +949,9 @@ def test_mark_submission_failure_increments_retry_count(
         Mock(return_value=submission),
     )
 
-    error = RuntimeError("Provider unavailable")
+    error = RuntimeError(
+        "Provider unavailable"
+    )
 
     hie_service._mark_submission_failure(
         20,
@@ -898,11 +986,6 @@ def test_mark_submission_failure_handles_none_retry_count(
     )
 
     assert submission.retry_count == 1
-
-
-# ============================================================================
-# LAST SYNC
-# ============================================================================
 
 
 def test_update_last_sync(
@@ -955,11 +1038,6 @@ def test_update_last_sync_requires_integration(
         hie_service._update_last_sync(99)
 
 
-# ============================================================================
-# SUBMIT PATIENT
-# ============================================================================
-
-
 def test_submit_patient_success(
     monkeypatch,
 ):
@@ -974,7 +1052,9 @@ def test_submit_patient_success(
     }
 
     provider = Mock()
-    provider.submit_patient.return_value = provider_response
+    provider.submit_patient.return_value = (
+        provider_response
+    )
 
     monkeypatch.setattr(
         hie_service,
@@ -1032,7 +1112,10 @@ def test_submit_patient_success(
     assert result == provider_response
 
     hie_service._get_clinic.assert_called_once_with(1)
-    hie_service._get_patient.assert_called_once_with(1, 7)
+    hie_service._get_patient.assert_called_once_with(
+        1,
+        7,
+    )
     hie_service._create_submission.assert_called_once_with(
         integration_id=5,
         clinic_id=1,
@@ -1040,7 +1123,9 @@ def test_submit_patient_success(
         operation=HIEOperation.PATIENT_SUBMISSION,
         request_data=payload,
     )
-    provider.submit_patient.assert_called_once_with(payload)
+    provider.submit_patient.assert_called_once_with(
+        payload
+    )
     hie_service._mark_submission_success.assert_called_once_with(
         100,
         provider_response,
@@ -1097,6 +1182,14 @@ def test_submit_patient_marks_failure_and_reraises(
         Mock(),
     )
 
+    update_sync = Mock()
+
+    monkeypatch.setattr(
+        hie_service,
+        "_update_last_sync",
+        update_sync,
+    )
+
     with pytest.raises(
         RuntimeError,
         match="Provider failure",
@@ -1109,14 +1202,7 @@ def test_submit_patient_marks_failure_and_reraises(
         )
 
     hie_service._mark_submission_failure.assert_called_once()
-    hie_service._update_last_sync = Mock()
-
-    assert not hie_service._update_last_sync.called
-
-
-# ============================================================================
-# SUBMIT CLINICAL DATA
-# ============================================================================
+    update_sync.assert_not_called()
 
 
 def test_submit_clinical_data_success(
@@ -1133,8 +1219,16 @@ def test_submit_clinical_data_success(
         "external_reference": "CLIN-1",
     }
 
-    monkeypatch.setattr(hie_service, "_get_clinic", Mock())
-    monkeypatch.setattr(hie_service, "_get_patient", Mock())
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        hie_service,
+        "_get_patient",
+        Mock(),
+    )
     monkeypatch.setattr(
         hie_service,
         "_get_integration",
@@ -1178,6 +1272,7 @@ def test_submit_clinical_data_success(
     )
 
     assert result["status_code"] == 200
+
     provider.submit_clinical_data.assert_called_once_with(
         payload
     )
@@ -1189,11 +1284,6 @@ def test_submit_clinical_data_success(
         operation=HIEOperation.CLINICAL_DATA_SUBMISSION,
         request_data=payload,
     )
-
-
-# ============================================================================
-# SUBMIT CLINICAL DOCUMENT
-# ============================================================================
 
 
 def test_submit_clinical_document_success(
@@ -1210,8 +1300,16 @@ def test_submit_clinical_document_success(
         "external_reference": "DOC-1",
     }
 
-    monkeypatch.setattr(hie_service, "_get_clinic", Mock())
-    monkeypatch.setattr(hie_service, "_get_patient", Mock())
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+    monkeypatch.setattr(
+        hie_service,
+        "_get_patient",
+        Mock(),
+    )
     monkeypatch.setattr(
         hie_service,
         "_get_integration",
@@ -1262,11 +1360,6 @@ def test_submit_clinical_document_success(
     )
 
 
-# ============================================================================
-# QUERY PATIENT
-# ============================================================================
-
-
 def test_query_patient_success(
     monkeypatch,
 ):
@@ -1283,7 +1376,11 @@ def test_query_patient_success(
         },
     }
 
-    monkeypatch.setattr(hie_service, "_get_clinic", Mock())
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
     monkeypatch.setattr(
         hie_service,
         "_get_integration",
@@ -1357,11 +1454,6 @@ def test_query_patient_requires_identifier(
         )
 
 
-# ============================================================================
-# QUERY CLINICAL DATA
-# ============================================================================
-
-
 def test_query_clinical_data_success(
     monkeypatch,
 ):
@@ -1376,7 +1468,11 @@ def test_query_clinical_data_success(
         "records": [],
     }
 
-    monkeypatch.setattr(hie_service, "_get_clinic", Mock())
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
     monkeypatch.setattr(
         hie_service,
         "_get_integration",
@@ -1457,11 +1553,6 @@ def test_query_clinical_data_rejects_non_dict_filters(
             patient_identifier="MRN-1",
             filters=[],
         )
-
-
-# ============================================================================
-# INTEGRATION MANAGEMENT
-# ============================================================================
 
 
 def test_get_hie_integration_success(
@@ -1848,11 +1939,6 @@ def test_update_hie_integration_rejects_blank_facility(
         )
 
 
-# ============================================================================
-# LIST HIE SUBMISSIONS
-# ============================================================================
-
-
 def test_list_hie_submissions_rejects_invalid_page(
     monkeypatch,
 ):
@@ -1872,6 +1958,25 @@ def test_list_hie_submissions_rejects_invalid_page(
         )
 
 
+def test_list_hie_submissions_rejects_non_integer_page(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Page must be an integer",
+    ):
+        hie_service.list_hie_submissions(
+            clinic_id=1,
+            page="1",
+        )
+
+
 def test_list_hie_submissions_rejects_invalid_per_page(
     monkeypatch,
 ):
@@ -1888,6 +1993,25 @@ def test_list_hie_submissions_rejects_invalid_per_page(
         hie_service.list_hie_submissions(
             clinic_id=1,
             per_page=101,
+        )
+
+
+def test_list_hie_submissions_rejects_non_integer_per_page(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="per_page must be an integer",
+    ):
+        hie_service.list_hie_submissions(
+            clinic_id=1,
+            per_page="20",
         )
 
 
@@ -1965,3 +2089,308 @@ def test_list_hie_submissions_rejects_invalid_status(
             clinic_id=1,
             status="success",
         )
+
+
+def test_list_hie_submissions_validates_integration_ownership(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    integration = make_integration(
+        integration_id=20,
+        clinic_id=1,
+    )
+
+    get_integration = Mock(
+        return_value=integration
+    )
+
+    monkeypatch.setattr(
+        hie_service,
+        "_get_integration",
+        get_integration,
+    )
+
+    monkeypatch.setattr(
+        hie_service.db,
+        "paginate",
+        Mock(),
+    )
+
+    hie_service.list_hie_submissions(
+        clinic_id=1,
+        integration_id=20,
+    )
+
+    get_integration.assert_called_once_with(
+        1,
+        20,
+    )
+
+
+def test_list_hie_submissions_validates_patient_ownership(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    patient = make_patient(
+        patient_id=30,
+        clinic_id=1,
+    )
+
+    get_patient = Mock(
+        return_value=patient
+    )
+
+    monkeypatch.setattr(
+        hie_service,
+        "_get_patient",
+        get_patient,
+    )
+
+    monkeypatch.setattr(
+        hie_service.db,
+        "paginate",
+        Mock(),
+    )
+
+    hie_service.list_hie_submissions(
+        clinic_id=1,
+        patient_id=30,
+    )
+
+    get_patient.assert_called_once_with(
+        1,
+        30,
+    )
+
+
+def test_list_hie_submissions_success(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    integration = make_integration(
+        integration_id=7,
+        clinic_id=1,
+    )
+
+    patient = make_patient(
+        patient_id=9,
+        clinic_id=1,
+    )
+
+    get_integration = Mock(
+        return_value=integration
+    )
+
+    get_patient = Mock(
+        return_value=patient
+    )
+
+    monkeypatch.setattr(
+        hie_service,
+        "_get_integration",
+        get_integration,
+    )
+
+    monkeypatch.setattr(
+        hie_service,
+        "_get_patient",
+        get_patient,
+    )
+
+    pagination = SimpleNamespace(
+        items=[
+            make_submission(
+                submission_id=1,
+                clinic_id=1,
+            ),
+            make_submission(
+                submission_id=2,
+                clinic_id=1,
+            ),
+        ],
+        total=2,
+        page=2,
+        per_page=10,
+        pages=1,
+        has_next=False,
+        has_prev=True,
+    )
+
+    paginate = Mock(
+        return_value=pagination
+    )
+
+    monkeypatch.setattr(
+        hie_service.db,
+        "paginate",
+        paginate,
+    )
+
+    result = hie_service.list_hie_submissions(
+        clinic_id=1,
+        integration_id=7,
+        patient_id=9,
+        operation=HIEOperation.PATIENT_QUERY,
+        status=HIESubmissionStatus.SUCCESS,
+        page=2,
+        per_page=10,
+    )
+
+    assert result is pagination
+
+    paginate.assert_called_once()
+
+    statement = paginate.call_args.args[0]
+
+    where_criteria = list(
+        statement._where_criteria
+    )
+
+    assert len(where_criteria) == 5
+
+    assert any(
+        criterion.left.name == "clinic_id"
+        for criterion in where_criteria
+    )
+
+    assert any(
+        criterion.left.name == "integration_id"
+        for criterion in where_criteria
+    )
+
+    assert any(
+        criterion.left.name == "patient_id"
+        for criterion in where_criteria
+    )
+
+    assert any(
+        criterion.left.name == "operation"
+        for criterion in where_criteria
+    )
+
+    assert any(
+        criterion.left.name == "status"
+        for criterion in where_criteria
+    )
+
+    assert paginate.call_args.kwargs == {
+        "page": 2,
+        "per_page": 10,
+        "error_out": False,
+    }
+
+    get_integration.assert_called_once_with(
+        1,
+        7,
+    )
+
+    get_patient.assert_called_once_with(
+        1,
+        9,
+    )
+
+
+def test_list_hie_submissions_uses_deterministic_ordering(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    pagination = SimpleNamespace(
+        items=[],
+        total=0,
+        page=1,
+        per_page=20,
+    )
+
+    paginate = Mock(
+        return_value=pagination
+    )
+
+    monkeypatch.setattr(
+        hie_service.db,
+        "paginate",
+        paginate,
+    )
+
+    result = hie_service.list_hie_submissions(
+        clinic_id=1,
+    )
+
+    assert result is pagination
+    paginate.assert_called_once()
+
+    statement = paginate.call_args.args[0]
+
+    order_by_clauses = list(
+        statement._order_by_clauses
+    )
+
+    assert len(order_by_clauses) == 2
+
+    first_order = order_by_clauses[0]
+    second_order = order_by_clauses[1]
+
+    assert first_order.element.name == "created_at"
+    assert second_order.element.name == "id"
+
+    assert str(first_order).lower().endswith("desc")
+    assert str(second_order).lower().endswith("desc")
+
+
+def test_list_hie_submissions_default_pagination(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        hie_service,
+        "_get_clinic",
+        Mock(),
+    )
+
+    pagination = SimpleNamespace(
+        items=[],
+        total=0,
+        page=1,
+        per_page=20,
+    )
+
+    paginate = Mock(
+        return_value=pagination
+    )
+
+    monkeypatch.setattr(
+        hie_service.db,
+        "paginate",
+        paginate,
+    )
+
+    result = hie_service.list_hie_submissions(
+        clinic_id=1,
+    )
+
+    assert result is pagination
+    paginate.assert_called_once()
+
+    assert paginate.call_args.kwargs == {
+        "page": 1,
+        "per_page": 20,
+        "error_out": False,
+    }

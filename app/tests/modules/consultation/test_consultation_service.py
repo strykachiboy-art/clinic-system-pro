@@ -1477,9 +1477,7 @@ class TestGetConsultationsForPatient:
             started_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
 
-        # Correct production signature:
-        # get_consultations_for_patient(patient_id, clinic_id)
-        results = consultation_service.get_consultations_for_patient(
+        results, pagination = consultation_service.get_consultations_for_patient(
             patient.id,
             clinic.id,
         )
@@ -1487,6 +1485,15 @@ class TestGetConsultationsForPatient:
         ids = [item.id for item in results]
 
         assert ids.index(newer.id) < ids.index(older.id)
+
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 50
+        assert pagination["total"] == 2
+        assert pagination["pages"] == 1
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] is None
 
     def test_excludes_other_patient(
         self,
@@ -1512,9 +1519,7 @@ class TestGetConsultationsForPatient:
             staff,
         )
 
-        # Correct production signature:
-        # get_consultations_for_patient(patient_id, clinic_id)
-        results = consultation_service.get_consultations_for_patient(
+        results, _ = consultation_service.get_consultations_for_patient(
             patient.id,
             clinic.id,
         )
@@ -1523,6 +1528,117 @@ class TestGetConsultationsForPatient:
 
         assert target.id in ids
         assert other.id not in ids
+
+    def test_filters_by_consultation_type(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        general = make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        specialist = make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        ids = [item.id for item in results]
+
+        assert specialist.id in ids
+        assert general.id not in ids
+        assert pagination["total"] == 1
+
+    def test_filters_by_consultation_type_with_pagination(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        specialist = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                consultation_type=ConsultationType.SPECIALIST,
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
+            )
+            for index in range(3)
+        ]
+
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            consultation_type=ConsultationType.SPECIALIST,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            specialist[0].id,
+            specialist[1].id,
+        ]
+
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] == 2
+        assert pagination["prev_page"] is None
+
+    def test_returns_empty_page_for_non_matching_consultation_type(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            consultation_type=ConsultationType.EMERGENCY,
+        )
+
+        assert results == []
+        assert pagination["total"] == 0
+        assert pagination["pages"] == 0
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] is None
 
     def test_wrong_clinic_patient_is_hidden(
         self,
@@ -1583,6 +1699,139 @@ class TestGetConsultationsForPatient:
                 clinic_id,
             )
 
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (0, 50),
+            (-1, 50),
+            (1, 0),
+            (1, -1),
+            (1, 501),
+        ],
+    )
+    def test_rejects_invalid_pagination(
+        self,
+        clinic,
+        patient,
+        page,
+        per_page,
+    ):
+        with pytest.raises(
+            ValidationError,
+        ):
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                page=page,
+                per_page=per_page,
+            )
+
+    def test_paginates_results(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        consultations = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                started_at=datetime.now(timezone.utc)
+                - timedelta(days=index),
+            )
+            for index in range(3)
+        ]
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            page=1,
+            per_page=2,
+        )
+
+        assert len(results) == 2
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] == 2
+        assert pagination["prev_page"] is None
+
+        assert results[0].id == consultations[0].id
+        assert results[1].id == consultations[1].id
+
+    def test_returns_second_page(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        consultations = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                started_at=datetime.now(timezone.utc)
+                - timedelta(days=index),
+            )
+            for index in range(3)
+        ]
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            consultations[2].id,
+        ]
+
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
+
+    def test_empty_last_page_is_returned_without_error(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_patient(
+            patient.id,
+            clinic.id,
+            page=2,
+            per_page=1,
+        )
+
+        assert results == []
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 1
+        assert pagination["total"] == 1
+        assert pagination["pages"] == 1
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
+
     def test_historical_consultations_remain_readable_for_inactive_clinic(
         self,
         suspended_clinic,
@@ -1599,12 +1848,13 @@ class TestGetConsultationsForPatient:
             staff,
         )
 
-        results = consultation_service.get_consultations_for_patient(
+        results, pagination = consultation_service.get_consultations_for_patient(
             patient.id,
             suspended_clinic.id,
         )
 
         assert consultation.id in [item.id for item in results]
+        assert pagination["total"] == 1
 
 
 class TestGetConsultationsForStaff:
@@ -1621,14 +1871,13 @@ class TestGetConsultationsForStaff:
             staff,
         )
 
-        # Correct production signature:
-        # get_consultations_for_staff(staff_id, clinic_id, status=None)
-        results = consultation_service.get_consultations_for_staff(
+        results, pagination = consultation_service.get_consultations_for_staff(
             staff.id,
             clinic.id,
         )
 
         assert consultation.id in [item.id for item in results]
+        assert pagination["total"] == 1
 
     def test_filters_by_status(
         self,
@@ -1651,7 +1900,7 @@ class TestGetConsultationsForStaff:
             status=ConsultationStatus.COMPLETED,
         )
 
-        results = consultation_service.get_consultations_for_staff(
+        results, pagination = consultation_service.get_consultations_for_staff(
             staff.id,
             clinic.id,
             status=ConsultationStatus.IN_PROGRESS,
@@ -1661,6 +1910,163 @@ class TestGetConsultationsForStaff:
 
         assert in_progress.id in ids
         assert completed.id not in ids
+        assert pagination["total"] == 1
+
+    def test_filters_by_consultation_type(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        general = make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        specialist = make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        ids = [item.id for item in results]
+
+        assert specialist.id in ids
+        assert general.id not in ids
+        assert pagination["total"] == 1
+
+    def test_filters_by_status_and_consultation_type(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        matching = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.IN_PROGRESS,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        wrong_type = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.IN_PROGRESS,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        wrong_status = make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.COMPLETED,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            status=ConsultationStatus.IN_PROGRESS,
+            consultation_type=ConsultationType.SPECIALIST,
+        )
+
+        ids = [item.id for item in results]
+
+        assert matching.id in ids
+        assert wrong_type.id not in ids
+        assert wrong_status.id not in ids
+        assert pagination["total"] == 1
+
+    def test_filters_by_consultation_type_with_pagination(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        specialist = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                consultation_type=ConsultationType.SPECIALIST,
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
+            )
+            for index in range(3)
+        ]
+
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            consultation_type=ConsultationType.SPECIALIST,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            specialist[0].id,
+            specialist[1].id,
+        ]
+
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] == 2
+        assert pagination["prev_page"] is None
+
+    def test_returns_empty_results_for_non_matching_consultation_type(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+            consultation_type=ConsultationType.GENERAL,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            consultation_type=ConsultationType.EMERGENCY,
+        )
+
+        assert results == []
+        assert pagination["total"] == 0
+        assert pagination["pages"] == 0
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] is None
 
     def test_wrong_clinic_staff_is_hidden(
         self,
@@ -1720,6 +2126,116 @@ class TestGetConsultationsForStaff:
                 staff.id,
                 clinic_id,
             )
+
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (0, 50),
+            (-1, 50),
+            (1, 0),
+            (1, -1),
+            (1, 501),
+        ],
+    )
+    def test_rejects_invalid_pagination(
+        self,
+        clinic,
+        staff,
+        page,
+        per_page,
+    ):
+        with pytest.raises(
+            ValidationError,
+        ):
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                page=page,
+                per_page=per_page,
+            )
+
+    def test_paginates_results(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        consultations = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                started_at=datetime.now(timezone.utc)
+                - timedelta(days=index),
+            )
+            for index in range(3)
+        ]
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            consultations[0].id,
+            consultations[1].id,
+        ]
+
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] == 2
+        assert pagination["prev_page"] is None
+
+    def test_paginates_with_status_filter(
+        self,
+        clinic,
+        patient,
+        staff,
+        make_consultation,
+    ):
+        matching = [
+            make_consultation(
+                clinic,
+                patient,
+                staff,
+                status=ConsultationStatus.IN_PROGRESS,
+                started_at=datetime.now(timezone.utc)
+                - timedelta(days=index),
+            )
+            for index in range(3)
+        ]
+
+        make_consultation(
+            clinic,
+            patient,
+            staff,
+            status=ConsultationStatus.COMPLETED,
+        )
+
+        results, pagination = consultation_service.get_consultations_for_staff(
+            staff.id,
+            clinic.id,
+            status=ConsultationStatus.IN_PROGRESS,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            matching[0].id,
+            matching[1].id,
+        ]
+
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["next_page"] == 2
 
 
 class TestCreateConsultationTemplate:
@@ -1902,7 +2418,7 @@ class TestGetActiveTemplates:
             name="D Inactive",
         )
 
-        results = consultation_service.get_active_templates(
+        results, pagination = consultation_service.get_active_templates(
             clinic.id,
         )
 
@@ -1912,6 +2428,7 @@ class TestGetActiveTemplates:
         assert clinic_template.id in ids
         assert other_template.id not in ids
         assert inactive.id not in ids
+        assert pagination["total"] == 2
 
     def test_returns_all_active_templates_without_clinic_filter(
         self,
@@ -1929,12 +2446,13 @@ class TestGetActiveTemplates:
             name="Another Global",
         )
 
-        results = consultation_service.get_active_templates()
+        results, pagination = consultation_service.get_active_templates()
 
         ids = [item.id for item in results]
 
         assert global_template.id in ids
         assert clinic_template.id in ids
+        assert pagination["total"] == 2
 
     def test_returns_templates_in_name_order(
         self,
@@ -1953,7 +2471,7 @@ class TestGetActiveTemplates:
             name="Zulu",
         )
 
-        results = consultation_service.get_active_templates(
+        results, _ = consultation_service.get_active_templates(
             clinic.id,
         )
 
@@ -1980,6 +2498,125 @@ class TestGetActiveTemplates:
             consultation_service.get_active_templates(
                 clinic_id,
             )
+
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (0, 50),
+            (-1, 50),
+            (1, 0),
+            (1, -1),
+            (1, 501),
+        ],
+    )
+    def test_rejects_invalid_pagination(
+        self,
+        clinic,
+        page,
+        per_page,
+    ):
+        with pytest.raises(
+            ValidationError,
+        ):
+            consultation_service.get_active_templates(
+                clinic.id,
+                page=page,
+                per_page=per_page,
+            )
+
+    def test_paginates_templates(
+        self,
+        clinic,
+        make_template,
+    ):
+        templates = [
+            make_template(
+                clinic=clinic,
+                is_active=True,
+                name=f"Template {index}",
+            )
+            for index in range(3)
+        ]
+
+        results, pagination = consultation_service.get_active_templates(
+            clinic.id,
+            page=1,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            templates[0].id,
+            templates[1].id,
+        ]
+
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is True
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] == 2
+        assert pagination["prev_page"] is None
+
+    def test_returns_second_template_page(
+        self,
+        clinic,
+        make_template,
+    ):
+        templates = [
+            make_template(
+                clinic=clinic,
+                is_active=True,
+                name=f"Template {index}",
+            )
+            for index in range(3)
+        ]
+
+        results, pagination = consultation_service.get_active_templates(
+            clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert [item.id for item in results] == [
+            templates[2].id,
+        ]
+
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
+
+    def test_empty_template_page_is_returned_without_error(
+        self,
+        clinic,
+        make_template,
+    ):
+        make_template(
+            clinic=clinic,
+            is_active=True,
+            name="Only Template",
+        )
+
+        results, pagination = consultation_service.get_active_templates(
+            clinic.id,
+            page=2,
+            per_page=1,
+        )
+
+        assert results == []
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 1
+        assert pagination["total"] == 1
+        assert pagination["pages"] == 1
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
 
 
 class TestConsultationLifecycleValidators:

@@ -1,40 +1,45 @@
-from flask import Blueprint, g, jsonify, request, session
+from __future__ import annotations
+
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
-from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.enums.ward_enums import (
-    BedStatus,
-    ReservationStatus,
-    WardType,
-)
-from app.core.exceptions import (
-    DomainError,
-    ValidationError,
-)
+from app.core.exceptions import DomainError, ValidationError
 from app.core.utils.decorators import role_required
 
 from app.modules.ward.schemas.admission_schema import (
     AdmissionCreateSchema,
     AdmissionDischargeSchema,
     AdmissionFromReservationSchema,
+    AdmissionListQuerySchema,
+    AdmissionListResponseSchema,
+    AdmissionResponseSchema,
     AdmissionTransferSchema,
 )
 from app.modules.ward.schemas.reservation_schema import (
     BedReservationCancelSchema,
     BedReservationCreateSchema,
+    BedReservationListQuerySchema,
+    BedReservationListResponseSchema,
     BedReservationResponseSchema,
 )
 from app.modules.ward.schemas.bed_schema import (
     BedCreateSchema,
+    BedListQuerySchema,
+    BedListResponseSchema,
     BedMaintenanceSchema,
+    BedResponseSchema,
 )
 from app.modules.ward.schemas.ward_schema import (
     WardCreateSchema,
+    WardListQuerySchema,
+    WardListResponseSchema,
     WardOccupancyResponseSchema,
+    WardResponseSchema,
+    WardUpdateSchema,
 )
 
 from app.modules.ward.services.ward_service import (
@@ -44,9 +49,9 @@ from app.modules.ward.services.ward_service import (
     cancel_bed_reservation,
     create_ward,
     discharge_patient,
+    get_active_admission_for_patient,
     get_active_bed_reservation_for_bed,
     get_active_bed_reservation_for_patient,
-    get_active_admission_for_patient,
     get_admission,
     get_bed,
     get_bed_reservation,
@@ -59,6 +64,7 @@ from app.modules.ward.services.ward_service import (
     reserve_bed,
     set_bed_maintenance,
     transfer_bed,
+    update_ward,
 )
 
 
@@ -68,10 +74,6 @@ ward_bp = Blueprint(
     url_prefix="/api/wards",
 )
 
-
-# ============================================================================
-# ROLES
-# ============================================================================
 
 MANAGEMENT_ROLES = (
     Role.ADMIN,
@@ -93,19 +95,17 @@ VIEW_ROLES = (
 )
 
 
-# ============================================================================
-# AUTH HELPERS
-# ============================================================================
-
-def _current_user():
-    """
-    Return the authenticated user.
-    """
+def _current_user() -> User:
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
     except (TypeError, ValueError):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    if user_id <= 0:
         raise ValidationError(
             "Invalid authentication identity"
         )
@@ -126,12 +126,6 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    """
-    Resolve clinic ownership exclusively from the authenticated user.
-
-    Never accept clinic_id from the request body or query string.
-    """
-
     user = _current_user()
 
     if user.clinic_id is None:
@@ -143,14 +137,6 @@ def _current_clinic_id() -> int:
 
 
 def _current_staff_id() -> int:
-    """
-    Resolve the staff record belonging to the authenticated user.
-
-    Ward reservations and admissions must be attributed to the
-    authenticated staff member rather than accepting a staff ID
-    from the client.
-    """
-
     user = _current_user()
 
     if user.staff is None:
@@ -172,6 +158,55 @@ def _serialize_model(schema, value):
     )
 
 
+def _serialize_page(
+    response_schema,
+    item_schema,
+    result,
+):
+    items = [
+        _serialize_model(
+            item_schema,
+            item,
+        )
+        for item in result["items"]
+    ]
+
+    payload = {
+        "items": items,
+        "total": result["total"],
+        "page": result["page"],
+        "per_page": result["per_page"],
+    }
+
+    return response_schema.model_validate(
+        payload
+    ).model_dump(
+        mode="json"
+    )
+
+
+def _request_json() -> dict:
+    payload = request.get_json(
+        silent=True
+    )
+
+    if payload is None:
+        return {}
+
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            "Request body must be a JSON object"
+        )
+
+    return payload
+
+
+def _query_params() -> dict:
+    return request.args.to_dict(
+        flat=True
+    )
+
+
 def _domain_error_response(exc: DomainError):
     return jsonify(
         {
@@ -180,7 +215,9 @@ def _domain_error_response(exc: DomainError):
     ), exc.status_code
 
 
-def _validation_error_response(exc: PydanticValidationError):
+def _validation_error_response(
+    exc: PydanticValidationError,
+):
     return jsonify(
         {
             "error": "Validation failed",
@@ -189,25 +226,10 @@ def _validation_error_response(exc: PydanticValidationError):
     ), 422
 
 
-def _parse_enum(value, enum_class, field_name):
-    if value is None:
-        return None
-
-    try:
-        return enum_class(value)
-    except ValueError:
-        raise ValidationError(
-            f"Invalid {field_name}: {value}"
-        )
-
-
-# ============================================================================
-# WARDS
-# ============================================================================
+# Wards
 
 
 @ward_bp.route("", methods=["POST"])
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def create_ward_route():
     try:
@@ -215,9 +237,7 @@ def create_ward_route():
         clinic_id = _current_clinic_id()
 
         payload = WardCreateSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         ward = create_ward(
@@ -232,7 +252,7 @@ def create_ward_route():
             {
                 "message": "Ward created successfully",
                 "ward": _serialize_model(
-                    WardCreateSchema,
+                    WardResponseSchema,
                     ward,
                 ),
             }
@@ -245,32 +265,37 @@ def create_ward_route():
         return _domain_error_response(exc)
 
 
-@ward_bp.route("", methods=["GET"])
-@jwt_required()
-@role_required(*VIEW_ROLES)
-def list_wards_route():
+@ward_bp.route(
+    "/<int:ward_id>",
+    methods=["PATCH"],
+)
+@role_required(*MANAGEMENT_ROLES)
+def update_ward_route(ward_id: int):
     try:
+        user = _current_user()
         clinic_id = _current_clinic_id()
 
-        ward_type = _parse_enum(
-            request.args.get("ward_type"),
-            WardType,
-            "ward type",
+        payload = WardUpdateSchema.model_validate(
+            _request_json()
         )
 
-        wards = list_wards(
+        ward = update_ward(
+            ward_id=ward_id,
             clinic_id=clinic_id,
-            ward_type=ward_type,
+            actor_user_id=user.id,
+            name=payload.name,
+            ward_type=payload.ward_type,
+            capacity=payload.capacity,
         )
 
         return jsonify(
-            [
-                _serialize_model(
-                    WardCreateSchema,
+            {
+                "message": "Ward updated successfully",
+                "ward": _serialize_model(
+                    WardResponseSchema,
                     ward,
-                )
-                for ward in wards
-            ]
+                ),
+            }
         ), 200
 
     except PydanticValidationError as exc:
@@ -280,8 +305,42 @@ def list_wards_route():
         return _domain_error_response(exc)
 
 
-@ward_bp.route("/<int:ward_id>", methods=["GET"])
-@jwt_required()
+@ward_bp.route("", methods=["GET"])
+@role_required(*VIEW_ROLES)
+def list_wards_route():
+    try:
+        clinic_id = _current_clinic_id()
+
+        payload = WardListQuerySchema.model_validate(
+            _query_params()
+        )
+
+        result = list_wards(
+            clinic_id=clinic_id,
+            ward_type=payload.ward_type,
+            page=payload.page,
+            per_page=payload.per_page,
+        )
+
+        return jsonify(
+            _serialize_page(
+                WardListResponseSchema,
+                WardResponseSchema,
+                result,
+            )
+        ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
+
+
+@ward_bp.route(
+    "/<int:ward_id>",
+    methods=["GET"],
+)
 @role_required(*VIEW_ROLES)
 def get_ward_route(ward_id: int):
     try:
@@ -294,7 +353,7 @@ def get_ward_route(ward_id: int):
 
         return jsonify(
             _serialize_model(
-                WardCreateSchema,
+                WardResponseSchema,
                 ward,
             )
         ), 200
@@ -307,7 +366,6 @@ def get_ward_route(ward_id: int):
     "/<int:ward_id>/occupancy",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_ward_occupancy_route(ward_id: int):
     try:
@@ -319,30 +377,23 @@ def get_ward_occupancy_route(ward_id: int):
         )
 
         return jsonify(
-            WardOccupancyResponseSchema.model_validate(
-                occupancy
-            ).model_dump(
-                mode="json"
+            _serialize_model(
+                WardOccupancyResponseSchema,
+                occupancy,
             )
         ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
 
     except DomainError as exc:
         return _domain_error_response(exc)
 
 
-# ============================================================================
-# BEDS
-# ============================================================================
+# Beds
 
 
 @ward_bp.route(
     "/<int:ward_id>/beds",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def add_bed_route(ward_id: int):
     try:
@@ -350,9 +401,7 @@ def add_bed_route(ward_id: int):
         clinic_id = _current_clinic_id()
 
         payload = BedCreateSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         bed = add_bed(
@@ -365,12 +414,10 @@ def add_bed_route(ward_id: int):
         return jsonify(
             {
                 "message": "Bed added successfully",
-                "bed": {
-                    "id": bed.id,
-                    "ward_id": bed.ward_id,
-                    "bed_number": bed.bed_number,
-                    "status": bed.status.value,
-                },
+                "bed": _serialize_model(
+                    BedResponseSchema,
+                    bed,
+                ),
             }
         ), 201
 
@@ -385,35 +432,33 @@ def add_bed_route(ward_id: int):
     "/<int:ward_id>/beds",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_beds_route(ward_id: int):
     try:
         clinic_id = _current_clinic_id()
 
-        status = _parse_enum(
-            request.args.get("status"),
-            BedStatus,
-            "bed status",
+        payload = BedListQuerySchema.model_validate(
+            _query_params()
         )
 
-        beds = list_beds(
+        result = list_beds(
             ward_id=ward_id,
             clinic_id=clinic_id,
-            status=status,
+            status=payload.status,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
         return jsonify(
-            [
-                {
-                    "id": bed.id,
-                    "ward_id": bed.ward_id,
-                    "bed_number": bed.bed_number,
-                    "status": bed.status.value,
-                }
-                for bed in beds
-            ]
+            _serialize_page(
+                BedListResponseSchema,
+                BedResponseSchema,
+                result,
+            )
         ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
 
     except DomainError as exc:
         return _domain_error_response(exc)
@@ -423,7 +468,6 @@ def list_beds_route(ward_id: int):
     "/beds/<int:bed_id>",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_bed_route(bed_id: int):
     try:
@@ -435,12 +479,10 @@ def get_bed_route(bed_id: int):
         )
 
         return jsonify(
-            {
-                "id": bed.id,
-                "ward_id": bed.ward_id,
-                "bed_number": bed.bed_number,
-                "status": bed.status.value,
-            }
+            _serialize_model(
+                BedResponseSchema,
+                bed,
+            )
         ), 200
 
     except DomainError as exc:
@@ -451,7 +493,6 @@ def get_bed_route(bed_id: int):
     "/beds/<int:bed_id>/maintenance",
     methods=["PATCH"],
 )
-@jwt_required()
 @role_required(*MANAGEMENT_ROLES)
 def set_bed_maintenance_route(bed_id: int):
     try:
@@ -459,9 +500,7 @@ def set_bed_maintenance_route(bed_id: int):
         clinic_id = _current_clinic_id()
 
         payload = BedMaintenanceSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         bed = set_bed_maintenance(
@@ -474,12 +513,10 @@ def set_bed_maintenance_route(bed_id: int):
         return jsonify(
             {
                 "message": "Bed maintenance status updated",
-                "bed": {
-                    "id": bed.id,
-                    "ward_id": bed.ward_id,
-                    "bed_number": bed.bed_number,
-                    "status": bed.status.value,
-                },
+                "bed": _serialize_model(
+                    BedResponseSchema,
+                    bed,
+                ),
             }
         ), 200
 
@@ -490,16 +527,13 @@ def set_bed_maintenance_route(bed_id: int):
         return _domain_error_response(exc)
 
 
-# ============================================================================
-# RESERVATIONS
-# ============================================================================
+# Reservations
 
 
 @ward_bp.route(
     "/reservations",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def reserve_bed_route():
     try:
@@ -508,9 +542,7 @@ def reserve_bed_route():
         staff_id = _current_staff_id()
 
         payload = BedReservationCreateSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         reservation = reserve_bed(
@@ -544,54 +576,34 @@ def reserve_bed_route():
     "/reservations",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_bed_reservations_route():
     try:
         clinic_id = _current_clinic_id()
 
-        status = _parse_enum(
-            request.args.get("status"),
-            ReservationStatus,
-            "reservation status",
+        payload = BedReservationListQuerySchema.model_validate(
+            _query_params()
         )
 
-        patient_id = request.args.get(
-            "patient_id",
-            type=int,
-        )
-
-        bed_id = request.args.get(
-            "bed_id",
-            type=int,
-        )
-
-        if patient_id is not None and patient_id <= 0:
-            raise ValidationError(
-                "patient_id must be greater than zero"
-            )
-
-        if bed_id is not None and bed_id <= 0:
-            raise ValidationError(
-                "bed_id must be greater than zero"
-            )
-
-        reservations = list_bed_reservations(
+        result = list_bed_reservations(
             clinic_id=clinic_id,
-            status=status,
-            patient_id=patient_id,
-            bed_id=bed_id,
+            status=payload.status,
+            patient_id=payload.patient_id,
+            bed_id=payload.bed_id,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
         return jsonify(
-            [
-                _serialize_model(
-                    BedReservationResponseSchema,
-                    reservation,
-                )
-                for reservation in reservations
-            ]
+            _serialize_page(
+                BedReservationListResponseSchema,
+                BedReservationResponseSchema,
+                result,
+            )
         ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
 
     except DomainError as exc:
         return _domain_error_response(exc)
@@ -642,11 +654,9 @@ def get_patient_active_reservation_route(
                 "patient_id must be greater than zero"
             )
 
-        reservation = (
-            get_active_bed_reservation_for_patient(
-                patient_id=patient_id,
-                clinic_id=clinic_id,
-            )
+        reservation = get_active_bed_reservation_for_patient(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
         )
 
         if reservation is None:
@@ -671,7 +681,6 @@ def get_patient_active_reservation_route(
     "/beds/<int:bed_id>/reservation",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_bed_active_reservation_route(
     bed_id: int,
@@ -684,11 +693,9 @@ def get_bed_active_reservation_route(
                 "bed_id must be greater than zero"
             )
 
-        reservation = (
-            get_active_bed_reservation_for_bed(
-                bed_id=bed_id,
-                clinic_id=clinic_id,
-            )
+        reservation = get_active_bed_reservation_for_bed(
+            bed_id=bed_id,
+            clinic_id=clinic_id,
         )
 
         if reservation is None:
@@ -713,7 +720,6 @@ def get_bed_active_reservation_route(
     "/reservations/<int:reservation_id>/cancel",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def cancel_bed_reservation_route(
     reservation_id: int,
@@ -723,9 +729,7 @@ def cancel_bed_reservation_route(
         clinic_id = _current_clinic_id()
 
         payload = BedReservationCancelSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         reservation = cancel_bed_reservation(
@@ -752,16 +756,13 @@ def cancel_bed_reservation_route(
         return _domain_error_response(exc)
 
 
-# ============================================================================
-# ADMISSIONS
-# ============================================================================
+# Admissions
 
 
 @ward_bp.route(
     "/reservations/<int:reservation_id>/admit",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def admit_patient_from_reservation_route(
     reservation_id: int,
@@ -772,9 +773,7 @@ def admit_patient_from_reservation_route(
         staff_id = _current_staff_id()
 
         payload = AdmissionFromReservationSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         admission = admit_patient_from_reservation(
@@ -788,20 +787,10 @@ def admit_patient_from_reservation_route(
         return jsonify(
             {
                 "message": "Patient admitted from reservation",
-                "admission": {
-                    "id": admission.id,
-                    "patient_id": admission.patient_id,
-                    "bed_id": admission.bed_id,
-                    "admitted_by_id": admission.admitted_by_id,
-                    "reservation_id": admission.reservation_id,
-                    "status": admission.status.value,
-                    "reason": admission.reason,
-                    "admitted_at": (
-                        admission.admitted_at.isoformat()
-                        if admission.admitted_at
-                        else None
-                    ),
-                },
+                "admission": _serialize_model(
+                    AdmissionResponseSchema,
+                    admission,
+                ),
             }
         ), 201
 
@@ -816,7 +805,6 @@ def admit_patient_from_reservation_route(
     "/admissions",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def admit_patient_route():
     try:
@@ -825,9 +813,7 @@ def admit_patient_route():
         staff_id = _current_staff_id()
 
         payload = AdmissionCreateSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         admission = admit_patient(
@@ -842,20 +828,10 @@ def admit_patient_route():
         return jsonify(
             {
                 "message": "Patient admitted successfully",
-                "admission": {
-                    "id": admission.id,
-                    "patient_id": admission.patient_id,
-                    "bed_id": admission.bed_id,
-                    "admitted_by_id": admission.admitted_by_id,
-                    "reservation_id": admission.reservation_id,
-                    "status": admission.status.value,
-                    "reason": admission.reason,
-                    "admitted_at": (
-                        admission.admitted_at.isoformat()
-                        if admission.admitted_at
-                        else None
-                    ),
-                },
+                "admission": _serialize_model(
+                    AdmissionResponseSchema,
+                    admission,
+                ),
             }
         ), 201
 
@@ -870,7 +846,6 @@ def admit_patient_route():
     "/admissions/<int:admission_id>",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_admission_route(admission_id: int):
     try:
@@ -882,25 +857,10 @@ def get_admission_route(admission_id: int):
         )
 
         return jsonify(
-            {
-                "id": admission.id,
-                "patient_id": admission.patient_id,
-                "bed_id": admission.bed_id,
-                "admitted_by_id": admission.admitted_by_id,
-                "reservation_id": admission.reservation_id,
-                "status": admission.status.value,
-                "reason": admission.reason,
-                "admitted_at": (
-                    admission.admitted_at.isoformat()
-                    if admission.admitted_at
-                    else None
-                ),
-                "discharged_at": (
-                    admission.discharged_at.isoformat()
-                    if admission.discharged_at
-                    else None
-                ),
-            }
+            _serialize_model(
+                AdmissionResponseSchema,
+                admission,
+            )
         ), 200
 
     except DomainError as exc:
@@ -911,7 +871,6 @@ def get_admission_route(admission_id: int):
     "/patients/<int:patient_id>/admissions",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def list_patient_admissions_route(
     patient_id: int,
@@ -924,35 +883,27 @@ def list_patient_admissions_route(
                 "patient_id must be greater than zero"
             )
 
-        admissions = list_admissions_for_patient(
+        payload = AdmissionListQuerySchema.model_validate(
+            _query_params()
+        )
+
+        result = list_admissions_for_patient(
             patient_id=patient_id,
             clinic_id=clinic_id,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
         return jsonify(
-            [
-                {
-                    "id": admission.id,
-                    "patient_id": admission.patient_id,
-                    "bed_id": admission.bed_id,
-                    "admitted_by_id": admission.admitted_by_id,
-                    "reservation_id": admission.reservation_id,
-                    "status": admission.status.value,
-                    "reason": admission.reason,
-                    "admitted_at": (
-                        admission.admitted_at.isoformat()
-                        if admission.admitted_at
-                        else None
-                    ),
-                    "discharged_at": (
-                        admission.discharged_at.isoformat()
-                        if admission.discharged_at
-                        else None
-                    ),
-                }
-                for admission in admissions
-            ]
+            _serialize_page(
+                AdmissionListResponseSchema,
+                AdmissionResponseSchema,
+                result,
+            )
         ), 200
+
+    except PydanticValidationError as exc:
+        return _validation_error_response(exc)
 
     except DomainError as exc:
         return _domain_error_response(exc)
@@ -962,7 +913,6 @@ def list_patient_admissions_route(
     "/patients/<int:patient_id>/current-admission",
     methods=["GET"],
 )
-@jwt_required()
 @role_required(*VIEW_ROLES)
 def get_current_patient_admission_route(
     patient_id: int,
@@ -988,25 +938,10 @@ def get_current_patient_admission_route(
             ), 404
 
         return jsonify(
-            {
-                "id": admission.id,
-                "patient_id": admission.patient_id,
-                "bed_id": admission.bed_id,
-                "admitted_by_id": admission.admitted_by_id,
-                "reservation_id": admission.reservation_id,
-                "status": admission.status.value,
-                "reason": admission.reason,
-                "admitted_at": (
-                    admission.admitted_at.isoformat()
-                    if admission.admitted_at
-                    else None
-                ),
-                "discharged_at": (
-                    admission.discharged_at.isoformat()
-                    if admission.discharged_at
-                    else None
-                ),
-            }
+            _serialize_model(
+                AdmissionResponseSchema,
+                admission,
+            )
         ), 200
 
     except DomainError as exc:
@@ -1017,7 +952,6 @@ def get_current_patient_admission_route(
     "/admissions/<int:admission_id>/transfer",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def transfer_bed_route(admission_id: int):
     try:
@@ -1025,9 +959,7 @@ def transfer_bed_route(admission_id: int):
         clinic_id = _current_clinic_id()
 
         payload = AdmissionTransferSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         transfer = transfer_bed(
@@ -1042,15 +974,15 @@ def transfer_bed_route(admission_id: int):
             {
                 "message": "Patient transferred successfully",
                 "transfer": {
-                    "id": transfer.id,
-                    "admission_id": transfer.admission_id,
-                    "from_bed_id": transfer.from_bed_id,
-                    "to_bed_id": transfer.to_bed_id,
-                    "reason": transfer.reason,
-                    "transferred_at": (
-                        transfer.transferred_at.isoformat()
-                        if transfer.transferred_at
-                        else None
+                "id": transfer.id,
+                "admission_id": transfer.admission_id,
+                "from_bed_id": transfer.from_bed_id,
+                "to_bed_id": transfer.to_bed_id,
+                "reason": transfer.reason,
+                "transferred_at": (
+                    transfer.transferred_at.isoformat()
+                    if transfer.transferred_at
+                    else None
                     ),
                 },
             }
@@ -1067,7 +999,6 @@ def transfer_bed_route(admission_id: int):
     "/admissions/<int:admission_id>/discharge",
     methods=["POST"],
 )
-@jwt_required()
 @role_required(*CLINICAL_ROLES)
 def discharge_patient_route(admission_id: int):
     try:
@@ -1075,9 +1006,7 @@ def discharge_patient_route(admission_id: int):
         clinic_id = _current_clinic_id()
 
         payload = AdmissionDischargeSchema.model_validate(
-            request.get_json(
-                silent=True
-            ) or {}
+            _request_json()
         )
 
         admission = discharge_patient(
@@ -1090,23 +1019,10 @@ def discharge_patient_route(admission_id: int):
         return jsonify(
             {
                 "message": "Patient discharged successfully",
-                "admission": {
-                    "id": admission.id,
-                    "patient_id": admission.patient_id,
-                    "bed_id": admission.bed_id,
-                    "status": admission.status.value,
-                    "reason": admission.reason,
-                    "admitted_at": (
-                        admission.admitted_at.isoformat()
-                        if admission.admitted_at
-                        else None
-                    ),
-                    "discharged_at": (
-                        admission.discharged_at.isoformat()
-                        if admission.discharged_at
-                        else None
-                    ),
-                },
+                "admission": _serialize_model(
+                    AdmissionResponseSchema,
+                    admission,
+                ),
             }
         ), 200
 

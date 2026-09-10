@@ -21,11 +21,6 @@ from app.core.exceptions import (
 )
 
 
-# ============================================================================
-# ROUTE MODULE / AUTHENTICATED ACTOR FIXTURES
-# ============================================================================
-
-
 @pytest.fixture
 def lab_routes():
     import app.modules.lab.routes.lab_route as routes
@@ -35,12 +30,6 @@ def lab_routes():
 
 @pytest.fixture
 def lab_admin_context(make_authenticated_staff, clinic):
-    """
-    Real authenticated ADMIN + linked Staff record.
-
-    Inventory taught us not to authenticate with the standalone `user`
-    fixture for routes that resolve the Staff record from the JWT user.
-    """
     return make_authenticated_staff(
         clinic,
         Role.ADMIN,
@@ -127,11 +116,6 @@ def lab_receptionist_headers(lab_receptionist_context):
     return headers
 
 
-# ============================================================================
-# SIMPLE SERIALIZATION OBJECTS
-# ============================================================================
-
-
 def make_lab_test(**overrides):
     values = dict(
         id=1,
@@ -200,9 +184,19 @@ def make_lab_order(**overrides):
     return SimpleNamespace(**values)
 
 
-# ============================================================================
-# AUTHENTICATION / TENANCY HELPERS
-# ============================================================================
+def make_page(
+    items,
+    *,
+    total=None,
+    page=1,
+    per_page=50,
+):
+    return SimpleNamespace(
+        items=list(items),
+        total=len(items) if total is None else total,
+        page=page,
+        per_page=per_page,
+    )
 
 
 def test_endpoints_require_auth(client):
@@ -368,7 +362,6 @@ def test_get_current_staff_uses_modern_select(
     )
 
     assert lab_routes._get_current_staff() is lab_admin_staff
-
     execute.assert_called_once()
 
     statement = execute.call_args.args[0]
@@ -420,11 +413,6 @@ def test_get_current_staff_id_returns_staff_primary_key(
         lab_routes._get_current_staff_id()
         == lab_admin_staff.id
     )
-
-
-# ============================================================================
-# SERIALIZERS
-# ============================================================================
 
 
 def test_serialize_lab_test_handles_values(
@@ -496,11 +484,6 @@ def test_serialize_lab_order(
     assert result["status"] == LabOrderStatus.IN_PROGRESS.value
     assert result["qr_code"] == "LAB-123"
     assert len(result["items"]) == 1
-
-
-# ============================================================================
-# ROLE AUTHORIZATION
-# ============================================================================
 
 
 def test_create_test_is_admin_only(
@@ -607,11 +590,6 @@ def test_cancel_order_rejects_receptionist(
     )
 
     assert response.status_code == 403
-
-
-# ============================================================================
-# LAB TEST CATALOG
-# ============================================================================
 
 
 def test_create_lab_test_success(
@@ -777,12 +755,18 @@ def test_list_lab_tests_success(
     monkeypatch,
     lab_routes,
 ):
-    service = Mock(
-        return_value=[
+    page = make_page(
+        [
             make_lab_test(clinic_id=None),
-            make_lab_test(id=2, clinic_id=lab_admin_staff.clinic_id),
-        ]
+            make_lab_test(
+                id=2,
+                clinic_id=lab_admin_staff.clinic_id,
+            ),
+        ],
+        total=2,
     )
+
+    service = Mock(return_value=page)
 
     monkeypatch.setattr(
         lab_routes,
@@ -796,7 +780,15 @@ def test_list_lab_tests_success(
     )
 
     assert response.status_code == 200
-    assert len(response.get_json()["data"]) == 2
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["total"] == 2
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert len(body["data"]["items"]) == 2
+
     assert (
         service.call_args.kwargs["clinic_id"]
         == lab_admin_staff.clinic_id
@@ -805,15 +797,29 @@ def test_list_lab_tests_success(
         service.call_args.kwargs["active_only"]
         is True
     )
+    assert service.call_args.kwargs["page"] == 1
+    assert service.call_args.kwargs["per_page"] == 50
 
 
-def test_list_lab_tests_forwards_active_only(
+def test_list_lab_tests_forwards_filters_and_pagination(
     client,
     lab_admin_headers,
+    lab_admin_staff,
     monkeypatch,
     lab_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=make_page(
+            [
+                make_lab_test(
+                    clinic_id=lab_admin_staff.clinic_id
+                )
+            ],
+            total=21,
+            page=2,
+            per_page=10,
+        )
+    )
 
     monkeypatch.setattr(
         lab_routes,
@@ -822,15 +828,47 @@ def test_list_lab_tests_forwards_active_only(
     )
 
     response = client.get(
-        "/api/lab/tests?active_only=false",
+        "/api/lab/tests?active_only=false&page=2&per_page=10",
         headers=lab_admin_headers,
     )
 
     assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 10
+    assert body["data"]["total"] == 21
+
     assert (
         service.call_args.kwargs["active_only"]
         is False
     )
+    assert service.call_args.kwargs["page"] == 2
+    assert service.call_args.kwargs["per_page"] == 10
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=501",
+        "per_page=-1",
+    ],
+)
+def test_list_lab_tests_rejects_invalid_pagination(
+    client,
+    lab_admin_headers,
+    query,
+):
+    response = client.get(
+        f"/api/lab/tests?{query}",
+        headers=lab_admin_headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_lab_tests_rejects_unknown_query(
@@ -885,7 +923,9 @@ def test_get_lab_test_maps_not_found(
         lab_routes,
         "get_lab_test",
         Mock(
-            side_effect=NotFoundError("Lab test not found")
+            side_effect=NotFoundError(
+                "Lab test not found"
+            )
         ),
     )
 
@@ -984,11 +1024,6 @@ def test_update_lab_test_rejects_client_clinic(
     )
 
     assert response.status_code == 422
-
-
-# ============================================================================
-# LAB ORDER CREATION / RETRIEVAL
-# ============================================================================
 
 
 def test_create_lab_order_success(
@@ -1136,9 +1171,12 @@ def test_list_orders_for_patient_success(
     monkeypatch,
     lab_routes,
 ):
-    service = Mock(
-        return_value=[make_lab_order()]
+    page = make_page(
+        [make_lab_order()],
+        total=1,
     )
+
+    service = Mock(return_value=page)
 
     monkeypatch.setattr(
         lab_routes,
@@ -1152,15 +1190,84 @@ def test_list_orders_for_patient_success(
     )
 
     assert response.status_code == 200
-    assert response.get_json()["data"][0]["patient_id"] == 10
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert body["data"]["items"][0]["patient_id"] == 10
+
     assert (
         service.call_args.kwargs["clinic_id"]
         == lab_admin_staff.clinic_id
     )
-    assert (
-        service.call_args.kwargs["patient_id"]
-        == 10
+    assert service.call_args.kwargs["patient_id"] == 10
+    assert service.call_args.kwargs["page"] == 1
+    assert service.call_args.kwargs["per_page"] == 50
+
+
+def test_list_orders_for_patient_forwards_pagination(
+    client,
+    lab_admin_headers,
+    lab_admin_staff,
+    monkeypatch,
+    lab_routes,
+):
+    service = Mock(
+        return_value=make_page(
+            [make_lab_order()],
+            total=25,
+            page=3,
+            per_page=10,
+        )
     )
+
+    monkeypatch.setattr(
+        lab_routes,
+        "list_orders_for_patient",
+        service,
+    )
+
+    response = client.get(
+        "/api/lab/orders?patient_id=10&page=3&per_page=10",
+        headers=lab_admin_headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 10
+    assert body["data"]["total"] == 25
+
+    assert service.call_args.kwargs["patient_id"] == 10
+    assert service.call_args.kwargs["page"] == 3
+    assert service.call_args.kwargs["per_page"] == 10
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "patient_id=10&page=0",
+        "patient_id=10&page=-1",
+        "patient_id=10&per_page=0",
+        "patient_id=10&per_page=501",
+    ],
+)
+def test_list_orders_for_patient_rejects_invalid_pagination(
+    client,
+    lab_admin_headers,
+    query,
+):
+    response = client.get(
+        f"/api/lab/orders?{query}",
+        headers=lab_admin_headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_orders_for_patient_requires_patient_id(
@@ -1197,7 +1304,9 @@ def test_get_lab_order_maps_not_found(
         lab_routes,
         "get_lab_order",
         Mock(
-            side_effect=NotFoundError("Order not found")
+            side_effect=NotFoundError(
+                "Order not found"
+            )
         ),
     )
 
@@ -1207,12 +1316,10 @@ def test_get_lab_order_maps_not_found(
     )
 
     assert response.status_code == 404
-    assert response.get_json()["error"] == "Order not found"
-
-
-# ============================================================================
-# SAMPLE COLLECTION
-# ============================================================================
+    assert (
+        response.get_json()["error"]
+        == "Order not found"
+    )
 
 
 def test_collect_sample_success(
@@ -1326,11 +1433,6 @@ def test_collect_sample_maps_conflict(
     )
 
 
-# ============================================================================
-# EQUIPMENT
-# ============================================================================
-
-
 def test_link_equipment_success(
     client,
     lab_technician_headers,
@@ -1394,11 +1496,6 @@ def test_link_equipment_rejects_unknown_field(
     assert response.status_code == 422
 
 
-# ============================================================================
-# SAMPLE PROCESSING
-# ============================================================================
-
-
 def test_process_sample_success(
     client,
     lab_technician_headers,
@@ -1456,11 +1553,6 @@ def test_process_sample_rejects_client_actor(
     )
 
     assert response.status_code == 422
-
-
-# ============================================================================
-# RESULT ENTRY
-# ============================================================================
 
 
 def test_enter_result_success(
@@ -1586,11 +1678,6 @@ def test_enter_result_maps_conflict(
     assert response.status_code == 409
 
 
-# ============================================================================
-# VERIFICATION
-# ============================================================================
-
-
 def test_verify_results_success(
     client,
     lab_technician_headers,
@@ -1664,11 +1751,6 @@ def test_verify_results_accepts_empty_body(
     assert response.status_code == 200
 
 
-# ============================================================================
-# COMPLETION
-# ============================================================================
-
-
 def test_complete_order_success(
     client,
     lab_technician_headers,
@@ -1719,14 +1801,7 @@ def test_complete_order_does_not_accept_actor_id(
         },
     )
 
-    # Empty-body validation is not used on this route, so the body
-    # is ignored and the service is responsible for completion rules.
     assert response.status_code != 422
-
-
-# ============================================================================
-# CANCELLATION
-# ============================================================================
 
 
 def test_cancel_order_success(
@@ -1828,11 +1903,6 @@ def test_cancel_order_rejects_long_reason(
     assert response.status_code == 422
 
 
-# ============================================================================
-# ERROR TRANSLATION
-# ============================================================================
-
-
 @pytest.mark.parametrize(
     "exception,status_code",
     [
@@ -1901,11 +1971,6 @@ def test_unexpected_exception_is_not_exposed(
     assert "SECRET INTERNAL DETAIL" not in response.text
 
 
-# ============================================================================
-# VALIDATION RESPONSE SHAPE
-# ============================================================================
-
-
 def test_pydantic_validation_returns_consistent_shape(
     client,
     lab_admin_headers,
@@ -1926,11 +1991,6 @@ def test_pydantic_validation_returns_consistent_shape(
     assert body["error"] == "Validation failed"
     assert isinstance(body["details"], list)
     assert body["details"]
-
-
-# ============================================================================
-# CROSS-TENANT / CLIENT-CONTROL PROTECTION
-# ============================================================================
 
 
 def test_create_order_has_no_client_controlled_staff_identity(
@@ -2008,11 +2068,6 @@ def test_cancel_order_has_no_client_controlled_staff_identity(
     )
 
     assert response.status_code == 422
-
-
-# ============================================================================
-# ROUTE SERVICE INVOCATION CONTRACTS
-# ============================================================================
 
 
 def test_create_lab_test_passes_all_schema_fields(

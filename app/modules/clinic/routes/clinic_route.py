@@ -1,8 +1,8 @@
 from flask import Blueprint, g, jsonify, request
-from pydantic import ValidationError as PydanticValidationError
-from app.extensions import db
 from flask_jwt_extended import get_jwt_identity
-from app.core.exceptions import DomainError
+from pydantic import ValidationError as PydanticValidationError
+
+from app.extensions import db
 from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
@@ -77,9 +77,6 @@ CLINIC_MANAGEMENT_ROLES = (
 def _serialize_clinic(clinic):
     """
     Serialize a clinic without exposing sensitive internal fields.
-
-    IMPORTANT:
-    api_token is intentionally excluded.
     """
 
     return {
@@ -125,12 +122,6 @@ def _serialize_clinic(clinic):
 # ============================================================================
 
 def _is_admin():
-    """
-    Determine whether the authenticated user has the ADMIN role.
-
-    role_required() has already populated g.current_user_role.
-    """
-
     role = getattr(g, "current_user_role", None)
 
     if isinstance(role, Role):
@@ -140,9 +131,6 @@ def _is_admin():
 
 
 def _get_current_user():
-    """
-    Return the authenticated user.
-    """
     identity = get_jwt_identity()
 
     try:
@@ -172,12 +160,7 @@ def _get_authorized_clinic(clinic_id: int):
     Enforce clinic tenant isolation.
 
     ADMIN users may access any clinic.
-
-    Non-admin users may only access their authenticated
-    clinic.
-
-    Returns:
-        Clinic instance or an HTTP response tuple.
+    Non-admin users may access only their own clinic.
     """
 
     if clinic_id <= 0:
@@ -191,16 +174,6 @@ def _get_authorized_clinic(clinic_id: int):
         )
 
     user = _get_current_user()
-
-    if user is None:
-        return (
-            jsonify(
-                {
-                    "error": "Authenticated user not found",
-                }
-            ),
-            401,
-        )
 
     if _is_admin():
         return None
@@ -234,25 +207,11 @@ def _get_authorized_user_clinic():
     """
     Return the authenticated user's clinic ID.
 
-    ADMIN users may not have a clinic_id because they can operate
+    ADMIN users may not have a clinic_id because they operate
     at the system level.
-
-    Returns:
-        int | None
-        or an HTTP response tuple.
     """
 
     user = _get_current_user()
-
-    if user is None:
-        return (
-            jsonify(
-                {
-                    "error": "Authenticated user not found",
-                }
-            ),
-            401,
-        )
 
     clinic_id = getattr(user, "clinic_id", None)
 
@@ -275,9 +234,7 @@ def _get_authorized_user_clinic():
 
 def _sanitize_pydantic_errors(errors):
     """
-    Convert Pydantic validation errors into JSON-safe dictionaries.
-
-    Pydantic v2 can place exception objects inside the ctx field.
+    Convert Pydantic errors into JSON-safe dictionaries.
     """
 
     sanitized = []
@@ -298,11 +255,7 @@ def _sanitize_pydantic_errors(errors):
 
 def _validate_json(schema):
     """
-    Validate request JSON using the supplied Pydantic schema.
-
-    Returns:
-        (payload, None) on success
-        (None, response) on validation failure
+    Validate request JSON with the supplied Pydantic schema.
     """
 
     try:
@@ -324,20 +277,14 @@ def _validate_json(schema):
                         ),
                     }
                 ),
-                400,
+                422,
             ),
         )
 
 
 def _parse_status(raw_status=None):
     """
-    Parse a clinic status value.
-
-    If raw_status is omitted, read ?status= from the request.
-
-    Returns:
-        ClinicStatus | None
-        or an HTTP error response tuple.
+    Parse a clinic status from the query string.
     """
 
     if raw_status is None:
@@ -369,7 +316,9 @@ def _parse_status(raw_status=None):
 @clinic_bp.post("")
 @role_required(*CLINIC_MANAGEMENT_ROLES)
 def create_clinic_route():
-    payload, error = _validate_json(ClinicCreateSchema)
+    payload, error = _validate_json(
+        ClinicCreateSchema
+    )
 
     if error:
         return error
@@ -404,12 +353,19 @@ def create_clinic_route():
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 @clinic_bp.get("")
@@ -421,13 +377,11 @@ def list_clinics_route():
         return parsed_status
 
     try:
-        # ADMIN is allowed to view the clinic directory.
         if _is_admin():
             clinics = list_clinics(
                 status=parsed_status,
             )
 
-        # Non-admin users must never receive a cross-clinic directory.
         else:
             clinic_id = _get_authorized_user_clinic()
 
@@ -460,18 +414,27 @@ def list_clinics_route():
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ValidationError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 422
+
+    except ConflictError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 409
 
 
 @clinic_bp.get("/<int:clinic_id>")
 @role_required(*CLINIC_VIEW_ROLES)
 def get_clinic_route(clinic_id: int):
-    authorization_error = _get_authorized_clinic(clinic_id)
+    authorization_error = _get_authorized_clinic(
+        clinic_id
+    )
 
     if authorization_error:
         return authorization_error
@@ -492,6 +455,13 @@ def get_clinic_route(clinic_id: int):
             }
         ), 404
 
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
+
 
 # ============================================================================
 # BRANCHES
@@ -500,7 +470,9 @@ def get_clinic_route(clinic_id: int):
 @clinic_bp.get("/<int:clinic_id>/branches")
 @role_required(*CLINIC_VIEW_ROLES)
 def list_clinic_branches_route(clinic_id: int):
-    authorization_error = _get_authorized_clinic(clinic_id)
+    authorization_error = _get_authorized_clinic(
+        clinic_id
+    )
 
     if authorization_error:
         return authorization_error
@@ -525,6 +497,13 @@ def list_clinic_branches_route(clinic_id: int):
                 "error": str(exc),
             }
         ), 404
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 @clinic_bp.post("/<int:clinic_id>/branches")
@@ -568,12 +547,19 @@ def create_clinic_branch_route(clinic_id: int):
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 @clinic_bp.patch(
@@ -617,12 +603,19 @@ def update_clinic_branch_configuration_route(
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 # ============================================================================
@@ -663,12 +656,19 @@ def update_clinic_route(clinic_id: int):
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 # ============================================================================
@@ -705,12 +705,19 @@ def update_clinic_status_route(clinic_id: int):
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 # ============================================================================
@@ -749,12 +756,19 @@ def update_clinic_ai_credits_route(clinic_id: int):
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422
 
 
 # ============================================================================
@@ -791,9 +805,16 @@ def regenerate_clinic_api_token_route(
             }
         ), 404
 
-    except (ValidationError, ConflictError) as exc:
+    except ConflictError as exc:
         return jsonify(
             {
                 "error": str(exc),
             }
-        ), 400
+        ), 409
+
+    except ValidationError as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+            }
+        ), 422

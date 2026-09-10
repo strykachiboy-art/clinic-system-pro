@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
     get_jwt_identity,
@@ -5,6 +7,7 @@ from flask_jwt_extended import (
 )
 from pydantic import ValidationError as PydanticValidationError
 
+from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.exceptions import (
     ConflictError,
@@ -14,7 +17,10 @@ from app.core.exceptions import (
 
 from app.modules.messages.schemas.message_schema import (
     MessageCreateSchema,
+    MessageListQuerySchema,
     MessageReadSchema,
+    MessageSentListQuerySchema,
+    MessageThreadQuerySchema,
     MessageUpdateSchema,
 )
 
@@ -31,11 +37,6 @@ from app.modules.messages.services.message_service import (
 )
 
 
-# ============================================================================
-# BLUEPRINT
-# ============================================================================
-
-
 message_bp = Blueprint(
     "message",
     __name__,
@@ -43,41 +44,39 @@ message_bp = Blueprint(
 )
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def _payload(schema):
-    """
-    Validate incoming JSON using the supplied Pydantic schema.
-    """
-
     try:
-        payload = schema.model_validate(
+        return schema.model_validate(
             request.get_json(silent=True) or {}
         )
-
-        return payload
-
     except PydanticValidationError as exc:
         return (
             jsonify({
                 "success": False,
-                "error": exc.errors(),
+                "error": "Validation failed",
+                "details": exc.errors(),
+            }),
+            422,
+        )
+
+
+def _query_payload(schema):
+    try:
+        return schema.model_validate(
+            request.args.to_dict()
+        )
+    except PydanticValidationError as exc:
+        return (
+            jsonify({
+                "success": False,
+                "error": "Validation failed",
+                "details": exc.errors(),
             }),
             422,
         )
 
 
 def _get_authenticated_user():
-    """
-    Resolve the authenticated JWT identity to an active User.
-
-    The user's clinic_id is used as the tenant boundary for
-    every message operation.
-    """
-
     identity = get_jwt_identity()
 
     try:
@@ -87,9 +86,15 @@ def _get_authenticated_user():
             "Invalid authenticated user identity"
         )
 
-    user = User.query.filter(
-        User.id == user_id,
-    ).first()
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authenticated user identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise NotFoundError(
@@ -106,14 +111,19 @@ def _get_authenticated_user():
             "Authenticated user is not assigned to a clinic"
         )
 
+    if (
+        isinstance(user.clinic_id, bool)
+        or not isinstance(user.clinic_id, int)
+        or user.clinic_id <= 0
+    ):
+        raise ValidationError(
+            "Authenticated user has an invalid clinic"
+        )
+
     return user
 
 
 def _serialize_message(message):
-    """
-    Convert a Message model into an API-safe response.
-    """
-
     return {
         "id": message.id,
         "clinic_id": message.clinic_id,
@@ -153,25 +163,40 @@ def _serialize_message(message):
     }
 
 
-# ============================================================================
-# SEND MESSAGE
-# ============================================================================
+def _serialize_message_page(page):
+    return {
+        "items": [
+            _serialize_message(message)
+            for message in page.items
+        ],
+        "total": page.total,
+        "page": page.page,
+        "per_page": page.per_page,
+    }
+
+
+def _error_response(exc):
+    if isinstance(exc, NotFoundError):
+        status_code = 404
+    elif isinstance(exc, ConflictError):
+        status_code = 409
+    elif isinstance(exc, ValidationError):
+        status_code = 422
+    else:
+        status_code = 400
+
+    return (
+        jsonify({
+            "success": False,
+            "error": str(exc),
+        }),
+        status_code,
+    )
 
 
 @message_bp.post("/")
 @jwt_required()
 def create():
-    """
-    Send a new message.
-
-    POST /api/messages/
-
-    The authenticated user is always the sender.
-
-    clinic_id and sender_id are NEVER accepted from the
-    request body.
-    """
-
     payload = _payload(
         MessageCreateSchema
     )
@@ -188,37 +213,31 @@ def create():
             **payload.model_dump(),
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 201
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            201,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# INBOX
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.get("/inbox")
 @jwt_required()
 def inbox():
-    """
-    Get messages received by the authenticated user.
+    payload = _query_payload(
+        MessageListQuerySchema
+    )
 
-    GET /api/messages/inbox
-    """
+    if isinstance(payload, tuple):
+        return payload
 
     try:
         user = _get_authenticated_user()
@@ -226,42 +245,36 @@ def inbox():
         messages = get_inbox(
             user_id=user.id,
             clinic_id=user.clinic_id,
+            unread_only=payload.unread_only,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_message(message)
-                for message in messages
-            ],
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message_page(messages),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# UNREAD INBOX
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.get("/inbox/unread")
 @jwt_required()
 def unread_inbox():
-    """
-    Get unread messages received by the authenticated user.
+    payload = _query_payload(
+        MessageSentListQuerySchema
+    )
 
-    GET /api/messages/inbox/unread
-    """
+    if isinstance(payload, tuple):
+        return payload
 
     try:
         user = _get_authenticated_user()
@@ -270,42 +283,35 @@ def unread_inbox():
             user_id=user.id,
             clinic_id=user.clinic_id,
             unread_only=True,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_message(message)
-                for message in messages
-            ],
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message_page(messages),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# SENT MESSAGES
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.get("/sent")
 @jwt_required()
 def sent():
-    """
-    Get messages sent by the authenticated user.
+    payload = _query_payload(
+        MessageSentListQuerySchema
+    )
 
-    GET /api/messages/sent
-    """
+    if isinstance(payload, tuple):
+        return payload
 
     try:
         user = _get_authenticated_user()
@@ -313,45 +319,29 @@ def sent():
         messages = get_sent_messages(
             user_id=user.id,
             clinic_id=user.clinic_id,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_message(message)
-                for message in messages
-            ],
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message_page(messages),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# GET MESSAGE
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.get("/<int:message_id>")
 @jwt_required()
 def get(message_id: int):
-    """
-    Get a single message.
-
-    GET /api/messages/<message_id>
-
-    Access is restricted to the sender or recipient.
-    """
-
     try:
         user = _get_authenticated_user()
 
@@ -361,41 +351,25 @@ def get(message_id: int):
             clinic_id=user.clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# UPDATE MESSAGE
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.patch("/<int:message_id>")
 @jwt_required()
 def update(message_id: int):
-    """
-    Update editable message fields.
-
-    PATCH /api/messages/<message_id>
-
-    The service determines whether the authenticated user
-    is allowed to modify the message.
-    """
-
     payload = _payload(
         MessageUpdateSchema
     )
@@ -417,38 +391,25 @@ def update(message_id: int):
             **fields,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# MARK READ
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.post("/<int:message_id>/read")
 @jwt_required()
 def read(message_id: int):
-    """
-    Mark a received message as read.
-
-    POST /api/messages/<message_id>/read
-    """
-
     payload = _payload(
         MessageReadSchema
     )
@@ -465,38 +426,25 @@ def read(message_id: int):
             clinic_id=user.clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# ARCHIVE
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.post("/<int:message_id>/archive")
 @jwt_required()
 def archive(message_id: int):
-    """
-    Archive a message.
-
-    POST /api/messages/<message_id>/archive
-    """
-
     try:
         user = _get_authenticated_user()
 
@@ -506,38 +454,25 @@ def archive(message_id: int):
             clinic_id=user.clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# SOFT DELETE
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.delete("/<int:message_id>")
 @jwt_required()
 def delete(message_id: int):
-    """
-    Soft-delete a message.
-
-    DELETE /api/messages/<message_id>
-    """
-
     try:
         user = _get_authenticated_user()
 
@@ -547,37 +482,31 @@ def delete(message_id: int):
             clinic_id=user.clinic_id,
         )
 
-        return jsonify({
-            "success": True,
-            "data": _serialize_message(message),
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message(message),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
-
-
-# ============================================================================
-# THREAD
-# ============================================================================
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)
 
 
 @message_bp.get("/<int:message_id>/thread")
 @jwt_required()
 def thread(message_id: int):
-    """
-    Get the complete conversation thread.
+    payload = _query_payload(
+        MessageThreadQuerySchema
+    )
 
-    GET /api/messages/<message_id>/thread
-    """
+    if isinstance(payload, tuple):
+        return payload
 
     try:
         user = _get_authenticated_user()
@@ -586,24 +515,21 @@ def thread(message_id: int):
             message_id=message_id,
             user_id=user.id,
             clinic_id=user.clinic_id,
+            page=payload.page,
+            per_page=payload.per_page,
         )
 
-        return jsonify({
-            "success": True,
-            "data": [
-                _serialize_message(message)
-                for message in messages
-            ],
-        }), 200
+        return (
+            jsonify({
+                "success": True,
+                "data": _serialize_message_page(messages),
+            }),
+            200,
+        )
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ConflictError,
+        ValidationError,
+    ) as exc:
+        return _error_response(exc)

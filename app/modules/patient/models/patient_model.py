@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import CheckConstraint, Index
+
 from app.extensions import db
 from app.core.enums.patient_enums import (
-    Gender,
     BloodType,
     FamilyRelation,
+    Gender,
 )
 
 
@@ -15,18 +17,36 @@ def _utcnow():
 class Patient(db.Model):
     __tablename__ = "patients"
 
+    __table_args__ = (
+        Index(
+            "ix_patients_clinic_active_name",
+            "clinic_id",
+            "is_active",
+            "last_name",
+            "first_name",
+            "id",
+        ),
+        CheckConstraint(
+            "length(trim(first_name)) > 0",
+            name="ck_patients_first_name_nonempty",
+        ),
+        CheckConstraint(
+            "length(trim(last_name)) > 0",
+            name="ck_patients_last_name_nonempty",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
     )
-    
+
     user_id = db.Column(
-    db.Integer,
-    db.ForeignKey("users.id"),
-    nullable=True,
-    unique=True,
-    index=True,
-    
+        db.Integer,
+        db.ForeignKey("users.id"),
+        nullable=True,
+        unique=True,
+        index=True,
     )
 
     clinic_id = db.Column(
@@ -37,7 +57,7 @@ class Patient(db.Model):
     )
 
     emirates_id = db.Column(
-        db.String(20),
+        db.String(50),
         unique=True,
         nullable=True,
         index=True,
@@ -49,10 +69,6 @@ class Patient(db.Model):
         nullable=True,
         index=True,
     )
-
-    # -------------------------------------------------------------
-    # Identity
-    # -------------------------------------------------------------
 
     first_name = db.Column(
         db.String(80),
@@ -80,10 +96,6 @@ class Patient(db.Model):
         nullable=False,
     )
 
-    # -------------------------------------------------------------
-    # Contact
-    # -------------------------------------------------------------
-
     phone = db.Column(
         db.String(30),
         nullable=True,
@@ -99,10 +111,6 @@ class Patient(db.Model):
         nullable=True,
     )
 
-    # -------------------------------------------------------------
-    # Medical baseline
-    # -------------------------------------------------------------
-
     allergies = db.Column(
         db.Text,
         nullable=True,
@@ -112,10 +120,6 @@ class Patient(db.Model):
         db.Text,
         nullable=True,
     )
-
-    # -------------------------------------------------------------
-    # Patient identity / lifecycle
-    # -------------------------------------------------------------
 
     patient_number = db.Column(
         db.String(50),
@@ -130,10 +134,6 @@ class Patient(db.Model):
         nullable=False,
         index=True,
     )
-
-    # -------------------------------------------------------------
-    # AI feature cache
-    # -------------------------------------------------------------
 
     ai_risk_score = db.Column(
         db.String(20),
@@ -150,30 +150,30 @@ class Patient(db.Model):
         nullable=True,
     )
 
-    # -------------------------------------------------------------
-    # Timestamps
-    # -------------------------------------------------------------
-
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
     )
 
-    # -------------------------------------------------------------
-    # Relationships
-    # -------------------------------------------------------------
-
     clinic = db.relationship(
         "Clinic",
         back_populates="patients",
+    )
+
+    user = db.relationship(
+        "User",
+        back_populates="patient",
+        foreign_keys=[user_id],
+        uselist=False,
     )
 
     family_members = db.relationship(
@@ -255,6 +255,16 @@ class Patient(db.Model):
 class PatientFamilyMember(db.Model):
     __tablename__ = "patient_family_members"
 
+    __table_args__ = (
+        Index(
+            "ix_patient_family_members_patient_emergency_name",
+            "patient_id",
+            "is_emergency_contact",
+            "full_name",
+            "id",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
@@ -267,8 +277,6 @@ class PatientFamilyMember(db.Model):
         index=True,
     )
 
-    # Optional link if this family member is also
-    # a registered patient.
     related_patient_id = db.Column(
         db.Integer,
         db.ForeignKey("patients.id"),
@@ -295,16 +303,17 @@ class PatientFamilyMember(db.Model):
         db.Boolean,
         default=False,
         nullable=False,
+        index=True,
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -330,6 +339,17 @@ class PatientFamilyMember(db.Model):
 
 class PatientInsurance(db.Model):
     __tablename__ = "patient_insurances"
+
+    __table_args__ = (
+        Index(
+            "ix_patient_insurances_patient_priority",
+            "patient_id",
+            "is_primary",
+            "is_active",
+            "created_at",
+            "id",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -382,13 +402,14 @@ class PatientInsurance(db.Model):
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
@@ -407,14 +428,60 @@ class PatientInsurance(db.Model):
 
 
 class PatientVitals(db.Model):
-    """
-    Historical vitals log.
-
-    One row represents one clinical reading, allowing the application
-    to build patient vital-sign trends over time.
-    """
-
     __tablename__ = "patient_vitals"
+
+    __table_args__ = (
+        Index(
+            "ix_patient_vitals_patient_recorded",
+            "patient_id",
+            "recorded_at",
+            "id",
+        ),
+        Index(
+            "ix_patient_vitals_patient_consultation",
+            "patient_id",
+            "consultation_id",
+            "id",
+        ),
+        CheckConstraint(
+            "temperature_c IS NULL OR "
+            "(temperature_c >= 0 AND temperature_c <= 100)",
+            name="ck_patient_vitals_temperature",
+        ),
+        CheckConstraint(
+            "blood_pressure_systolic IS NULL OR "
+            "(blood_pressure_systolic >= 0 AND blood_pressure_systolic <= 400)",
+            name="ck_patient_vitals_systolic",
+        ),
+        CheckConstraint(
+            "blood_pressure_diastolic IS NULL OR "
+            "(blood_pressure_diastolic >= 0 AND blood_pressure_diastolic <= 300)",
+            name="ck_patient_vitals_diastolic",
+        ),
+        CheckConstraint(
+            "heart_rate_bpm IS NULL OR "
+            "(heart_rate_bpm >= 0 AND heart_rate_bpm <= 400)",
+            name="ck_patient_vitals_heart_rate",
+        ),
+        CheckConstraint(
+            "respiratory_rate IS NULL OR "
+            "(respiratory_rate >= 0 AND respiratory_rate <= 200)",
+            name="ck_patient_vitals_respiratory_rate",
+        ),
+        CheckConstraint(
+            "oxygen_saturation IS NULL OR "
+            "(oxygen_saturation >= 0 AND oxygen_saturation <= 100)",
+            name="ck_patient_vitals_oxygen",
+        ),
+        CheckConstraint(
+            "weight_kg IS NULL OR weight_kg >= 0",
+            name="ck_patient_vitals_weight",
+        ),
+        CheckConstraint(
+            "height_cm IS NULL OR height_cm >= 0",
+            name="ck_patient_vitals_height",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -483,7 +550,7 @@ class PatientVitals(db.Model):
     )
 
     recorded_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         default=_utcnow,
         nullable=False,
         index=True,

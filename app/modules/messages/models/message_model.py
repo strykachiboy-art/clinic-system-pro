@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import (
+    CheckConstraint,
+    Index,
+)
+
 from app.core.enums.message_enums import (
     MessagePriority,
     MessageStatus,
@@ -11,23 +16,54 @@ from app.extensions import db
 
 
 def _utcnow() -> datetime:
-    """
-    Return the current UTC time as a timezone-aware datetime.
-    """
     return datetime.now(timezone.utc)
 
 
 class Message(db.Model):
     __tablename__ = "messages"
 
+    __table_args__ = (
+        CheckConstraint(
+            "sender_id <> recipient_id",
+            name="ck_messages_sender_recipient_different",
+        ),
+        Index(
+            "ix_messages_clinic_recipient_deleted_created",
+            "clinic_id",
+            "recipient_id",
+            "deleted_at",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_messages_clinic_sender_deleted_created",
+            "clinic_id",
+            "sender_id",
+            "deleted_at",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_messages_clinic_parent_deleted_created",
+            "clinic_id",
+            "parent_message_id",
+            "deleted_at",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_messages_clinic_status_created",
+            "clinic_id",
+            "status",
+            "created_at",
+            "id",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
     )
-
-    # ==================================================================
-    # TENANCY
-    # ==================================================================
 
     clinic_id = db.Column(
         db.Integer,
@@ -35,10 +71,6 @@ class Message(db.Model):
         nullable=False,
         index=True,
     )
-
-    # ==================================================================
-    # PARTICIPANTS
-    # ==================================================================
 
     sender_id = db.Column(
         db.Integer,
@@ -54,10 +86,6 @@ class Message(db.Model):
         index=True,
     )
 
-    # ==================================================================
-    # MESSAGE CONTENT
-    # ==================================================================
-
     subject = db.Column(
         db.String(255),
         nullable=False,
@@ -67,10 +95,6 @@ class Message(db.Model):
         db.Text,
         nullable=False,
     )
-
-    # ==================================================================
-    # CLASSIFICATION
-    # ==================================================================
 
     message_type = db.Column(
         db.Enum(MessageType),
@@ -93,20 +117,12 @@ class Message(db.Model):
         index=True,
     )
 
-    # ==================================================================
-    # THREADING
-    # ==================================================================
-
     parent_message_id = db.Column(
         db.Integer,
         db.ForeignKey("messages.id"),
         nullable=True,
         index=True,
     )
-
-    # ==================================================================
-    # READ / DELIVERY STATE
-    # ==================================================================
 
     sent_at = db.Column(
         db.DateTime(timezone=True),
@@ -120,19 +136,11 @@ class Message(db.Model):
         index=True,
     )
 
-    # ==================================================================
-    # SOFT DELETE
-    # ==================================================================
-
     deleted_at = db.Column(
         db.DateTime(timezone=True),
         nullable=True,
         index=True,
     )
-
-    # ==================================================================
-    # AUDIT TIMESTAMPS
-    # ==================================================================
 
     created_at = db.Column(
         db.DateTime(timezone=True),
@@ -147,10 +155,6 @@ class Message(db.Model):
         onupdate=_utcnow,
         nullable=False,
     )
-
-    # ==================================================================
-    # RELATIONSHIPS
-    # ==================================================================
 
     clinic = db.relationship(
         "Clinic",
@@ -180,12 +184,8 @@ class Message(db.Model):
         "Message",
         foreign_keys=[parent_message_id],
         back_populates="parent_message",
-        cascade="all, delete-orphan",
+        cascade="save-update, merge",
     )
-
-    # ==================================================================
-    # REPRESENTATION
-    # ==================================================================
 
     def __repr__(self) -> str:
         return (

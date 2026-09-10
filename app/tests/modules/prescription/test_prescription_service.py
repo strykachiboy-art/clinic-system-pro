@@ -49,11 +49,17 @@ def active_clinic(clinic):
 
 
 def _future(days=30):
-    return datetime.now(timezone.utc) + timedelta(days=days)
+    return (
+        datetime.now(timezone.utc)
+        + timedelta(days=days)
+    )
 
 
 def _past(days=1):
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return (
+        datetime.now(timezone.utc)
+        - timedelta(days=days)
+    )
 
 
 def _naive_future(days=30):
@@ -63,7 +69,10 @@ def _naive_future(days=30):
     )
 
 
-def _make_second_clinic(db, source_clinic):
+def _make_second_clinic(
+    db,
+    source_clinic,
+):
     """
     Create a second active clinic without assuming a fixed Clinic constructor.
     """
@@ -120,13 +129,16 @@ def _make_second_clinic(db, source_clinic):
                 f"{source_slug}-rx-{source_clinic.id}"
             )
 
-    # Explicitly ensure the second clinic is active.
     if hasattr(clinic_model, "status"):
         values["status"] = ClinicStatus.ACTIVE
 
-    other_clinic = clinic_model(**values)
+    other_clinic = clinic_model(
+        **values
+    )
 
-    db.session.add(other_clinic)
+    db.session.add(
+        other_clinic
+    )
     db.session.flush()
 
     return other_clinic
@@ -147,10 +159,10 @@ def _make_doctor(
 def _make_inactive_staff(staff):
     """
     Select a real non-active StaffStatus enum member.
-
-    This avoids assuming the enum contains an 'inactive' member.
     """
-    status_enum = type(staff.status)
+    status_enum = type(
+        staff.status
+    )
 
     inactive_status = next(
         (
@@ -169,6 +181,31 @@ def _make_inactive_staff(staff):
     staff.status = inactive_status
 
     return inactive_status
+
+
+def _make_prescriptions(
+    make_prescription,
+    clinic,
+    patient,
+    staff,
+    count,
+):
+    """
+    Create a predictable collection for pagination tests.
+    """
+    prescriptions = []
+
+    for _ in range(count):
+        prescriptions.append(
+            make_prescription(
+                clinic,
+                patient,
+                staff,
+                status=PrescriptionStatus.ACTIVE,
+            )
+        )
+
+    return prescriptions
 
 
 # ============================================================================
@@ -357,7 +394,9 @@ def test_validate_prescriber_rejects_inactive_staff(
         active_clinic,
     )
 
-    _make_inactive_staff(staff)
+    _make_inactive_staff(
+        staff
+    )
 
     with pytest.raises(
         ValidationError,
@@ -700,7 +739,11 @@ def test_validate_expiry_converts_to_utc(
 ):
     value = (
         datetime.now(timezone.utc)
-        .astimezone(timezone(timedelta(hours=2)))
+        .astimezone(
+            timezone(
+                timedelta(hours=2)
+            )
+        )
         + timedelta(days=30)
     )
 
@@ -709,7 +752,9 @@ def test_validate_expiry_converts_to_utc(
     )
 
     assert result.tzinfo == timezone.utc
-    assert result == value.astimezone(timezone.utc)
+    assert result == value.astimezone(
+        timezone.utc
+    )
 
 
 def test_validate_expiry_treats_naive_as_utc(
@@ -745,6 +790,86 @@ def test_validate_expiry_rejects_non_future(
         prescription_service._validate_expiry(
             value
         )
+
+
+# ============================================================================
+# PAGINATION VALIDATION
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "1",
+        1.5,
+    ],
+)
+def test_validate_pagination_rejects_invalid_page(
+    prescription_service,
+    page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Page must be a positive integer",
+    ):
+        prescription_service._validate_pagination(
+            page=page,
+            per_page=50,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "50",
+        1.5,
+    ],
+)
+def test_validate_pagination_rejects_invalid_per_page(
+    prescription_service,
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="per_page must be a positive integer",
+    ):
+        prescription_service._validate_pagination(
+            page=1,
+            per_page=per_page,
+        )
+
+
+def test_validate_pagination_rejects_excessive_per_page(
+    prescription_service,
+):
+    with pytest.raises(
+        ValidationError,
+        match="must not exceed 500",
+    ):
+        prescription_service._validate_pagination(
+            page=1,
+            per_page=501,
+        )
+
+
+def test_validate_pagination_accepts_boundary_values(
+    prescription_service,
+):
+    assert prescription_service._validate_pagination(
+        page=1,
+        per_page=500,
+    ) == (
+        1,
+        500,
+    )
 
 
 # ============================================================================
@@ -815,7 +940,9 @@ def test_validate_items_rejects_duplicate_drugs(
     active_clinic,
     make_drug,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     with pytest.raises(
         ValidationError,
@@ -847,7 +974,9 @@ def test_validate_items_rejects_invalid_quantity(
     make_drug,
     quantity,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     with pytest.raises(
         ValidationError,
@@ -869,8 +998,13 @@ def test_validate_items_accepts_valid_items(
     active_clinic,
     make_drug,
 ):
-    first = make_drug(active_clinic)
-    second = make_drug(None)
+    first = make_drug(
+        active_clinic
+    )
+
+    second = make_drug(
+        None
+    )
 
     result = prescription_service._validate_items(
         items=[
@@ -885,7 +1019,10 @@ def test_validate_items_accepts_valid_items(
         clinic_id=active_clinic.id,
     )
 
-    assert [drug.id for drug in result] == [
+    assert [
+        drug.id
+        for drug in result
+    ] == [
         first.id,
         second.id,
     ]
@@ -904,7 +1041,10 @@ def test_normalize_interaction_pair_orders_ids(
             10,
             5,
         )
-        == (5, 10)
+        == (
+            5,
+            10,
+        )
     )
 
 
@@ -916,7 +1056,10 @@ def test_normalize_interaction_pair_keeps_sorted_ids(
             5,
             10,
         )
-        == (5, 10)
+        == (
+            5,
+            10,
+        )
     )
 
 
@@ -930,6 +1073,36 @@ def test_normalize_interaction_pair_rejects_self(
         prescription_service._normalize_interaction_pair(
             5,
             5,
+        )
+
+
+@pytest.mark.parametrize(
+    "drug_a_id,drug_b_id",
+    [
+        (0, 5),
+        (-1, 5),
+        (True, 5),
+        (False, 5),
+        ("5", 6),
+        (5, 0),
+        (5, -1),
+        (5, True),
+        (5, False),
+        (5, "6"),
+    ],
+)
+def test_normalize_interaction_pair_rejects_invalid_ids(
+    prescription_service,
+    drug_a_id,
+    drug_b_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="greater than zero",
+    ):
+        prescription_service._normalize_interaction_pair(
+            drug_a_id,
+            drug_b_id,
         )
 
 
@@ -952,11 +1125,13 @@ def test_create_drug_interaction_success(
         is_active=True,
     )
 
-    interaction = prescription_service.create_drug_interaction(
-        drug_a_id=drug_b.id,
-        drug_b_id=drug_a.id,
-        severity=DrugInteractionSeverity.SEVERE,
-        description="Serious interaction",
+    interaction = (
+        prescription_service.create_drug_interaction(
+            drug_a_id=drug_b.id,
+            drug_b_id=drug_a.id,
+            severity=DrugInteractionSeverity.SEVERE,
+            description="Serious interaction",
+        )
     )
 
     assert interaction.id is not None
@@ -971,13 +1146,37 @@ def test_create_drug_interaction_success(
     assert interaction.severity == (
         DrugInteractionSeverity.SEVERE
     )
+    assert interaction.description == (
+        "Serious interaction"
+    )
+
+
+def test_create_drug_interaction_normalizes_blank_description(
+    prescription_service,
+    make_drug,
+):
+    drug_a = make_drug(None)
+    drug_b = make_drug(None)
+
+    interaction = (
+        prescription_service.create_drug_interaction(
+            drug_a_id=drug_a.id,
+            drug_b_id=drug_b.id,
+            severity=DrugInteractionSeverity.MILD,
+            description="   ",
+        )
+    )
+
+    assert interaction.description is None
 
 
 def test_create_drug_interaction_rejects_self(
     prescription_service,
     make_drug,
 ):
-    drug = make_drug(None)
+    drug = make_drug(
+        None
+    )
 
     with pytest.raises(
         ValidationError,
@@ -995,8 +1194,13 @@ def test_create_drug_interaction_rejects_clinic_drug(
     active_clinic,
     make_drug,
 ):
-    clinic_drug = make_drug(active_clinic)
-    global_drug = make_drug(None)
+    clinic_drug = make_drug(
+        active_clinic
+    )
+
+    global_drug = make_drug(
+        None
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1038,8 +1242,13 @@ def test_create_drug_interaction_rejects_duplicate(
     prescription_service,
     make_drug,
 ):
-    drug_a = make_drug(None)
-    drug_b = make_drug(None)
+    drug_a = make_drug(
+        None
+    )
+
+    drug_b = make_drug(
+        None
+    )
 
     prescription_service.create_drug_interaction(
         drug_a_id=drug_a.id,
@@ -1055,6 +1264,46 @@ def test_create_drug_interaction_rejects_duplicate(
             drug_a_id=drug_b.id,
             drug_b_id=drug_a.id,
             severity=DrugInteractionSeverity.SEVERE,
+        )
+
+
+def test_find_interaction_finds_normalized_pair(
+    prescription_service,
+    make_drug,
+):
+    drug_a = make_drug(
+        None
+    )
+
+    drug_b = make_drug(
+        None
+    )
+
+    created = prescription_service.create_drug_interaction(
+        drug_a_id=drug_a.id,
+        drug_b_id=drug_b.id,
+        severity=DrugInteractionSeverity.MODERATE,
+    )
+
+    found = prescription_service.find_interaction(
+        drug_b.id,
+        drug_a.id,
+    )
+
+    assert found is not None
+    assert found.id == created.id
+
+
+def test_find_interaction_rejects_self_pair(
+    prescription_service,
+):
+    with pytest.raises(
+        ValidationError,
+        match="cannot interact with itself",
+    ):
+        prescription_service.find_interaction(
+            5,
+            5,
         )
 
 
@@ -1120,7 +1369,9 @@ def test_check_interactions_single_unique_drug_returns_empty(
     active_clinic,
     make_drug,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     result = prescription_service.check_interactions(
         drug_ids=[
@@ -1137,8 +1388,13 @@ def test_check_interactions_finds_normalized_pair(
     prescription_service,
     make_drug,
 ):
-    drug_a = make_drug(None)
-    drug_b = make_drug(None)
+    drug_a = make_drug(
+        None
+    )
+
+    drug_b = make_drug(
+        None
+    )
 
     prescription_service.create_drug_interaction(
         drug_a_id=drug_a.id,
@@ -1165,7 +1421,9 @@ def test_check_interactions_finds_normalized_pair(
         drug_b.id,
     )
     assert result[0]["severity"] == "severe"
-    assert result[0]["description"] == "Known interaction"
+    assert result[0]["description"] == (
+        "Known interaction"
+    )
 
 
 def test_check_interactions_returns_multiple_warnings(
@@ -1198,6 +1456,32 @@ def test_check_interactions_returns_multiple_warnings(
     )
 
     assert len(result) == 2
+
+
+def test_check_interactions_deduplicates_ids_before_pair_generation(
+    prescription_service,
+    make_drug,
+):
+    drug_a = make_drug(None)
+    drug_b = make_drug(None)
+
+    prescription_service.create_drug_interaction(
+        drug_a_id=drug_a.id,
+        drug_b_id=drug_b.id,
+        severity=DrugInteractionSeverity.MODERATE,
+    )
+
+    result = prescription_service.check_interactions(
+        drug_ids=[
+            drug_a.id,
+            drug_b.id,
+            drug_a.id,
+            drug_b.id,
+        ],
+        clinic_id=999,
+    )
+
+    assert len(result) == 1
 
 
 def test_check_interactions_rejects_other_clinic_drug(
@@ -1306,7 +1590,7 @@ def test_get_prescription_is_historical_read(
 
 
 # ============================================================================
-# PRESCRIPTION LISTING
+# PRESCRIPTION LISTING / PAGINATION
 # ============================================================================
 
 
@@ -1317,6 +1601,9 @@ def test_list_prescriptions_for_patient_returns_clinic_records(
     make_authenticated_staff,
     make_prescription,
 ):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
     staff, _ = _make_doctor(
         make_authenticated_staff,
         active_clinic,
@@ -1335,18 +1622,24 @@ def test_list_prescriptions_for_patient_returns_clinic_records(
         status=PrescriptionStatus.COMPLETED,
     )
 
-    results = prescription_service.list_prescriptions_for_patient(
-        patient_id=patient.id,
-        clinic_id=active_clinic.id,
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+        )
     )
 
-    ids = {
+    assert set(
         prescription.id
-        for prescription in results
+        for prescription in result["items"]
+    ) >= {
+        first.id,
+        second.id,
     }
 
-    assert first.id in ids
-    assert second.id in ids
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["per_page"] == 50
 
 
 def test_list_prescriptions_active_only(
@@ -1356,6 +1649,9 @@ def test_list_prescriptions_active_only(
     make_authenticated_staff,
     make_prescription,
 ):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
     staff, _ = _make_doctor(
         make_authenticated_staff,
         active_clinic,
@@ -1375,19 +1671,22 @@ def test_list_prescriptions_active_only(
         status=PrescriptionStatus.COMPLETED,
     )
 
-    results = prescription_service.list_prescriptions_for_patient(
-        patient_id=patient.id,
-        clinic_id=active_clinic.id,
-        active_only=True,
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            active_only=True,
+        )
     )
 
     ids = {
         prescription.id
-        for prescription in results
+        for prescription in result["items"]
     }
 
     assert active.id in ids
     assert completed.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_prescriptions_rejects_inactive_patient(
@@ -1406,6 +1705,319 @@ def test_list_prescriptions_rejects_inactive_patient(
             patient_id=patient.id,
             clinic_id=active_clinic.id,
         )
+
+
+def test_list_prescriptions_rejects_other_clinic_patient(
+    prescription_service,
+    active_clinic,
+    patient,
+):
+    patient.clinic_id = active_clinic.id + 999
+    patient.is_active = True
+
+    with pytest.raises(
+        ValidationError,
+        match="does not belong to clinic",
+    ):
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+        )
+
+
+def test_list_prescriptions_supports_pagination(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    prescriptions = _make_prescriptions(
+        make_prescription,
+        active_clinic,
+        patient,
+        staff,
+        5,
+    )
+
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=1,
+            per_page=2,
+        )
+    )
+
+    assert len(result["items"]) == 2
+    assert result["total"] == 5
+    assert result["page"] == 1
+    assert result["per_page"] == 2
+
+    assert set(
+        item.id
+        for item in result["items"]
+    ).issubset(
+        {
+            prescription.id
+            for prescription in prescriptions
+        }
+    )
+
+
+def test_list_prescriptions_returns_last_partial_page(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    _make_prescriptions(
+        make_prescription,
+        active_clinic,
+        patient,
+        staff,
+        5,
+    )
+
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=3,
+            per_page=2,
+        )
+    )
+
+    assert len(result["items"]) == 1
+    assert result["total"] == 5
+    assert result["page"] == 3
+    assert result["per_page"] == 2
+
+
+def test_list_prescriptions_returns_empty_page_after_last_page(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    _make_prescriptions(
+        make_prescription,
+        active_clinic,
+        patient,
+        staff,
+        3,
+    )
+
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=5,
+            per_page=2,
+        )
+    )
+
+    assert result["items"] == []
+    assert result["total"] == 3
+    assert result["page"] == 5
+    assert result["per_page"] == 2
+
+
+def test_list_prescriptions_has_deterministic_ordering(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    db,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    first = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    second = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    same_issued_at = datetime.now(
+        timezone.utc
+    )
+
+    first.issued_at = same_issued_at
+    second.issued_at = same_issued_at
+
+    db.session.flush()
+
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=1,
+            per_page=50,
+        )
+    )
+
+    ids = [
+        item.id
+        for item in result["items"]
+    ]
+
+    assert ids.index(
+        max(
+            first.id,
+            second.id,
+        )
+    ) < ids.index(
+        min(
+            first.id,
+            second.id,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        0,
+        -1,
+        True,
+        False,
+    ],
+)
+def test_list_prescriptions_rejects_invalid_page(
+    prescription_service,
+    active_clinic,
+    patient,
+    page,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    with pytest.raises(
+        ValidationError,
+        match="Page must be a positive integer",
+    ):
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=page,
+            per_page=50,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [
+        0,
+        -1,
+        True,
+        False,
+        501,
+    ],
+)
+def test_list_prescriptions_rejects_invalid_per_page(
+    prescription_service,
+    active_clinic,
+    patient,
+    per_page,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    expected = (
+        "must not exceed"
+        if per_page == 501
+        else "must be a positive integer"
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=expected,
+    ):
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            page=1,
+            per_page=per_page,
+        )
+
+
+def test_list_prescriptions_can_read_completed_history(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    completed = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+        status=PrescriptionStatus.COMPLETED,
+    )
+
+    active_clinic.status = ClinicStatus.SUSPENDED
+
+    result = (
+        prescription_service.list_prescriptions_for_patient(
+            patient_id=patient.id,
+            clinic_id=active_clinic.id,
+            active_only=False,
+        )
+    )
+
+    ids = {
+        item.id
+        for item in result["items"]
+    }
+
+    assert completed.id in ids
 
 
 # ============================================================================
@@ -1460,10 +2072,49 @@ def test_create_prescription_success(
         PrescriptionStatus.ACTIVE
     )
 
-    assert len(prescription.items) == 1
+    assert len(
+        prescription.items
+    ) == 1
+
     assert prescription.items[0].drug_id == drug.id
     assert prescription.items[0].quantity == 14
     assert warnings == []
+
+
+def test_create_prescription_normalizes_blank_notes(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        active_clinic
+    )
+
+    prescription, _ = (
+        prescription_service.create_prescription(
+            clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {
+                    "drug_id": drug.id,
+                }
+            ],
+            notes="   ",
+        )
+    )
+
+    assert prescription.notes is None
 
 
 def test_create_prescription_with_expiry(
@@ -1481,7 +2132,9 @@ def test_create_prescription_with_expiry(
         active_clinic,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     expires_at = _future()
 
@@ -1497,10 +2150,56 @@ def test_create_prescription_with_expiry(
         )
     )
 
-    # SQLite's DateTime commonly strips timezone information.
     assert prescription.expires_at.replace(
         tzinfo=timezone.utc
     ) == expires_at
+
+
+def test_create_prescription_normalizes_naive_expiry(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        active_clinic
+    )
+
+    expires_at = _naive_future()
+
+    prescription, _ = (
+        prescription_service.create_prescription(
+            clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {"drug_id": drug.id}
+            ],
+            expires_at=expires_at,
+        )
+    )
+
+    normalized = prescription.expires_at
+
+    assert normalized.tzinfo in (
+        None,
+        timezone.utc,
+    )
+
+    assert normalized.replace(
+        tzinfo=timezone.utc
+    ) == expires_at.replace(
+        tzinfo=timezone.utc
+    )
 
 
 def test_create_prescription_with_consultation(
@@ -1528,7 +2227,9 @@ def test_create_prescription_with_consultation(
     consultation.clinic_id = active_clinic.id
     consultation.patient_id = patient.id
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     prescription, _ = (
         prescription_service.create_prescription(
@@ -1563,8 +2264,13 @@ def test_create_prescription_returns_interaction_warnings(
         active_clinic,
     )
 
-    drug_a = make_drug(None)
-    drug_b = make_drug(None)
+    drug_a = make_drug(
+        None
+    )
+
+    drug_b = make_drug(
+        None
+    )
 
     prescription_service.create_drug_interaction(
         drug_a_id=drug_a.id,
@@ -1604,7 +2310,9 @@ def test_create_prescription_rejects_inactive_clinic(
         active_clinic,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1612,6 +2320,36 @@ def test_create_prescription_rejects_inactive_clinic(
     ):
         prescription_service.create_prescription(
             clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {"drug_id": drug.id}
+            ],
+        )
+
+
+def test_create_prescription_rejects_missing_clinic(
+    prescription_service,
+    patient,
+    make_authenticated_staff,
+    active_clinic,
+    make_drug,
+):
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        active_clinic
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Clinic 999999 not found",
+    ):
+        prescription_service.create_prescription(
+            clinic_id=999999,
             patient_id=patient.id,
             prescribed_by_id=staff.id,
             items=[
@@ -1635,11 +2373,46 @@ def test_create_prescription_rejects_inactive_patient(
         active_clinic,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     with pytest.raises(
         ValidationError,
         match="inactive",
+    ):
+        prescription_service.create_prescription(
+            clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {"drug_id": drug.id}
+            ],
+        )
+
+
+def test_create_prescription_rejects_patient_from_other_clinic(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+):
+    patient.clinic_id = active_clinic.id + 999
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        active_clinic
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="does not belong to clinic",
     ):
         prescription_service.create_prescription(
             clinic_id=active_clinic.id,
@@ -1677,6 +2450,48 @@ def test_create_prescription_rejects_invalid_items(
         )
 
 
+def test_create_prescription_rejects_other_clinic_drug(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+    db,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    other_clinic = _make_second_clinic(
+        db,
+        active_clinic,
+    )
+
+    foreign_drug = make_drug(
+        other_clinic,
+        is_active=True,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="does not belong to clinic",
+    ):
+        prescription_service.create_prescription(
+            clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {
+                    "drug_id": foreign_drug.id,
+                }
+            ],
+        )
+
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
@@ -1711,6 +2526,7 @@ def test_cancel_prescription_success(
     assert result.status == (
         PrescriptionStatus.CANCELLED
     )
+
     assert (
         "Cancelled: Patient requested cancellation"
         in result.notes
@@ -1745,7 +2561,45 @@ def test_cancel_prescription_without_reason(
     assert result.status == (
         PrescriptionStatus.CANCELLED
     )
-    assert result.notes == "Original notes"
+
+    assert result.notes == (
+        "Original notes"
+    )
+
+
+def test_cancel_prescription_normalizes_blank_reason(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+        status=PrescriptionStatus.ACTIVE,
+        notes="Original notes",
+    )
+
+    result = prescription_service.cancel_prescription(
+        prescription_id=prescription.id,
+        clinic_id=active_clinic.id,
+        reason="   ",
+    )
+
+    assert result.status == (
+        PrescriptionStatus.CANCELLED
+    )
+
+    assert result.notes == (
+        "Original notes"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1847,6 +2701,20 @@ def test_cancel_prescription_rejects_other_clinic(
         prescription_service.cancel_prescription(
             prescription_id=prescription.id,
             clinic_id=other_clinic.id,
+        )
+
+
+def test_cancel_prescription_rejects_missing_prescription(
+    prescription_service,
+    active_clinic,
+):
+    with pytest.raises(
+        NotFoundError,
+        match="Prescription 999999 not found",
+    ):
+        prescription_service.cancel_prescription(
+            prescription_id=999999,
+            clinic_id=active_clinic.id,
         )
 
 
@@ -1972,6 +2840,20 @@ def test_complete_prescription_rejects_other_clinic(
         )
 
 
+def test_complete_prescription_rejects_missing_prescription(
+    prescription_service,
+    active_clinic,
+):
+    with pytest.raises(
+        NotFoundError,
+        match="Prescription 999999 not found",
+    ):
+        prescription_service.complete_prescription(
+            prescription_id=999999,
+            clinic_id=active_clinic.id,
+        )
+
+
 # ============================================================================
 # AUTOMATED EXPIRATION
 # ============================================================================
@@ -2066,6 +2948,33 @@ def test_expire_stale_prescriptions_ignores_non_active(
     assert prescription.status == status
 
 
+def test_expire_stale_prescriptions_ignores_without_expiry(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+        status=PrescriptionStatus.ACTIVE,
+        expires_at=None,
+    )
+
+    prescription_service.expire_stale_prescriptions()
+
+    assert prescription.status == (
+        PrescriptionStatus.ACTIVE
+    )
+
+
 # ============================================================================
 # AUDIT
 # ============================================================================
@@ -2087,7 +2996,9 @@ def test_create_prescription_writes_audit(
         active_clinic,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic
+    )
 
     audit = Mock()
 
@@ -2110,8 +3021,71 @@ def test_create_prescription_writes_audit(
 
     kwargs = audit.call_args.kwargs
 
-    assert kwargs["action"] == AuditAction.CREATE
-    assert kwargs["entity_type"] == "Prescription"
+    assert kwargs["action"] == (
+        AuditAction.CREATE
+    )
+
+    assert kwargs["entity_type"] == (
+        "Prescription"
+    )
+
+
+def test_create_prescription_audit_contains_interaction_warnings(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+    monkeypatch,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug_a = make_drug(None)
+    drug_b = make_drug(None)
+
+    prescription_service.create_drug_interaction(
+        drug_a_id=drug_a.id,
+        drug_b_id=drug_b.id,
+        severity=DrugInteractionSeverity.SEVERE,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        service,
+        "create_audit_log",
+        audit,
+    )
+
+    prescription_service.create_prescription(
+        clinic_id=active_clinic.id,
+        patient_id=patient.id,
+        prescribed_by_id=staff.id,
+        items=[
+            {"drug_id": drug_a.id},
+            {"drug_id": drug_b.id},
+        ],
+    )
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == (
+        AuditAction.CREATE
+    )
+
+    assert kwargs["entity_type"] == (
+        "Prescription"
+    )
+
+    assert len(
+        kwargs["new_value"]["interaction_warnings"]
+    ) == 1
 
 
 def test_create_drug_interaction_writes_audit(
@@ -2119,8 +3093,13 @@ def test_create_drug_interaction_writes_audit(
     make_drug,
     monkeypatch,
 ):
-    drug_a = make_drug(None)
-    drug_b = make_drug(None)
+    drug_a = make_drug(
+        None
+    )
+
+    drug_b = make_drug(
+        None
+    )
 
     audit = Mock()
 
@@ -2142,9 +3121,17 @@ def test_create_drug_interaction_writes_audit(
 
     kwargs = audit.call_args.kwargs
 
-    assert kwargs["action"] == AuditAction.CREATE
-    assert kwargs["entity_type"] == "DrugInteraction"
-    assert kwargs["entity_id"] == interaction.id
+    assert kwargs["action"] == (
+        AuditAction.CREATE
+    )
+
+    assert kwargs["entity_type"] == (
+        "DrugInteraction"
+    )
+
+    assert kwargs["entity_id"] == (
+        interaction.id
+    )
 
 
 def test_cancel_prescription_writes_status_audit(
@@ -2185,9 +3172,17 @@ def test_cancel_prescription_writes_status_audit(
 
     kwargs = audit.call_args.kwargs
 
-    assert kwargs["action"] == AuditAction.STATUS_CHANGE
-    assert kwargs["entity_type"] == "Prescription"
-    assert kwargs["entity_id"] == prescription.id
+    assert kwargs["action"] == (
+        AuditAction.STATUS_CHANGE
+    )
+
+    assert kwargs["entity_type"] == (
+        "Prescription"
+    )
+
+    assert kwargs["entity_id"] == (
+        prescription.id
+    )
 
 
 def test_complete_prescription_writes_status_audit(
@@ -2227,6 +3222,70 @@ def test_complete_prescription_writes_status_audit(
 
     kwargs = audit.call_args.kwargs
 
-    assert kwargs["action"] == AuditAction.STATUS_CHANGE
-    assert kwargs["entity_type"] == "Prescription"
-    assert kwargs["entity_id"] == prescription.id
+    assert kwargs["action"] == (
+        AuditAction.STATUS_CHANGE
+    )
+
+    assert kwargs["entity_type"] == (
+        "Prescription"
+    )
+
+    assert kwargs["entity_id"] == (
+        prescription.id
+    )
+
+
+def test_expire_stale_prescriptions_writes_status_audit(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    monkeypatch,
+):
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+        status=PrescriptionStatus.ACTIVE,
+        expires_at=_past(),
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        service,
+        "create_audit_log",
+        audit,
+    )
+
+    prescription_service.expire_stale_prescriptions()
+
+    matching_calls = [
+        call
+        for call in audit.call_args_list
+        if call.kwargs.get(
+            "entity_id"
+        ) == prescription.id
+    ]
+
+    assert matching_calls
+
+    kwargs = matching_calls[-1].kwargs
+
+    assert kwargs["action"] == (
+        AuditAction.STATUS_CHANGE
+    )
+
+    assert kwargs["entity_type"] == (
+        "Prescription"
+    )
+
+    assert kwargs["new_value"]["status"] == (
+        PrescriptionStatus.EXPIRED.value
+    )

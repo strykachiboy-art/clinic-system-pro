@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint
+
 from app.core.enums.hie_enums import (
     HIEIntegrationStatus,
     HIEOperation,
@@ -9,9 +11,6 @@ from app.extensions import db
 
 
 def _utcnow() -> datetime:
-    """
-    Return the current UTC time as a timezone-aware datetime.
-    """
     return datetime.now(timezone.utc)
 
 
@@ -77,6 +76,20 @@ class HIEIntegration(db.Model):
         nullable=False,
     )
 
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "clinic_id",
+            name="uq_hie_integrations_id_clinic",
+        ),
+        Index(
+            "ix_hie_integrations_clinic_status_provider",
+            "clinic_id",
+            "status",
+            "provider",
+        ),
+    )
+
     clinic = db.relationship(
         "Clinic",
         back_populates="hie_integrations",
@@ -85,7 +98,12 @@ class HIEIntegration(db.Model):
     submissions = db.relationship(
         "HIESubmission",
         back_populates="integration",
+        foreign_keys=lambda: [
+            HIESubmission.integration_id,
+            HIESubmission.clinic_id,
+        ],
         cascade="all, delete-orphan",
+        overlaps="clinic,hie_submissions",
     )
 
     def __repr__(self) -> str:
@@ -108,9 +126,7 @@ class HIESubmission(db.Model):
 
     integration_id = db.Column(
         db.Integer,
-        db.ForeignKey("hie_integrations.id"),
         nullable=False,
-        index=True,
     )
 
     clinic_id = db.Column(
@@ -191,19 +207,60 @@ class HIESubmission(db.Model):
         nullable=False,
     )
 
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["integration_id", "clinic_id"],
+            [
+                "hie_integrations.id",
+                "hie_integrations.clinic_id",
+            ],
+            name="fk_hie_submissions_integration_clinic",
+        ),
+        Index(
+            "ix_hie_submissions_clinic_created_id",
+            "clinic_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_hie_submissions_clinic_status_created",
+            "clinic_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_hie_submissions_clinic_patient_created",
+            "clinic_id",
+            "patient_id",
+            "created_at",
+        ),
+    )
+
     integration = db.relationship(
         "HIEIntegration",
         back_populates="submissions",
+        foreign_keys=[
+            integration_id,
+            clinic_id,
+        ],
+        overlaps="clinic,hie_submissions",
     )
 
     clinic = db.relationship(
         "Clinic",
         back_populates="hie_submissions",
+        foreign_keys=[
+            clinic_id,
+        ],
+        overlaps="integration,submissions",
     )
 
     patient = db.relationship(
         "Patient",
         back_populates="hie_submissions",
+        foreign_keys=[
+            patient_id,
+        ],
     )
 
     def __repr__(self) -> str:

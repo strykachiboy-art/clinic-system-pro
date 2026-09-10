@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.extensions import db
+
 from app.core.enums.staff_enums import (
     LeaveStatus,
     LeaveType,
@@ -9,11 +12,29 @@ from app.core.enums.staff_enums import (
 
 
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(
+        tzinfo=None
+    )
 
 
 class Staff(db.Model):
     __tablename__ = "staff"
+
+    __table_args__ = (
+        db.Index(
+            "ix_staff_clinic_status_name",
+            "clinic_id",
+            "status",
+            "last_name",
+            "first_name",
+            "id",
+        ),
+        db.Index(
+            "ix_staff_clinic_specialty",
+            "clinic_id",
+            "specialty",
+        ),
+    )
 
     id = db.Column(
         db.Integer,
@@ -86,10 +107,6 @@ class Staff(db.Model):
         nullable=False,
     )
 
-    # ------------------------------------------------------------------
-    # Relationships
-    # ------------------------------------------------------------------
-
     clinic = db.relationship(
         "Clinic",
         back_populates="staff",
@@ -99,10 +116,6 @@ class Staff(db.Model):
         "User",
         back_populates="staff",
     )
-
-    # ------------------------------------------------------------------
-    # Clinical / Operational Relationships
-    # ------------------------------------------------------------------
 
     appointments = db.relationship(
         "Appointment",
@@ -150,10 +163,6 @@ class Staff(db.Model):
         back_populates="admitted_by",
     )
 
-    # ------------------------------------------------------------------
-    # Ambulance Relationships
-    # ------------------------------------------------------------------
-
     driver_trips = db.relationship(
         "AmbulanceTrip",
         foreign_keys="AmbulanceTrip.driver_id",
@@ -165,10 +174,6 @@ class Staff(db.Model):
         foreign_keys="AmbulanceTrip.paramedic_id",
         back_populates="paramedic",
     )
-
-    # ------------------------------------------------------------------
-    # HR Relationships
-    # ------------------------------------------------------------------
 
     payroll_records = db.relationship(
         "PayrollRecord",
@@ -191,7 +196,10 @@ class Staff(db.Model):
     )
 
     def __repr__(self):
-        return f"<Staff {self.first_name} {self.last_name}>"
+        return (
+            f"<Staff {self.first_name} "
+            f"{self.last_name}>"
+        )
 
 
 class PayrollRecord(db.Model):
@@ -273,12 +281,14 @@ class PayrollRecord(db.Model):
     paid_at = db.Column(
         db.DateTime,
         nullable=True,
+        index=True,
     )
 
     created_at = db.Column(
         db.DateTime,
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
@@ -296,7 +306,8 @@ class PayrollRecord(db.Model):
     def __repr__(self):
         return (
             f"<PayrollRecord Staff {self.staff_id} "
-            f"({self.pay_period_start} - {self.pay_period_end})>"
+            f"({self.pay_period_start} - "
+            f"{self.pay_period_end})>"
         )
 
 
@@ -307,6 +318,21 @@ class LeaveRequest(db.Model):
         db.CheckConstraint(
             "start_date <= end_date",
             name="ck_leave_requests_valid_period",
+        ),
+        db.Index(
+            "ix_leave_requests_staff_status_period",
+            "staff_id",
+            "status",
+            "start_date",
+            "end_date",
+            "id",
+        ),
+        db.Index(
+            "ix_leave_requests_status_period",
+            "status",
+            "start_date",
+            "end_date",
+            "id",
         ),
     )
 
@@ -360,12 +386,14 @@ class LeaveRequest(db.Model):
     reviewed_at = db.Column(
         db.DateTime,
         nullable=True,
+        index=True,
     )
 
     created_at = db.Column(
         db.DateTime,
         default=_utcnow,
         nullable=False,
+        index=True,
     )
 
     updated_at = db.Column(
@@ -374,10 +402,6 @@ class LeaveRequest(db.Model):
         onupdate=_utcnow,
         nullable=False,
     )
-
-    # ------------------------------------------------------------------
-    # Relationships
-    # ------------------------------------------------------------------
 
     staff = db.relationship(
         "Staff",

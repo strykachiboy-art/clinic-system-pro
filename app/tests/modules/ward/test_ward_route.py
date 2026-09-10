@@ -21,30 +21,11 @@ from app.extensions import db
 from app.modules.ward.services import ward_service
 
 
-# ============================================================================
-# ROUTE MODULE
-# ============================================================================
-
-
 @pytest.fixture()
 def ward_routes():
-    """
-    Import the concrete Ward route module.
-
-    The package:
-        app.modules.ward.routes
-
-    exposes the routes package, while the actual route implementation
-    lives in the concrete route module.
-    """
     import app.modules.ward.routes.ward_route as routes
 
     return routes
-
-
-# ============================================================================
-# HELPERS
-# ============================================================================
 
 
 def _headers(
@@ -122,7 +103,9 @@ def _create_reservation(
         clinic=clinic,
     )
 
-    _, bed = _create_bed(clinic)
+    _, bed = _create_bed(
+        clinic,
+    )
 
     reservation = ward_service.reserve_bed(
         patient_id=patient.id,
@@ -158,7 +141,9 @@ def _create_admission(
         clinic=clinic,
     )
 
-    _, bed = _create_bed(clinic)
+    _, bed = _create_bed(
+        clinic,
+    )
 
     admission = ward_service.admit_patient(
         patient_id=patient.id,
@@ -177,9 +162,7 @@ def _create_admission(
     )
 
 
-# ============================================================================
-# AUTHENTICATION
-# ============================================================================
+# Authentication
 
 
 @pytest.mark.parametrize(
@@ -187,6 +170,7 @@ def _create_admission(
     [
         ("POST", "/api/wards"),
         ("GET", "/api/wards"),
+        ("PATCH", "/api/wards/1"),
         ("GET", "/api/wards/1"),
         ("GET", "/api/wards/1/occupancy"),
         ("POST", "/api/wards/1/beds"),
@@ -221,9 +205,7 @@ def test_all_ward_routes_require_authentication(
     assert response.status_code in (401, 422)
 
 
-# ============================================================================
 # RBAC
-# ============================================================================
 
 
 def test_receptionist_can_view_wards(
@@ -259,6 +241,13 @@ def test_receptionist_can_view_wards(
             {
                 "name": "Restricted Ward",
                 "capacity": 5,
+            },
+        ),
+        (
+            "PATCH",
+            "/api/wards/1",
+            {
+                "name": "Restricted Update",
             },
         ),
         (
@@ -332,9 +321,7 @@ def test_receptionist_cannot_perform_management_or_clinical_actions(
     assert response.status_code == 403
 
 
-# ============================================================================
-# CREATE WARD
-# ============================================================================
+# Create ward
 
 
 def test_create_ward_route_success(
@@ -368,7 +355,9 @@ def test_create_ward_route_success(
 
     assert ward["name"] == "Surgical Ward"
     assert ward["capacity"] == 10
-    assert ward["ward_type"] == WardType.GENERAL.value
+    assert ward["ward_type"] == (
+        WardType.GENERAL.value
+    )
 
 
 def test_create_ward_route_rejects_client_clinic_override(
@@ -482,9 +471,7 @@ def test_create_ward_route_maps_domain_error(
     )
 
 
-# ============================================================================
-# LIST WARDS
-# ============================================================================
+# List wards
 
 
 def test_list_wards_route_success(
@@ -515,13 +502,19 @@ def test_list_wards_route_success(
 
     body = response.get_json()
 
+    assert body["total"] == 2
+    assert body["page"] == 1
+    assert body["per_page"] == 50
+
     names = {
         item["name"]
-        for item in body
+        for item in body["items"]
     }
 
-    assert "General Ward" in names
-    assert "Surgical Ward" in names
+    assert names == {
+        "General Ward",
+        "Surgical Ward",
+    }
 
 
 def test_list_wards_route_filters_by_type(
@@ -551,12 +544,13 @@ def test_list_wards_route_filters_by_type(
 
     body = response.get_json()
 
-    assert body
+    assert body["total"] == 1
+    assert body["items"]
 
     assert all(
         item["ward_type"]
         == WardType.GENERAL.value
-        for item in body
+        for item in body["items"]
     )
 
 
@@ -575,14 +569,240 @@ def test_list_wards_route_rejects_invalid_type(
 
     assert response.status_code == 422
 
-    assert "Invalid ward type" in (
-        response.get_json()["error"]
+    body = response.get_json()
+
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert any(
+        "ward_type" in str(detail)
+        for detail in body["details"]
     )
 
 
-# ============================================================================
-# GET WARD
-# ============================================================================
+def test_list_wards_route_supports_pagination(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    for index in range(1, 6):
+        _create_ward(
+            clinic,
+            name=f"Ward {index:02d}",
+        )
+
+    response = client.get(
+        "/api/wards?page=2&per_page=2",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 5
+    assert body["page"] == 2
+    assert body["per_page"] == 2
+    assert len(body["items"]) == 2
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=501",
+        "page=abc",
+        "per_page=abc",
+    ],
+)
+def test_list_wards_route_rejects_invalid_pagination(
+    client,
+    user,
+    auth_headers_for,
+    query,
+):
+    response = client.get(
+        f"/api/wards?{query}",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
+# Update ward
+
+
+def test_update_ward_route_success(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    ward = _create_ward(
+        clinic,
+        name="Old Ward",
+        capacity=5,
+    )
+
+    response = client.patch(
+        f"/api/wards/{ward.id}",
+        json={
+            "name": "Updated Ward",
+            "capacity": 10,
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["message"] == (
+        "Ward updated successfully"
+    )
+
+    assert body["ward"]["id"] == ward.id
+    assert body["ward"]["name"] == "Updated Ward"
+    assert body["ward"]["capacity"] == 10
+
+
+def test_update_ward_route_rejects_unknown_fields(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    ward = _create_ward(clinic)
+
+    response = client.patch(
+        f"/api/wards/{ward.id}",
+        json={
+            "unexpected": "blocked",
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_ward_route_rejects_empty_payload(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    ward = _create_ward(clinic)
+
+    response = client.patch(
+        f"/api/wards/{ward.id}",
+        json={},
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_ward_route_rejects_duplicate_name(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    first = _create_ward(
+        clinic,
+        name="Ward One",
+    )
+
+    second = _create_ward(
+        clinic,
+        name="Ward Two",
+    )
+
+    response = client.patch(
+        f"/api/wards/{second.id}",
+        json={
+            "name": first.name,
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 409
+
+
+def test_update_ward_route_missing(
+    client,
+    user,
+    auth_headers_for,
+):
+    response = client.patch(
+        "/api/wards/999999",
+        json={
+            "name": "Updated Ward",
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 404
+
+
+def test_update_ward_route_maps_domain_error(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    ward_routes,
+):
+    monkeypatch.setattr(
+        ward_routes,
+        "update_ward",
+        Mock(
+            side_effect=ConflictError(
+                "Ward update conflict"
+            )
+        ),
+    )
+
+    response = client.patch(
+        "/api/wards/1",
+        json={
+            "name": "Updated Ward",
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == (
+        "Ward update conflict"
+    )
+
+
+# Get ward
 
 
 def test_get_ward_route_success(
@@ -609,6 +829,8 @@ def test_get_ward_route_success(
 
     body = response.get_json()
 
+    assert body["id"] == ward.id
+    assert body["clinic_id"] == clinic.id
     assert body["name"] == "Recovery Ward"
     assert body["capacity"] == 8
     assert body["ward_type"] == (
@@ -666,9 +888,70 @@ def test_get_ward_route_enforces_clinic_isolation(
     assert response.status_code == 404
 
 
-# ============================================================================
-# OCCUPANCY
-# ============================================================================
+def test_get_ward_route_maps_not_found_error(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    ward_routes,
+):
+    monkeypatch.setattr(
+        ward_routes,
+        "get_ward",
+        Mock(
+            side_effect=NotFoundError(
+                "Ward 123 not found"
+            )
+        ),
+    )
+
+    response = client.get(
+        "/api/wards/123",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == (
+        "Ward 123 not found"
+    )
+
+
+def test_get_ward_route_maps_validation_error(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    ward_routes,
+):
+    monkeypatch.setattr(
+        ward_routes,
+        "get_ward",
+        Mock(
+            side_effect=ValidationError(
+                "Invalid ward"
+            )
+        ),
+    )
+
+    response = client.get(
+        "/api/wards/1",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+    assert response.get_json()["error"] == (
+        "Invalid ward"
+    )
+
+
+# Occupancy
 
 
 def test_get_ward_occupancy_route_success(
@@ -698,6 +981,7 @@ def test_get_ward_occupancy_route_success(
     assert body["clinic_id"] == clinic.id
     assert body["capacity"] == 2
     assert body["total_beds"] == 1
+    assert body["available"] == 1
 
 
 def test_get_ward_occupancy_route_missing_ward(
@@ -716,9 +1000,7 @@ def test_get_ward_occupancy_route_missing_ward(
     assert response.status_code == 404
 
 
-# ============================================================================
-# ADD BED
-# ============================================================================
+# Beds
 
 
 def test_add_bed_route_success(
@@ -751,6 +1033,7 @@ def test_add_bed_route_success(
         "Bed added successfully"
     )
 
+    assert body["bed"]["id"] is not None
     assert body["bed"]["ward_id"] == ward.id
     assert body["bed"]["bed_number"] == "B-101"
     assert body["bed"]["status"] == (
@@ -780,6 +1063,29 @@ def test_add_bed_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
+def test_add_bed_route_rejects_unknown_fields(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    ward = _create_ward(clinic)
+
+    response = client.post(
+        f"/api/wards/{ward.id}/beds",
+        json={
+            "bed_number": "B-001",
+            "clinic_id": 999,
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
 def test_add_bed_route_missing_ward(
     client,
     user,
@@ -799,9 +1105,39 @@ def test_add_bed_route_missing_ward(
     assert response.status_code == 404
 
 
-# ============================================================================
-# LIST / GET BEDS
-# ============================================================================
+def test_add_bed_route_maps_conflict_error(
+    client,
+    user,
+    auth_headers_for,
+    monkeypatch,
+    ward_routes,
+):
+    monkeypatch.setattr(
+        ward_routes,
+        "add_bed",
+        Mock(
+            side_effect=ConflictError(
+                "Ward has reached capacity"
+            )
+        ),
+    )
+
+    response = client.post(
+        "/api/wards/1/beds",
+        json={
+            "bed_number": "B-001",
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 409
+
+    assert response.get_json()["error"] == (
+        "Ward has reached capacity"
+    )
 
 
 def test_list_beds_route_success(
@@ -839,9 +1175,13 @@ def test_list_beds_route_success(
 
     body = response.get_json()
 
+    assert body["total"] == 2
+    assert body["page"] == 1
+    assert body["per_page"] == 50
+
     assert [
         item["bed_number"]
-        for item in body
+        for item in body["items"]
     ] == [
         "B-001",
         "B-002",
@@ -892,13 +1232,88 @@ def test_list_beds_route_filters_status(
 
     body = response.get_json()
 
+    assert body["total"] == 1
+
     ids = {
         item["id"]
-        for item in body
+        for item in body["items"]
     }
 
     assert maintenance.id in ids
     assert available.id not in ids
+
+
+def test_list_beds_route_supports_pagination(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+):
+    ward = _create_ward(
+        clinic,
+        capacity=5,
+    )
+
+    for index in range(1, 6):
+        ward_service.add_bed(
+            ward.id,
+            f"B-{index:03d}",
+            clinic.id,
+        )
+
+    response = client.get(
+        (
+            f"/api/wards/{ward.id}/beds"
+            "?page=2&per_page=2"
+        ),
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 5
+    assert body["page"] == 2
+    assert body["per_page"] == 2
+    assert len(body["items"]) == 2
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=501",
+        "page=abc",
+        "per_page=abc",
+    ],
+)
+def test_list_beds_route_rejects_invalid_pagination(
+    client,
+    clinic,
+    user,
+    auth_headers_for,
+    query,
+):
+    ward = _create_ward(
+        clinic,
+        capacity=1,
+    )
+
+    response = client.get(
+        f"/api/wards/{ward.id}/beds?{query}",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_beds_route_rejects_invalid_status(
@@ -922,9 +1337,30 @@ def test_list_beds_route_rejects_invalid_status(
 
     assert response.status_code == 422
 
-    assert "Invalid bed status" in (
-        response.get_json()["error"]
+    body = response.get_json()
+
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert any(
+        "status" in str(detail)
+        for detail in body["details"]
     )
+
+
+def test_list_beds_route_missing_ward(
+    client,
+    user,
+    auth_headers_for,
+):
+    response = client.get(
+        "/api/wards/999999/beds",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 404
 
 
 def test_get_bed_route_success(
@@ -950,12 +1386,12 @@ def test_get_bed_route_success(
 
     body = response.get_json()
 
-    assert body == {
-        "id": bed.id,
-        "ward_id": ward.id,
-        "bed_number": "B-100",
-        "status": BedStatus.AVAILABLE.value,
-    }
+    assert body["id"] == bed.id
+    assert body["ward_id"] == ward.id
+    assert body["bed_number"] == "B-100"
+    assert body["status"] == (
+        BedStatus.AVAILABLE.value
+    )
 
 
 def test_get_bed_route_missing(
@@ -974,9 +1410,34 @@ def test_get_bed_route_missing(
     assert response.status_code == 404
 
 
-# ============================================================================
-# BED MAINTENANCE
-# ============================================================================
+def test_get_bed_route_rejects_foreign_bed(
+    client,
+    clinic,
+    make_clinic,
+    make_user,
+    auth_headers_for,
+):
+    foreign_clinic = make_clinic()
+
+    _, foreign_bed = _create_bed(
+        foreign_clinic,
+        ward_name="Foreign Ward",
+    )
+
+    local_user = make_user(
+        clinic,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        f"/api/wards/beds/{foreign_bed.id}",
+        headers=_headers(
+            auth_headers_for,
+            local_user,
+        ),
+    )
+
+    assert response.status_code == 404
 
 
 def test_set_bed_maintenance_route_success(
@@ -1055,7 +1516,7 @@ def test_set_bed_maintenance_route_rejects_invalid_payload(
     response = client.patch(
         f"/api/wards/beds/{bed.id}/maintenance",
         json={
-            "under_maintenance": "not-a-boolean",
+            "under_maintenance": "invalid",
         },
         headers=_headers(
             auth_headers_for,
@@ -1066,9 +1527,7 @@ def test_set_bed_maintenance_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
-# ============================================================================
-# RESERVATIONS
-# ============================================================================
+# Reservations
 
 
 def test_reserve_bed_route_success(
@@ -1120,6 +1579,7 @@ def test_reserve_bed_route_success(
 
     assert reservation["patient_id"] == patient.id
     assert reservation["bed_id"] == bed.id
+    assert reservation["reserved_by_id"] == staff.id
     assert reservation["status"] == (
         ReservationStatus.PENDING.value
     )
@@ -1127,7 +1587,6 @@ def test_reserve_bed_route_success(
 
 def test_reserve_bed_route_rejects_invalid_payload(
     client,
-    clinic,
     user,
     auth_headers_for,
 ):
@@ -1146,7 +1605,7 @@ def test_reserve_bed_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
-def test_reserve_bed_route_rejects_client_staff_override(
+def test_reserve_bed_route_rejects_unknown_fields(
     client,
     clinic,
     make_patient,
@@ -1185,6 +1644,60 @@ def test_reserve_bed_route_rejects_client_staff_override(
     assert response.status_code == 422
 
 
+def test_reserve_bed_route_maps_service_conflict(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+    monkeypatch,
+    ward_routes,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    patient = make_patient(
+        clinic=clinic,
+    )
+
+    _, bed = _create_bed(clinic)
+
+    user = db.session.get(
+        type(staff.user),
+        staff.user_id,
+    )
+
+    monkeypatch.setattr(
+        ward_routes,
+        "reserve_bed",
+        Mock(
+            side_effect=ConflictError(
+                "Bed is already reserved"
+            )
+        ),
+    )
+
+    response = client.post(
+        "/api/wards/reservations",
+        json={
+            "patient_id": patient.id,
+            "bed_id": bed.id,
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 409
+
+    assert response.get_json()["error"] == (
+        "Bed is already reserved"
+    )
+
+
 def test_list_reservations_route_success(
     client,
     clinic,
@@ -1215,9 +1728,13 @@ def test_list_reservations_route_success(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
+    assert body["total"] == 1
+
     ids = {
         item["id"]
-        for item in response.get_json()
+        for item in body["items"]
     }
 
     assert reservation.id in ids
@@ -1258,10 +1775,254 @@ def test_list_reservations_route_filters_status(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
+    assert body["total"] == 1
+
     assert any(
         item["id"] == reservation.id
-        for item in response.get_json()
+        for item in body["items"]
     )
+
+
+def test_list_reservations_route_filters_patient(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+):
+    actor = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    patient_a = make_patient(
+        clinic=clinic,
+    )
+
+    patient_b = make_patient(
+        clinic=clinic,
+    )
+
+    _, bed_a = _create_bed(
+        clinic,
+        ward_name="Reservation A",
+        bed_number="B-001",
+    )
+
+    _, bed_b = _create_bed(
+        clinic,
+        ward_name="Reservation B",
+        bed_number="B-002",
+    )
+
+    first = ward_service.reserve_bed(
+        patient_id=patient_a.id,
+        bed_id=bed_a.id,
+        reserved_by_id=actor.id,
+        clinic_id=clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    second = ward_service.reserve_bed(
+        patient_id=patient_b.id,
+        bed_id=bed_b.id,
+        reserved_by_id=actor.id,
+        clinic_id=clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    user = db.session.get(
+        type(actor.user),
+        actor.user_id,
+    )
+
+    response = client.get(
+        (
+            "/api/wards/reservations"
+            f"?patient_id={patient_a.id}"
+        ),
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 1
+
+    ids = {
+        item["id"]
+        for item in body["items"]
+    }
+
+    assert ids == {first.id}
+    assert second.id not in ids
+
+
+def test_list_reservations_route_filters_bed(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+):
+    actor = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    patient_a = make_patient(
+        clinic=clinic,
+    )
+
+    patient_b = make_patient(
+        clinic=clinic,
+    )
+
+    _, bed_a = _create_bed(
+        clinic,
+        ward_name="Reservation A",
+        bed_number="B-001",
+    )
+
+    _, bed_b = _create_bed(
+        clinic,
+        ward_name="Reservation B",
+        bed_number="B-002",
+    )
+
+    first = ward_service.reserve_bed(
+        patient_id=patient_a.id,
+        bed_id=bed_a.id,
+        reserved_by_id=actor.id,
+        clinic_id=clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    second = ward_service.reserve_bed(
+        patient_id=patient_b.id,
+        bed_id=bed_b.id,
+        reserved_by_id=actor.id,
+        clinic_id=clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    user = db.session.get(
+        type(actor.user),
+        actor.user_id,
+    )
+
+    response = client.get(
+        (
+            "/api/wards/reservations"
+            f"?bed_id={bed_a.id}"
+        ),
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 1
+
+    ids = {
+        item["id"]
+        for item in body["items"]
+    }
+
+    assert ids == {first.id}
+    assert second.id not in ids
+
+
+def test_list_reservations_route_supports_pagination(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    user = db.session.get(
+        type(staff.user),
+        staff.user_id,
+    )
+
+    for index in range(1, 4):
+        patient = make_patient(
+            clinic=clinic,
+        )
+
+        _, bed = _create_bed(
+            clinic,
+            ward_name=f"Reservation Ward {index}",
+            bed_number=f"B-{index:03d}",
+        )
+
+        ward_service.reserve_bed(
+            patient_id=patient.id,
+            bed_id=bed.id,
+            reserved_by_id=staff.id,
+            clinic_id=clinic.id,
+            actor_user_id=staff.user_id,
+        )
+
+    response = client.get(
+        "/api/wards/reservations?page=2&per_page=2",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 3
+    assert body["page"] == 2
+    assert body["per_page"] == 2
+    assert len(body["items"]) == 1
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=501",
+        "page=abc",
+        "per_page=abc",
+    ],
+)
+def test_list_reservations_route_rejects_invalid_pagination(
+    client,
+    user,
+    auth_headers_for,
+    query,
+):
+    response = client.get(
+        f"/api/wards/reservations?{query}",
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_reservations_route_rejects_invalid_status(
@@ -1279,8 +2040,13 @@ def test_list_reservations_route_rejects_invalid_status(
 
     assert response.status_code == 422
 
-    assert "Invalid reservation status" in (
-        response.get_json()["error"]
+    body = response.get_json()
+
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert any(
+        "status" in str(detail)
+        for detail in body["details"]
     )
 
 
@@ -1367,9 +2133,7 @@ def test_get_reservation_route_missing(
     assert response.status_code == 404
 
 
-# ============================================================================
-# ACTIVE RESERVATION LOOKUPS
-# ============================================================================
+# Active reservations
 
 
 def test_get_patient_active_reservation_route_success(
@@ -1393,7 +2157,10 @@ def test_get_patient_active_reservation_route_success(
     )
 
     response = client.get(
-        f"/api/wards/patients/{patient.id}/reservation",
+        (
+            f"/api/wards/patients/"
+            f"{patient.id}/reservation"
+        ),
         headers=_headers(
             auth_headers_for,
             user,
@@ -1419,7 +2186,10 @@ def test_get_patient_active_reservation_route_returns_404_when_missing(
     )
 
     response = client.get(
-        f"/api/wards/patients/{patient.id}/reservation",
+        (
+            f"/api/wards/patients/"
+            f"{patient.id}/reservation"
+        ),
         headers=_headers(
             auth_headers_for,
             user,
@@ -1427,7 +2197,6 @@ def test_get_patient_active_reservation_route_returns_404_when_missing(
     )
 
     assert response.status_code == 404
-
     assert response.get_json()["message"] == (
         "No active reservation found"
     )
@@ -1470,7 +2239,10 @@ def test_get_bed_active_reservation_route_success(
     )
 
     response = client.get(
-        f"/api/wards/beds/{bed.id}/reservation",
+        (
+            f"/api/wards/beds/"
+            f"{bed.id}/reservation"
+        ),
         headers=_headers(
             auth_headers_for,
             user,
@@ -1478,7 +2250,6 @@ def test_get_bed_active_reservation_route_success(
     )
 
     assert response.status_code == 200
-
     assert (
         response.get_json()["id"]
         == reservation.id
@@ -1494,7 +2265,10 @@ def test_get_bed_active_reservation_route_returns_404_when_missing(
     _, bed = _create_bed(clinic)
 
     response = client.get(
-        f"/api/wards/beds/{bed.id}/reservation",
+        (
+            f"/api/wards/beds/"
+            f"{bed.id}/reservation"
+        ),
         headers=_headers(
             auth_headers_for,
             user,
@@ -1520,9 +2294,7 @@ def test_get_bed_active_reservation_route_rejects_invalid_id(
     assert response.status_code == 422
 
 
-# ============================================================================
-# CANCEL RESERVATION
-# ============================================================================
+# Cancel reservation
 
 
 def test_cancel_reservation_route_success(
@@ -1610,9 +2382,24 @@ def test_cancel_reservation_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
-# ============================================================================
-# ADMISSION
-# ============================================================================
+def test_cancel_reservation_route_missing(
+    client,
+    user,
+    auth_headers_for,
+):
+    response = client.post(
+        "/api/wards/reservations/999999/cancel",
+        json={},
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 404
+
+
+# Admissions
 
 
 def test_admit_patient_route_success(
@@ -1661,8 +2448,10 @@ def test_admit_patient_route_success(
 
     admission = body["admission"]
 
+    assert admission["id"] is not None
     assert admission["patient_id"] == patient.id
     assert admission["bed_id"] == bed.id
+    assert admission["admitted_by_id"] == staff.id
     assert admission["status"] == (
         AdmissionStatus.ADMITTED.value
     )
@@ -1762,6 +2551,7 @@ def test_get_admission_route_success(
     assert body["id"] == admission.id
     assert body["patient_id"] == patient.id
     assert body["bed_id"] == bed.id
+    assert body["admitted_by_id"] == staff.id
     assert body["status"] == (
         AdmissionStatus.ADMITTED.value
     )
@@ -1783,9 +2573,42 @@ def test_get_admission_route_missing(
     assert response.status_code == 404
 
 
-# ============================================================================
-# PATIENT ADMISSIONS
-# ============================================================================
+def test_get_admission_route_rejects_foreign_admission(
+    client,
+    clinic,
+    make_clinic,
+    make_patient,
+    make_staff,
+    make_user,
+    auth_headers_for,
+):
+    foreign_clinic = make_clinic()
+
+    _, _, _, foreign_admission = (
+        _create_admission(
+            foreign_clinic,
+            make_patient,
+            make_staff,
+        )
+    )
+
+    local_user = make_user(
+        clinic,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        f"/api/wards/admissions/{foreign_admission.id}",
+        headers=_headers(
+            auth_headers_for,
+            local_user,
+        ),
+    )
+
+    assert response.status_code == 404
+
+
+# Patient admissions
 
 
 def test_list_patient_admissions_route_success(
@@ -1813,6 +2636,7 @@ def test_list_patient_admissions_route_success(
     _, second_bed = _create_bed(
         clinic,
         ward_name="Second Ward",
+        bed_number="B-002",
     )
 
     second = ward_service.admit_patient(
@@ -1839,13 +2663,120 @@ def test_list_patient_admissions_route_success(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
+    assert body["total"] == 2
+
     ids = {
         item["id"]
-        for item in response.get_json()
+        for item in body["items"]
     }
 
     assert first.id in ids
     assert second.id in ids
+
+
+def test_list_patient_admissions_route_supports_pagination(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+):
+    patient, staff, _, first = _create_admission(
+        clinic,
+        make_patient,
+        make_staff,
+    )
+
+    user = db.session.get(
+        type(staff.user),
+        staff.user_id,
+    )
+
+    ward_service.discharge_patient(
+        first.id,
+        clinic.id,
+        actor_user_id=staff.user_id,
+    )
+
+    for index in range(2, 4):
+        _, bed = _create_bed(
+            clinic,
+            ward_name=f"Admission Ward {index}",
+            bed_number=f"B-{index:03d}",
+        )
+
+        admission = ward_service.admit_patient(
+            patient_id=patient.id,
+            bed_id=bed.id,
+            admitted_by_id=staff.id,
+            clinic_id=clinic.id,
+            actor_user_id=staff.user_id,
+        )
+
+        ward_service.discharge_patient(
+            admission.id,
+            clinic.id,
+            actor_user_id=staff.user_id,
+        )
+
+    response = client.get(
+        (
+            f"/api/wards/patients/{patient.id}/admissions"
+            "?page=2&per_page=2"
+        ),
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["total"] == 3
+    assert body["page"] == 2
+    assert body["per_page"] == 2
+    assert len(body["items"]) == 1
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "page=0",
+        "page=-1",
+        "per_page=0",
+        "per_page=501",
+        "page=abc",
+        "per_page=abc",
+    ],
+)
+def test_list_patient_admissions_route_rejects_invalid_pagination(
+    client,
+    clinic,
+    make_patient,
+    user,
+    auth_headers_for,
+    query,
+):
+    patient = make_patient(
+        clinic=clinic,
+    )
+
+    response = client.get(
+        (
+            f"/api/wards/patients/{patient.id}/admissions"
+            f"?{query}"
+        ),
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_patient_admissions_route_rejects_invalid_patient_id(
@@ -1900,6 +2831,7 @@ def test_current_patient_admission_route_success(
     body = response.get_json()
 
     assert body["id"] == admission.id
+    assert body["patient_id"] == patient.id
     assert body["status"] == (
         AdmissionStatus.ADMITTED.value
     )
@@ -1950,9 +2882,7 @@ def test_current_patient_admission_route_rejects_invalid_patient_id(
     assert response.status_code == 422
 
 
-# ============================================================================
-# ADMISSION FROM RESERVATION
-# ============================================================================
+# Admission from reservation
 
 
 def test_admit_from_reservation_route_success(
@@ -2001,6 +2931,7 @@ def test_admit_from_reservation_route_success(
 
     admission = body["admission"]
 
+    assert admission["id"] is not None
     assert admission["patient_id"] == patient.id
     assert admission["bed_id"] == bed.id
     assert admission["reservation_id"] == (
@@ -2017,9 +2948,6 @@ def test_admit_from_reservation_route_missing_reservation(
     make_staff,
     auth_headers_for,
 ):
-    # The route requires an authenticated user linked to Staff.
-    # A generic user can reach the route but _current_staff_id()
-    # returns ValidationError (422) before the service lookup.
     staff = make_staff(
         clinic=clinic,
         role=Role.DOCTOR,
@@ -2082,9 +3010,7 @@ def test_admit_from_reservation_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
-# ============================================================================
-# TRANSFER
-# ============================================================================
+# Transfer
 
 
 def test_transfer_bed_route_success(
@@ -2138,11 +3064,14 @@ def test_transfer_bed_route_success(
 
     transfer = body["transfer"]
 
+    assert transfer["id"] is not None
     assert transfer["admission_id"] == admission.id
     assert transfer["from_bed_id"] == source_bed.id
     assert transfer["to_bed_id"] == (
         destination_bed.id
     )
+    assert transfer["reason"] == "Clinical transfer"
+    assert transfer["transferred_at"] is not None
 
     assert patient.id == admission.patient_id
 
@@ -2182,6 +3111,42 @@ def test_transfer_bed_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
+def test_transfer_bed_route_rejects_unknown_fields(
+    client,
+    clinic,
+    make_patient,
+    make_staff,
+    auth_headers_for,
+):
+    _, staff, _, admission = _create_admission(
+        clinic,
+        make_patient,
+        make_staff,
+    )
+
+    user = db.session.get(
+        type(staff.user),
+        staff.user_id,
+    )
+
+    response = client.post(
+        (
+            f"/api/wards/admissions/"
+            f"{admission.id}/transfer"
+        ),
+        json={
+            "to_bed_id": 2,
+            "clinic_id": 999,
+        },
+        headers=_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
 def test_transfer_bed_route_missing_admission(
     client,
     user,
@@ -2201,9 +3166,7 @@ def test_transfer_bed_route_missing_admission(
     assert response.status_code == 404
 
 
-# ============================================================================
-# DISCHARGE
-# ============================================================================
+# Discharge
 
 
 def test_discharge_patient_route_success(
@@ -2349,39 +3312,7 @@ def test_discharge_patient_route_rejects_invalid_payload(
     assert response.status_code == 422
 
 
-# ============================================================================
-# CLINIC ISOLATION
-# ============================================================================
-
-
-def test_get_bed_route_rejects_foreign_clinic_bed(
-    client,
-    clinic,
-    make_clinic,
-    make_user,
-    auth_headers_for,
-):
-    foreign_clinic = make_clinic()
-
-    _, foreign_bed = _create_bed(
-        foreign_clinic,
-        ward_name="Foreign Ward",
-    )
-
-    local_user = make_user(
-        clinic,
-        role=Role.ADMIN,
-    )
-
-    response = client.get(
-        f"/api/wards/beds/{foreign_bed.id}",
-        headers=_headers(
-            auth_headers_for,
-            local_user,
-        ),
-    )
-
-    assert response.status_code == 404
+# Clinic isolation
 
 
 def test_list_reservations_uses_authenticated_clinic(
@@ -2421,10 +3352,7 @@ def test_list_reservations_uses_authenticated_clinic(
     )
 
     response = client.get(
-        (
-            "/api/wards/reservations"
-            f"?clinic_id={foreign_clinic.id}"
-        ),
+        "/api/wards/reservations",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2433,18 +3361,65 @@ def test_list_reservations_uses_authenticated_clinic(
 
     assert response.status_code == 200
 
+    body = response.get_json()
+
     ids = {
         item["id"]
-        for item in response.get_json()
+        for item in body["items"]
     }
 
     assert local_reservation.id in ids
     assert foreign_reservation.id not in ids
+    assert body["total"] == 1
 
 
-# ============================================================================
-# AUTH HELPERS / ACCOUNT STATE
-# ============================================================================
+def test_list_wards_uses_authenticated_clinic(
+    client,
+    clinic,
+    make_clinic,
+    make_user,
+    auth_headers_for,
+):
+    foreign_clinic = make_clinic()
+
+    local = _create_ward(
+        clinic,
+        name="Local Ward",
+    )
+
+    foreign = _create_ward(
+        foreign_clinic,
+        name="Foreign Ward",
+    )
+
+    local_user = make_user(
+        clinic,
+        role=Role.ADMIN,
+    )
+
+    response = client.get(
+        "/api/wards",
+        headers=_headers(
+            auth_headers_for,
+            local_user,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    ids = {
+        item["id"]
+        for item in body["items"]
+    }
+
+    assert local.id in ids
+    assert foreign.id not in ids
+    assert body["total"] == 1
+
+
+# Account state
 
 
 def test_route_rejects_inactive_authenticated_user(
@@ -2504,112 +3479,7 @@ def test_reservation_route_requires_linked_staff(
     )
 
 
-# ============================================================================
-# ROUTE / SERVICE ERROR MAPPING
-# ============================================================================
-
-
-def test_get_ward_route_maps_not_found_error(
-    client,
-    user,
-    auth_headers_for,
-    monkeypatch,
-    ward_routes,
-):
-    monkeypatch.setattr(
-        ward_routes,
-        "get_ward",
-        Mock(
-            side_effect=NotFoundError(
-                "Ward 123 not found"
-            )
-        ),
-    )
-
-    response = client.get(
-        "/api/wards/123",
-        headers=_headers(
-            auth_headers_for,
-            user,
-        ),
-    )
-
-    assert response.status_code == 404
-    assert response.get_json()["error"] == (
-        "Ward 123 not found"
-    )
-
-
-def test_add_bed_route_maps_conflict_error(
-    client,
-    user,
-    auth_headers_for,
-    monkeypatch,
-    ward_routes,
-):
-    monkeypatch.setattr(
-        ward_routes,
-        "add_bed",
-        Mock(
-            side_effect=ConflictError(
-                "Ward has reached capacity"
-            )
-        ),
-    )
-
-    response = client.post(
-        "/api/wards/1/beds",
-        json={
-            "bed_number": "B-001",
-        },
-        headers=_headers(
-            auth_headers_for,
-            user,
-        ),
-    )
-
-    assert response.status_code == 409
-
-    assert response.get_json()["error"] == (
-        "Ward has reached capacity"
-    )
-
-
-def test_get_ward_route_maps_validation_error(
-    client,
-    user,
-    auth_headers_for,
-    monkeypatch,
-    ward_routes,
-):
-    monkeypatch.setattr(
-        ward_routes,
-        "get_ward",
-        Mock(
-            side_effect=ValidationError(
-                "Invalid ward"
-            )
-        ),
-    )
-
-    response = client.get(
-        "/api/wards/1",
-        headers=_headers(
-            auth_headers_for,
-            user,
-        ),
-    )
-
-    assert response.status_code == 422
-
-    assert response.get_json()["error"] == (
-        "Invalid ward"
-    )
-
-
-# ============================================================================
-# RESPONSE SHAPES
-# ============================================================================
+# Response shapes
 
 
 def test_reservation_response_contains_expected_fields(
@@ -2648,7 +3518,7 @@ def test_reservation_response_contains_expected_fields(
     assert body["id"] == reservation.id
     assert body["patient_id"] == patient.id
     assert body["bed_id"] == bed.id
-    assert "reserved_by_id" in body
+    assert body["reserved_by_id"] == staff.id
     assert "status" in body
     assert "reason" in body
     assert "reserved_at" in body
@@ -2694,5 +3564,6 @@ def test_admission_response_contains_expected_fields(
     assert body["status"] == (
         AdmissionStatus.ADMITTED.value
     )
+    assert "reason" in body
     assert "admitted_at" in body
     assert "discharged_at" in body

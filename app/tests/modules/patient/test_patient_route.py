@@ -1,12 +1,52 @@
-﻿from app.core.enums.role_enums import Role
+﻿import pytest
+
+from app.core.enums.role_enums import Role
 
 
-def _headers(make_authenticated_staff, clinic, role):
-    _, headers = make_authenticated_staff(clinic, role)
+def _headers(
+    make_authenticated_staff,
+    clinic,
+    role,
+):
+    _, headers = make_authenticated_staff(
+        clinic,
+        role,
+    )
     return headers
 
 
+def _page_data(response):
+    data = response.get_json()["data"]
+
+    assert isinstance(data, dict)
+    assert "items" in data
+    assert "total" in data
+    assert "page" in data
+    assert "per_page" in data
+
+    return data
+
+
+def _assert_default_page(
+    response,
+    *,
+    expected_total=None,
+):
+    data = _page_data(response)
+
+    assert data["page"] == 1
+    assert data["per_page"] == 50
+    assert isinstance(data["items"], list)
+    assert data["total"] >= 0
+
+    if expected_total is not None:
+        assert data["total"] == expected_total
+
+    return data
+
+
 class TestPatientRoutes:
+
     def test_create_patient_requires_receptionist_or_admin(
         self,
         client,
@@ -145,6 +185,32 @@ class TestPatientRoutes:
 
         assert response.status_code == 401
 
+    def test_create_patient_rejects_client_controlled_fields(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.RECEPTIONIST,
+        )
+
+        response = client.post(
+            "/api/patients",
+            json={
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "clinic_id": clinic.id,
+                "patient_number": "ATTACK",
+                "is_active": False,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
     def test_list_patients_uses_authenticated_users_clinic(
         self,
         client,
@@ -180,14 +246,19 @@ class TestPatientRoutes:
 
         assert response.status_code == 200
 
+        data = _assert_default_page(
+            response,
+            expected_total=1,
+        )
+
         names = {
             patient["first_name"]
-            for patient in response.get_json()["data"]
+            for patient in data["items"]
         }
 
         assert names == {"Alice"}
 
-    def test_list_patients_ignores_client_clinic_id(
+    def test_list_patients_rejects_client_clinic_id(
         self,
         client,
         clinic,
@@ -220,14 +291,7 @@ class TestPatientRoutes:
             headers=headers,
         )
 
-        assert response.status_code == 200
-
-        names = {
-            patient["first_name"]
-            for patient in response.get_json()["data"]
-        }
-
-        assert names == {"Alice"}
+        assert response.status_code == 422
 
     def test_list_patients_search(
         self,
@@ -259,12 +323,185 @@ class TestPatientRoutes:
 
         assert response.status_code == 200
 
+        data = _assert_default_page(
+            response,
+            expected_total=1,
+        )
+
         names = {
             patient["first_name"]
-            for patient in response.get_json()["data"]
+            for patient in data["items"]
         }
 
         assert names == {"Alice"}
+
+    def test_list_patients_active_only(
+        self,
+        client,
+        clinic,
+        make_patient,
+        make_authenticated_staff,
+    ):
+        active = make_patient(
+            clinic,
+            first_name="Active",
+        )
+
+        inactive = make_patient(
+            clinic,
+            first_name="Inactive",
+        )
+
+        inactive.is_active = False
+
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?active_only=true",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _assert_default_page(
+            response,
+            expected_total=1,
+        )
+
+        ids = {
+            patient["id"]
+            for patient in data["items"]
+        }
+
+        assert active.id in ids
+        assert inactive.id not in ids
+
+    def test_list_patients_pagination(
+        self,
+        client,
+        clinic,
+        make_patient,
+        make_authenticated_staff,
+    ):
+        for index in range(5):
+            make_patient(
+                clinic,
+                first_name=f"Patient{index}",
+                last_name="Pagination",
+            )
+
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?page=2&per_page=2",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 2
+        assert data["per_page"] == 2
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+
+    def test_list_patients_beyond_last_page_is_empty(
+        self,
+        client,
+        clinic,
+        make_patient,
+        make_authenticated_staff,
+    ):
+        make_patient(
+            clinic,
+            first_name="Only",
+        )
+
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?page=99&per_page=50",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 99
+        assert data["per_page"] == 50
+        assert data["total"] == 1
+        assert data["items"] == []
+
+    def test_list_patients_rejects_invalid_page(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?page=0",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_list_patients_rejects_invalid_per_page(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?per_page=501",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_list_patients_rejects_unknown_query_parameter(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients?unknown=value",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
     def test_get_patient_not_found(
         self,
@@ -325,6 +562,25 @@ class TestPatientRoutes:
 
         response = client.get(
             f"/api/patients/{other_patient.id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_get_patient_rejects_invalid_patient_id(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            "/api/patients/0",
             headers=headers,
         )
 
@@ -410,6 +666,28 @@ class TestPatientRoutes:
 
         assert response.status_code == 422
 
+    def test_update_patient_rejects_invalid_patient_id(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        response = client.patch(
+            "/api/patients/0",
+            json={
+                "first_name": "Hacked",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
     def test_set_patient_status(
         self,
         client,
@@ -469,6 +747,7 @@ class TestPatientRoutes:
 
 
 class TestFamilyMemberRoutes:
+
     def test_add_and_list_family_member(
         self,
         client,
@@ -499,9 +778,93 @@ class TestFamilyMemberRoutes:
         )
 
         assert list_response.status_code == 200
-        assert len(
-            list_response.get_json()["data"]
-        ) == 1
+
+        data = _assert_default_page(
+            list_response,
+            expected_total=1,
+        )
+
+        assert len(data["items"]) == 1
+        assert data["items"][0]["full_name"] == "John Doe"
+
+    def test_list_family_members_pagination(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.RECEPTIONIST,
+        )
+
+        for index in range(5):
+            response = client.post(
+                f"/api/patients/{patient.id}/family",
+                json={
+                    "full_name": f"Member {index}",
+                    "relation": "child",
+                },
+                headers=headers,
+            )
+
+            assert response.status_code == 201
+
+        response = client.get(
+            f"/api/patients/{patient.id}/family?page=2&per_page=2",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 2
+        assert data["per_page"] == 2
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+
+    def test_list_family_members_rejects_invalid_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.RECEPTIONIST,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/family?page=0",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_list_family_members_rejects_unknown_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.RECEPTIONIST,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/family?unknown=value",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
     def test_add_family_member_rejects_invalid_payload(
         self,
@@ -625,6 +988,8 @@ class TestFamilyMemberRoutes:
             headers=headers,
         )
 
+        assert add_response.status_code == 201
+
         member_id = add_response.get_json()["data"]["id"]
 
         response = client.patch(
@@ -639,6 +1004,7 @@ class TestFamilyMemberRoutes:
 
 
 class TestInsuranceRoutes:
+
     def test_add_and_list_insurance(
         self,
         client,
@@ -675,9 +1041,93 @@ class TestInsuranceRoutes:
         )
 
         assert list_response.status_code == 200
-        assert len(
-            list_response.get_json()["data"]
-        ) == 1
+
+        data = _assert_default_page(
+            list_response,
+            expected_total=1,
+        )
+
+        assert len(data["items"]) == 1
+        assert data["items"][0]["provider_name"] == "Acme"
+
+    def test_list_insurance_pagination(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.RECEPTIONIST,
+        )
+
+        for index in range(5):
+            response = client.post(
+                f"/api/patients/{patient.id}/insurance",
+                json={
+                    "provider_name": f"Provider {index}",
+                    "policy_number": f"POL-{index}",
+                },
+                headers=headers,
+            )
+
+            assert response.status_code == 201
+
+        response = client.get(
+            f"/api/patients/{patient.id}/insurance?page=2&per_page=2",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 2
+        assert data["per_page"] == 2
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+
+    def test_list_insurance_rejects_invalid_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ACCOUNTANT,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/insurance?per_page=501",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_list_insurance_rejects_unknown_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ACCOUNTANT,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/insurance?unknown=value",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
     def test_add_insurance_rejects_invalid_payload(
         self,
@@ -775,6 +1225,7 @@ class TestInsuranceRoutes:
 
 
 class TestVitalsRoutes:
+
     def test_record_and_get_latest_vitals(
         self,
         client,
@@ -963,9 +1414,127 @@ class TestVitalsRoutes:
         )
 
         assert response.status_code == 200
-        assert len(
-            response.get_json()["data"]
-        ) == 2
+
+        data = _assert_default_page(
+            response,
+            expected_total=2,
+        )
+
+        assert len(data["items"]) == 2
+
+    def test_get_vitals_history_pagination(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.NURSE,
+        )
+
+        for heart_rate in range(70, 75):
+            response = client.post(
+                f"/api/patients/{patient.id}/vitals",
+                json={
+                    "heart_rate": heart_rate,
+                },
+                headers=headers,
+            )
+
+            assert response.status_code == 201
+
+        response = client.get(
+            f"/api/patients/{patient.id}/vitals?page=2&per_page=2",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 2
+        assert data["per_page"] == 2
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+
+    def test_get_vitals_history_beyond_last_page_is_empty(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.NURSE,
+        )
+
+        response = client.post(
+            f"/api/patients/{patient.id}/vitals",
+            json={
+                "heart_rate": 75,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+
+        response = client.get(
+            f"/api/patients/{patient.id}/vitals?page=99&per_page=50",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        data = _page_data(response)
+
+        assert data["page"] == 99
+        assert data["total"] == 1
+        assert data["items"] == []
+
+    def test_get_vitals_history_rejects_invalid_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/vitals?page=0",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_get_vitals_history_rejects_unknown_query(
+        self,
+        client,
+        clinic,
+        patient,
+        make_authenticated_staff,
+    ):
+        headers = _headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        response = client.get(
+            f"/api/patients/{patient.id}/vitals?unknown=value",
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
     def test_record_vitals_requires_clinical_role(
         self,

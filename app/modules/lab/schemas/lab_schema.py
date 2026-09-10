@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from typing import Optional
 
@@ -14,9 +16,66 @@ from app.core.enums.lab_enums import (
 )
 
 
-# ---------------------------------------------------------------------
-# Lab test catalog
-# ---------------------------------------------------------------------
+# ============================================================================
+# PAGINATION
+# ============================================================================
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
+class LabPaginationSchema(BaseModel):
+    """
+    Shared pagination contract for laboratory collection endpoints.
+    """
+
+    page: int = Field(
+        DEFAULT_PAGE,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class LabPaginationResponseSchema(BaseModel):
+    """
+    Standard pagination metadata returned by laboratory
+    collection endpoints.
+    """
+
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+# ============================================================================
+# LAB TEST CATALOG
+# ============================================================================
 
 
 class LabTestCreateSchema(BaseModel):
@@ -162,9 +221,32 @@ class LabTestUpdateSchema(BaseModel):
         return self
 
 
-class LabTestListQuerySchema(BaseModel):
+class LabTestListQuerySchema(LabPaginationSchema):
+    """
+    Query schema for laboratory test catalog listing.
+
+    clinic_id is intentionally excluded because the route/service
+    derives clinic context from authenticated identity.
+    """
+
     active_only: bool = Field(
         default=True,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class LabTestListResponseSchema(
+    LabPaginationResponseSchema
+):
+    """
+    Paginated laboratory test response.
+    """
+
+    items: list[LabTestCreateSchema] = Field(
+        default_factory=list,
     )
 
     model_config = ConfigDict(
@@ -173,21 +255,12 @@ class LabTestListQuerySchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Lab orders
-# ---------------------------------------------------------------------
+# ============================================================================
+# LAB ORDERS
+# ============================================================================
 
 
 class LabOrderCreateSchema(BaseModel):
-    """
-    Creates a laboratory order.
-
-    clinic_id and ordered_by_id are intentionally excluded.
-
-    clinic_id is derived from the authenticated user's clinic.
-    ordered_by_id is derived from the authenticated user's Staff
-    record.
-    """
 
     patient_id: int = Field(
         ...,
@@ -229,17 +302,51 @@ class LabOrderCreateSchema(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------
-# Sample collection
-# ---------------------------------------------------------------------
+# ============================================================================
+# LAB ORDER LIST QUERY
+# ============================================================================
+
+
+class LabOrderListQuerySchema(LabPaginationSchema):
+    """
+    Query schema for tenant-scoped patient laboratory orders.
+    """
+
+    patient_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class LabOrderListResponseSchema(
+    LabPaginationResponseSchema
+):
+    """
+    Paginated laboratory order response.
+    """
+
+    items: list[dict] = Field(
+        default_factory=list,
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+# ============================================================================
+# SAMPLE COLLECTION
+# ============================================================================
 
 
 class LabSampleCollectionSchema(BaseModel):
     """
     Collects a laboratory sample.
-
-    collected_by_id and sample_collected_at are intentionally
-    excluded because both are controlled by the service.
     """
 
     scanned_qr_code: Optional[str] = Field(
@@ -254,9 +361,9 @@ class LabSampleCollectionSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Laboratory processing
-# ---------------------------------------------------------------------
+# ============================================================================
+# LABORATORY PROCESSING
+# ============================================================================
 
 
 class LabProcessingSchema(BaseModel):
@@ -278,18 +385,14 @@ class LabProcessingSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Laboratory verification
-# ---------------------------------------------------------------------
+# ============================================================================
+# LABORATORY VERIFICATION
+# ============================================================================
 
 
 class LabVerificationSchema(BaseModel):
     """
     Verifies a laboratory order/result.
-
-    verified_by_id and verified_at are controlled by the service.
-
-    No client-controlled fields are accepted.
     """
 
     model_config = ConfigDict(
@@ -298,9 +401,9 @@ class LabVerificationSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Equipment
-# ---------------------------------------------------------------------
+# ============================================================================
+# EQUIPMENT
+# ============================================================================
 
 
 class LabEquipmentLinkSchema(BaseModel):
@@ -316,9 +419,9 @@ class LabEquipmentLinkSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Cancellation
-# ---------------------------------------------------------------------
+# ============================================================================
+# CANCELLATION
+# ============================================================================
 
 
 class LabOrderCancelSchema(BaseModel):
@@ -333,20 +436,14 @@ class LabOrderCancelSchema(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------
+# ============================================================================
+# RESULTS
+# ============================================================================
 
 
 class LabResultCreateSchema(BaseModel):
     """
     Creates or records a result for a laboratory order item.
-
-    The service controls:
-
-        - resulted_at
-        - authenticated actor identity
-        - automatic result flagging
     """
 
     result_value: str = Field(
@@ -365,23 +462,6 @@ class LabResultCreateSchema(BaseModel):
     result_file_url: Optional[str] = Field(
         None,
         max_length=255,
-    )
-
-    model_config = ConfigDict(
-        from_attributes=True,
-        extra="forbid",
-    )
-
-
-# ---------------------------------------------------------------------
-# Query schemas
-# ---------------------------------------------------------------------
-
-
-class LabOrderListQuerySchema(BaseModel):
-    patient_id: int = Field(
-        ...,
-        gt=0,
     )
 
     model_config = ConfigDict(

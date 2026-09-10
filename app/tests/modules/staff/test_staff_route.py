@@ -7,6 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 
+from app.core.enums.excuse_enums import (
+    ExcuseStatus,
+    ExcuseType,
+)
 from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import (
     LeaveStatus,
@@ -15,21 +19,11 @@ from app.core.enums.staff_enums import (
 )
 
 
-# ============================================================================
-# ROUTE MODULE
-# ============================================================================
-
-
 @pytest.fixture
 def staff_routes():
     import app.modules.staff.routes.staff_route as routes
 
     return routes
-
-
-# ============================================================================
-# AUTHENTICATED ACTORS
-# ============================================================================
 
 
 @pytest.fixture
@@ -126,11 +120,6 @@ def receptionist_headers(receptionist_context):
     return headers
 
 
-# ============================================================================
-# SIMPLE SERIALIZATION OBJECTS
-# ============================================================================
-
-
 def make_staff_object(**overrides):
     values = dict(
         id=1,
@@ -190,11 +179,6 @@ def make_payroll_object(**overrides):
 
 
 def make_excuse_object(**overrides):
-    from app.core.enums.excuse_enums import (
-        ExcuseStatus,
-        ExcuseType,
-    )
-
     values = dict(
         id=1,
         staff_id=1,
@@ -214,9 +198,19 @@ def make_excuse_object(**overrides):
     return SimpleNamespace(**values)
 
 
-# ============================================================================
-# RESPONSE HELPERS
-# ============================================================================
+def paginated(
+    items,
+    *,
+    page=1,
+    per_page=50,
+    total=None,
+):
+    return {
+        "items": items,
+        "total": len(items) if total is None else total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 def assert_success(response, status_code):
@@ -236,11 +230,6 @@ def assert_error(response, status_code):
     assert "error" in body
 
     return body
-
-
-# ============================================================================
-# AUTHENTICATION / AUTHORIZATION
-# ============================================================================
 
 
 def test_staff_routes_require_auth(client):
@@ -396,11 +385,6 @@ def test_excuse_rejection_is_admin_only(
     assert response.status_code == 403
 
 
-# ============================================================================
-# STAFF CREATE
-# ============================================================================
-
-
 def test_create_staff_success(
     client,
     admin_headers,
@@ -493,7 +477,6 @@ def test_create_staff_forwards_user_id(
     )
 
     assert response.status_code == 201
-
     assert (
         service.call_args.kwargs["user_id"]
         == linked_user.id
@@ -561,11 +544,6 @@ def test_create_staff_invalid_json_returns_400(
     assert response.status_code == 400
 
 
-# ============================================================================
-# STAFF LIST / GET
-# ============================================================================
-
-
 def test_list_staff_success(
     client,
     admin_headers,
@@ -573,12 +551,17 @@ def test_list_staff_success(
     monkeypatch,
     staff_routes,
 ):
+    staff = make_staff_object(
+        clinic_id=admin_staff.clinic_id,
+    )
+
     service = Mock(
-        return_value=[
-            make_staff_object(
-                clinic_id=admin_staff.clinic_id,
-            )
-        ]
+        return_value=paginated(
+            [staff],
+            total=1,
+            page=1,
+            per_page=50,
+        )
     )
 
     monkeypatch.setattr(
@@ -594,13 +577,54 @@ def test_list_staff_success(
 
     body = assert_success(response, 200)
 
-    assert len(body["data"]) == 1
-    assert body["data"][0]["id"] == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert len(body["data"]["items"]) == 1
+    assert body["data"]["items"][0]["id"] == 1
 
     assert (
         service.call_args.kwargs["clinic_id"]
         == admin_staff.clinic_id
     )
+
+
+def test_list_staff_forwards_pagination(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=100,
+            page=3,
+            per_page=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "list_staff",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff?page=3&per_page=10",
+        headers=admin_headers,
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 10
+    assert body["data"]["total"] == 100
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["page"] == 3
+    assert kwargs["per_page"] == 10
 
 
 def test_list_staff_forwards_status(
@@ -610,7 +634,14 @@ def test_list_staff_forwards_status(
     monkeypatch,
     staff_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+            page=1,
+            per_page=50,
+        )
+    )
 
     monkeypatch.setattr(
         staff_routes,
@@ -640,7 +671,14 @@ def test_list_staff_forwards_search(
     monkeypatch,
     staff_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+            page=1,
+            per_page=50,
+        )
+    )
 
     monkeypatch.setattr(
         staff_routes,
@@ -688,6 +726,30 @@ def test_list_staff_search_too_long_returns_422(
     assert response.status_code == 422
 
 
+def test_list_staff_invalid_page_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff?page=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_staff_invalid_per_page_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff?per_page=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
 def test_get_staff_success(
     client,
     doctor_headers,
@@ -722,11 +784,6 @@ def test_get_staff_success(
         service.call_args.kwargs["clinic_id"]
         == doctor_staff.clinic_id
     )
-
-
-# ============================================================================
-# STAFF UPDATE
-# ============================================================================
 
 
 def test_update_staff_success(
@@ -840,11 +897,6 @@ def test_update_staff_blank_last_name_returns_422(
     assert response.status_code == 422
 
 
-# ============================================================================
-# STAFF STATUS
-# ============================================================================
-
-
 def test_change_staff_status_success(
     client,
     admin_headers,
@@ -900,11 +952,6 @@ def test_change_staff_status_invalid_status_returns_422(
     )
 
     assert response.status_code == 422
-
-
-# ============================================================================
-# LEAVE REQUEST
-# ============================================================================
 
 
 def test_request_leave_success(
@@ -996,7 +1043,14 @@ def test_list_leave_requests_admin_can_filter_by_staff(
     monkeypatch,
     staff_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+            page=1,
+            per_page=50,
+        )
+    )
 
     monkeypatch.setattr(
         staff_routes,
@@ -1022,6 +1076,44 @@ def test_list_leave_requests_admin_can_filter_by_staff(
     assert kwargs["status"] == LeaveStatus.PENDING
 
 
+def test_list_leave_requests_forwards_pagination(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=37,
+            page=2,
+            per_page=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "list_leave_requests",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff/leave?page=2&per_page=10",
+        headers=admin_headers,
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["total"] == 37
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 10
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["page"] == 2
+    assert kwargs["per_page"] == 10
+
+
 def test_list_leave_requests_non_admin_is_forced_to_own_staff(
     client,
     doctor_headers,
@@ -1029,7 +1121,12 @@ def test_list_leave_requests_non_admin_is_forced_to_own_staff(
     monkeypatch,
     staff_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+        )
+    )
 
     monkeypatch.setattr(
         staff_routes,
@@ -1227,11 +1324,6 @@ def test_reject_leave_blank_reason_is_accepted_by_schema(
     assert response.status_code == 200
 
 
-# ============================================================================
-# EXCUSES
-# ============================================================================
-
-
 def test_create_excuse_success(
     client,
     doctor_headers,
@@ -1255,7 +1347,7 @@ def test_create_excuse_success(
         "/api/staff/excuses",
         headers=doctor_headers,
         json={
-            "excuse_type": "medical",
+            "excuse_type": ExcuseType.MEDICAL.value,
             "description": "Medical appointment",
         },
     )
@@ -1268,9 +1360,9 @@ def test_create_excuse_success(
 
     assert kwargs["clinic_id"] == doctor_staff.clinic_id
     assert kwargs["staff_id"] == doctor_staff.id
-    assert kwargs["actor_user_id"] == doctor_staff.user_id
-    assert kwargs["excuse_type"].value == "medical"
+    assert kwargs["excuse_type"] == ExcuseType.MEDICAL
     assert kwargs["description"] == "Medical appointment"
+    assert "actor_user_id" not in kwargs
 
 
 def test_create_excuse_missing_description_returns_422(
@@ -1281,7 +1373,7 @@ def test_create_excuse_missing_description_returns_422(
         "/api/staff/excuses",
         headers=doctor_headers,
         json={
-            "excuse_type": "medical",
+            "excuse_type": ExcuseType.MEDICAL.value,
         },
     )
 
@@ -1296,7 +1388,7 @@ def test_create_excuse_blank_description_returns_422(
         "/api/staff/excuses",
         headers=doctor_headers,
         json={
-            "excuse_type": "medical",
+            "excuse_type": ExcuseType.MEDICAL.value,
             "description": "",
         },
     )
@@ -1312,7 +1404,7 @@ def test_create_excuse_description_too_long_returns_422(
         "/api/staff/excuses",
         headers=doctor_headers,
         json={
-            "excuse_type": "medical",
+            "excuse_type": ExcuseType.MEDICAL.value,
             "description": "x" * 2001,
         },
     )
@@ -1343,12 +1435,14 @@ def test_list_excuses_admin_forwards_filters(
     monkeypatch,
     staff_routes,
 ):
-    from app.core.enums.excuse_enums import (
-        ExcuseStatus,
-        ExcuseType,
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+            page=1,
+            per_page=50,
+        )
     )
-
-    service = Mock(return_value=[])
 
     monkeypatch.setattr(
         staff_routes,
@@ -1378,6 +1472,44 @@ def test_list_excuses_admin_forwards_filters(
     assert kwargs["status"] == ExcuseStatus.PENDING
 
 
+def test_list_excuses_forwards_pagination(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=25,
+            page=2,
+            per_page=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "list_excuses",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff/excuses?page=2&per_page=10",
+        headers=admin_headers,
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["total"] == 25
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 10
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["page"] == 2
+    assert kwargs["per_page"] == 10
+
+
 def test_list_excuses_non_admin_is_forced_to_own_staff(
     client,
     doctor_headers,
@@ -1385,7 +1517,12 @@ def test_list_excuses_non_admin_is_forced_to_own_staff(
     monkeypatch,
     staff_routes,
 ):
-    service = Mock(return_value=[])
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=0,
+        )
+    )
 
     monkeypatch.setattr(
         staff_routes,
@@ -1417,11 +1554,16 @@ def test_list_my_excuses_success(
     staff_routes,
 ):
     service = Mock(
-        return_value=[
-            make_excuse_object(
-                staff_id=doctor_staff.id,
-            )
-        ]
+        return_value=paginated(
+            [
+                make_excuse_object(
+                    staff_id=doctor_staff.id,
+                )
+            ],
+            total=1,
+            page=1,
+            per_page=50,
+        )
     )
 
     monkeypatch.setattr(
@@ -1437,12 +1579,59 @@ def test_list_my_excuses_success(
 
     body = assert_success(response, 200)
 
-    assert body["data"][0]["staff_id"] == doctor_staff.id
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert (
+        body["data"]["items"][0]["staff_id"]
+        == doctor_staff.id
+    )
 
     kwargs = service.call_args.kwargs
 
     assert kwargs["clinic_id"] == doctor_staff.clinic_id
     assert kwargs["staff_id"] == doctor_staff.id
+    assert kwargs["page"] == 1
+    assert kwargs["per_page"] == 50
+
+
+def test_list_my_excuses_forwards_pagination(
+    client,
+    doctor_headers,
+    doctor_staff,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=17,
+            page=2,
+            per_page=5,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "get_my_excuses",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff/excuses/me?page=2&per_page=5",
+        headers=doctor_headers,
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 5
+    assert body["data"]["total"] == 17
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["page"] == 2
+    assert kwargs["per_page"] == 5
 
 
 def test_get_own_excuse_success(
@@ -1505,8 +1694,6 @@ def test_approve_excuse_success(
     monkeypatch,
     staff_routes,
 ):
-    from app.core.enums.excuse_enums import ExcuseStatus
-
     excuse = make_excuse_object(
         status=ExcuseStatus.APPROVED,
         reviewed_by_user_id=admin_staff.user_id,
@@ -1548,8 +1735,6 @@ def test_reject_excuse_success(
     monkeypatch,
     staff_routes,
 ):
-    from app.core.enums.excuse_enums import ExcuseStatus
-
     excuse = make_excuse_object(
         status=ExcuseStatus.REJECTED,
         reviewed_by_user_id=admin_staff.user_id,
@@ -1586,11 +1771,6 @@ def test_reject_excuse_success(
     assert kwargs["clinic_id"] == admin_staff.clinic_id
     assert kwargs["reviewer_user_id"] == admin_staff.user_id
     assert kwargs["reason"] == "Insufficient documentation"
-
-
-# ============================================================================
-# PAYROLL
-# ============================================================================
 
 
 def test_create_payroll_success(
@@ -1736,8 +1916,9 @@ def test_generate_payroll_success(
     kwargs = service.call_args.kwargs
 
     assert kwargs["clinic_id"] == accountant_staff.clinic_id
-    assert kwargs["salary_lookup"][accountant_staff.id] == Decimal(
-        "100000"
+    assert (
+        kwargs["salary_lookup"][accountant_staff.id]
+        == Decimal("100000")
     )
 
 
@@ -1784,12 +1965,17 @@ def test_list_payroll_success(
     monkeypatch,
     staff_routes,
 ):
+    payroll = make_payroll_object(
+        staff_id=accountant_staff.id,
+    )
+
     service = Mock(
-        return_value=[
-            make_payroll_object(
-                staff_id=accountant_staff.id,
-            )
-        ]
+        return_value=paginated(
+            [payroll],
+            total=1,
+            page=1,
+            per_page=50,
+        )
     )
 
     monkeypatch.setattr(
@@ -1805,12 +1991,57 @@ def test_list_payroll_success(
 
     body = assert_success(response, 200)
 
-    assert len(body["data"]) == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert len(body["data"]["items"]) == 1
+    assert (
+        body["data"]["items"][0]["staff_id"]
+        == accountant_staff.id
+    )
 
     assert (
         service.call_args.kwargs["clinic_id"]
         == accountant_staff.clinic_id
     )
+
+
+def test_list_payroll_forwards_pagination(
+    client,
+    accountant_headers,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=22,
+            page=2,
+            per_page=10,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "list_payroll",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff/payroll?page=2&per_page=10",
+        headers=accountant_headers,
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["total"] == 22
+    assert body["data"]["page"] == 2
+    assert body["data"]["per_page"] == 10
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["page"] == 2
+    assert kwargs["per_page"] == 10
 
 
 def test_list_payroll_for_staff_success(
@@ -1820,12 +2051,17 @@ def test_list_payroll_for_staff_success(
     monkeypatch,
     staff_routes,
 ):
+    payroll = make_payroll_object(
+        staff_id=accountant_staff.id,
+    )
+
     service = Mock(
-        return_value=[
-            make_payroll_object(
-                staff_id=accountant_staff.id,
-            )
-        ]
+        return_value=paginated(
+            [payroll],
+            total=1,
+            page=1,
+            per_page=50,
+        )
     )
 
     monkeypatch.setattr(
@@ -1844,12 +2080,61 @@ def test_list_payroll_for_staff_success(
 
     body = assert_success(response, 200)
 
-    assert len(body["data"]) == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["page"] == 1
+    assert body["data"]["per_page"] == 50
+    assert len(body["data"]["items"]) == 1
 
     kwargs = service.call_args.kwargs
 
     assert kwargs["clinic_id"] == accountant_staff.clinic_id
     assert kwargs["staff_id"] == accountant_staff.id
+
+
+def test_list_payroll_for_staff_forwards_pagination(
+    client,
+    accountant_headers,
+    accountant_staff,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=paginated(
+            [],
+            total=19,
+            page=3,
+            per_page=5,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "list_payroll_for_staff",
+        service,
+    )
+
+    response = client.get(
+        "/api/staff/payroll",
+        headers=accountant_headers,
+        query_string={
+            "staff_id": accountant_staff.id,
+            "page": 3,
+            "per_page": 5,
+        },
+    )
+
+    body = assert_success(response, 200)
+
+    assert body["data"]["total"] == 19
+    assert body["data"]["page"] == 3
+    assert body["data"]["per_page"] == 5
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["clinic_id"] == accountant_staff.clinic_id
+    assert kwargs["staff_id"] == accountant_staff.id
+    assert kwargs["page"] == 3
+    assert kwargs["per_page"] == 5
 
 
 def test_list_payroll_invalid_staff_id_returns_422(
@@ -1858,6 +2143,30 @@ def test_list_payroll_invalid_staff_id_returns_422(
 ):
     response = client.get(
         "/api/staff/payroll?staff_id=0",
+        headers=accountant_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_payroll_invalid_page_returns_422(
+    client,
+    accountant_headers,
+):
+    response = client.get(
+        "/api/staff/payroll?page=0",
+        headers=accountant_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_payroll_invalid_per_page_returns_422(
+    client,
+    accountant_headers,
+):
+    response = client.get(
+        "/api/staff/payroll?per_page=0",
         headers=accountant_headers,
     )
 
@@ -1933,11 +2242,6 @@ def test_mark_payroll_paid_success(
 
     assert kwargs["record_id"] == 9
     assert kwargs["clinic_id"] == accountant_staff.clinic_id
-
-
-# ============================================================================
-# DOMAIN ERROR MAPPING
-# ============================================================================
 
 
 @pytest.mark.parametrize(
@@ -2099,17 +2403,12 @@ def test_excuse_domain_error_is_returned(
         "/api/staff/excuses",
         headers=doctor_headers,
         json={
-            "excuse_type": "medical",
+            "excuse_type": ExcuseType.MEDICAL.value,
             "description": "Medical appointment",
         },
     )
 
     assert_error(response, 409)
-
-
-# ============================================================================
-# ROUTE SERIALIZATION
-# ============================================================================
 
 
 def test_staff_serializer_serializes_enum_and_dates(
@@ -2172,11 +2471,6 @@ def test_excuse_serializer_serializes_enum_and_dates(
     assert result["updated_at"] is not None
 
 
-# ============================================================================
-# ROLE COVERAGE
-# ============================================================================
-
-
 @pytest.mark.parametrize(
     "role",
     [
@@ -2210,7 +2504,12 @@ def test_staff_list_allows_view_roles(
     monkeypatch.setattr(
         staff_routes,
         "list_staff",
-        Mock(return_value=[]),
+        Mock(
+            return_value=paginated(
+                [],
+                total=0,
+            )
+        ),
     )
 
     response = client.get(
@@ -2244,7 +2543,12 @@ def test_payroll_list_allows_payroll_roles(
     monkeypatch.setattr(
         staff_routes,
         "list_payroll",
-        Mock(return_value=[]),
+        Mock(
+            return_value=paginated(
+                [],
+                total=0,
+            )
+        ),
     )
 
     response = client.get(
@@ -2299,11 +2603,6 @@ def test_payroll_create_allows_payroll_roles(
     assert response.status_code == 201
 
 
-# ============================================================================
-# CLINIC ISOLATION
-# ============================================================================
-
-
 def test_get_staff_uses_authenticated_clinic(
     client,
     admin_headers,
@@ -2337,25 +2636,10 @@ def test_get_staff_uses_authenticated_clinic(
     )
 
 
-def test_create_staff_does_not_accept_client_clinic_id(
+def test_create_staff_rejects_client_clinic_id(
     client,
     admin_headers,
-    admin_staff,
-    monkeypatch,
-    staff_routes,
 ):
-    service = Mock(
-        return_value=make_staff_object(
-            clinic_id=admin_staff.clinic_id,
-        )
-    )
-
-    monkeypatch.setattr(
-        staff_routes,
-        "create_staff",
-        service,
-    )
-
     response = client.post(
         "/api/staff",
         headers=admin_headers,
@@ -2366,14 +2650,7 @@ def test_create_staff_does_not_accept_client_clinic_id(
         },
     )
 
-    # StaffCreateSchema currently uses Pydantic's default extra behavior,
-    # so clinic_id is ignored rather than rejected.
-    assert response.status_code == 201
-
-    assert (
-        service.call_args.kwargs["clinic_id"]
-        == admin_staff.clinic_id
-    )
+    assert response.status_code == 422
 
 
 def test_create_staff_cannot_override_authenticated_clinic(
@@ -2401,7 +2678,6 @@ def test_create_staff_cannot_override_authenticated_clinic(
         json={
             "first_name": "Jane",
             "last_name": "Smith",
-            "clinic_id": 999999,
         },
     )
 
@@ -2410,12 +2686,6 @@ def test_create_staff_cannot_override_authenticated_clinic(
     kwargs = service.call_args.kwargs
 
     assert kwargs["clinic_id"] == admin_staff.clinic_id
-    assert kwargs["clinic_id"] != 999999
-
-
-# ============================================================================
-# ACTIVE USER ENFORCEMENT
-# ============================================================================
 
 
 def test_inactive_authenticated_user_is_rejected(
@@ -2435,11 +2705,6 @@ def test_inactive_authenticated_user_is_rejected(
     )
 
     assert response.status_code in (400, 401, 422)
-
-
-# ============================================================================
-# ROUTE EDGE CASES
-# ============================================================================
 
 
 def test_get_staff_invalid_negative_id_returns_404(

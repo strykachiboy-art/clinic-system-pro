@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
 
 from pydantic import (
     BaseModel,
@@ -14,23 +15,12 @@ from app.core.enums.message_enums import (
 )
 
 
-# ============================================================================
-# Message Creation
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 
 class MessageCreateSchema(BaseModel):
-    """
-    Request schema for creating a message.
-
-    clinic_id and sender_id are intentionally excluded.
-
-    The clinic is derived from the authenticated user's
-    clinic assignment by the route/service layer.
-
-    The sender is the authenticated user.
-    """
-
     recipient_id: int = Field(
         ...,
         gt=0,
@@ -60,103 +50,140 @@ class MessageCreateSchema(BaseModel):
         description="Priority of the message",
     )
 
-    parent_message_id: Optional[int] = Field(
+    parent_message_id: int | None = Field(
         default=None,
         gt=0,
-        description="ID of the parent message when replying to a thread",
+        description="Parent message ID when replying",
     )
 
     model_config = ConfigDict(
-        from_attributes=True,
+        extra="forbid",
     )
 
 
-# ============================================================================
-# Message Update
-# ============================================================================
-
-
 class MessageUpdateSchema(BaseModel):
-    """
-    Request schema for updating a message.
-
-    Only fields that are safe to modify after creation
-    should be accepted here.
-    """
-
-    subject: Optional[str] = Field(
+    subject: str | None = Field(
         default=None,
         min_length=1,
         max_length=255,
         description="Updated message subject",
     )
 
-    body: Optional[str] = Field(
+    body: str | None = Field(
         default=None,
         min_length=1,
         description="Updated message body",
     )
 
-    priority: Optional[MessagePriority] = Field(
+    priority: MessagePriority | None = Field(
         default=None,
         description="Updated message priority",
     )
 
     model_config = ConfigDict(
-        from_attributes=True,
+        extra="forbid",
     )
 
 
-# ============================================================================
-# Message Status Update
-# ============================================================================
-
-
 class MessageStatusUpdateSchema(BaseModel):
-    """
-    Request schema for updating message status.
-    """
-
     status: MessageStatus = Field(
         ...,
         description="New message status",
     )
 
     model_config = ConfigDict(
-        from_attributes=True,
+        extra="forbid",
     )
-
-
-# ============================================================================
-# Message Read State
-# ============================================================================
 
 
 class MessageReadSchema(BaseModel):
-    """
-    Request schema for marking a message as read.
-    """
-
     model_config = ConfigDict(
-        from_attributes=True,
+        extra="forbid",
     )
 
 
-# ============================================================================
-# Message Response
-# ============================================================================
+class MessageListQuerySchema(BaseModel):
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+        description="Page number",
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description="Items per page",
+    )
+
+    unread_only: bool = Field(
+        default=False,
+        description="Return unread messages only",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class MessageSentListQuerySchema(BaseModel):
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+        description="Page number",
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description="Items per page",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class MessageThreadQuerySchema(BaseModel):
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+        description="Page number",
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description="Items per page",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class MessageResponseSchema(BaseModel):
-    """
-    Response schema for a message.
-    """
+    id: int = Field(
+        ...,
+        gt=0,
+    )
 
-    id: int
-    clinic_id: int
+    clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
 
-    sender_id: int
-    recipient_id: int
+    sender_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    recipient_id: int = Field(
+        ...,
+        gt=0,
+    )
 
     subject: str
     body: str
@@ -165,15 +192,40 @@ class MessageResponseSchema(BaseModel):
     status: MessageStatus
     priority: MessagePriority
 
-    parent_message_id: Optional[int]
+    parent_message_id: int | None = Field(
+        default=None,
+        gt=0,
+    )
 
-    sent_at: Optional[datetime]
-    read_at: Optional[datetime]
-    deleted_at: Optional[datetime]
+    sent_at: datetime | None = None
+    read_at: datetime | None = None
+    deleted_at: datetime | None = None
 
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
+    )
+
+
+class MessageListResponseSchema(BaseModel):
+    items: list[MessageResponseSchema]
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
     )

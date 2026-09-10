@@ -102,6 +102,13 @@ class User(db.Model):
         back_populates="user",
         uselist=False,
     )
+    
+    patient = db.relationship(
+        "Patient",
+        back_populates="user",
+        uselist=False,
+    
+   )
 
     # ================================================================
     # AUTH IDENTITIES

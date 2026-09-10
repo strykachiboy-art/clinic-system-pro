@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Optional
+
+from sqlalchemy import func, select
 
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
+from app.core.auth.user.models.user_model import User
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.excuse_enums import (
     ExcuseStatus,
@@ -11,7 +16,6 @@ from app.core.enums.excuse_enums import (
 )
 from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import StaffStatus
-
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -19,28 +23,103 @@ from app.core.exceptions import (
 )
 from app.core.utils.decorators import transactional
 
-from app.core.auth.user.models.user_model import User
+from app.modules.staff.models.excuse_model import Excuse
 from app.modules.staff.models.staff_model import (
     LeaveRequest,
     Staff,
 )
-from app.modules.staff.models.excuse_model import Excuse
 
 
-def _utcnow():
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
+def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _db_now():
-    """
-    Return a naive UTC datetime for database DateTime columns.
-    """
+def _db_now() -> datetime:
     return _utcnow().replace(tzinfo=None)
 
 
-# ----------------------------------------------------------------------
-# LOOKUPS
-# ----------------------------------------------------------------------
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> int:
+    if isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        ) from exc
+
+    if value <= 0:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
+
+    return value
+
+
+def _validate_pagination(
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> tuple[int, int]:
+    page = _validate_positive_id(
+        page,
+        "page",
+    )
+
+    per_page = _validate_positive_id(
+        per_page,
+        "per_page",
+    )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"per_page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+def _paginate(
+    statement,
+    count_statement,
+    page: int,
+    per_page: int,
+) -> dict:
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
+
+    items = list(
+        db.session.execute(
+            statement
+            .offset(
+                (page - 1) * per_page
+            )
+            .limit(per_page)
+        ).scalars()
+    )
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 def _get_staff(
@@ -48,19 +127,32 @@ def _get_staff(
     clinic_id: Optional[int] = None,
     lock: bool = False,
 ) -> Staff:
-    query = Staff.query.filter(
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
+
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
+    statement = select(Staff).where(
         Staff.id == staff_id,
     )
 
     if clinic_id is not None:
-        query = query.filter(
+        statement = statement.where(
             Staff.clinic_id == clinic_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    staff = query.first()
+    staff = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if staff is None:
         raise NotFoundError(
@@ -74,18 +166,25 @@ def _get_user(
     user_id: int,
     clinic_id: Optional[int] = None,
 ) -> User:
-    query = User.query.filter(
-        User.id == user_id,
+    user_id = _validate_positive_id(
+        user_id,
+        "user_id",
     )
 
-    if clinic_id is not None:
-        query = query.filter(
-            User.clinic_id == clinic_id,
-        )
-
-    user = query.first()
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
+        raise NotFoundError(
+            f"User {user_id} not found"
+        )
+
+    if (
+        clinic_id is not None
+        and user.clinic_id != clinic_id
+    ):
         raise NotFoundError(
             f"User {user_id} not found"
         )
@@ -98,31 +197,39 @@ def _get_excuse(
     clinic_id: Optional[int] = None,
     lock: bool = False,
 ) -> Excuse:
-    """
-    Fetch an excuse while enforcing clinic ownership
-    through its Staff relationship.
-    """
+    excuse_id = _validate_positive_id(
+        excuse_id,
+        "excuse_id",
+    )
 
-    query = (
-        Excuse.query
+    if clinic_id is not None:
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "clinic_id",
+        )
+
+    statement = (
+        select(Excuse)
         .join(
             Staff,
             Excuse.staff_id == Staff.id,
         )
-        .filter(
+        .where(
             Excuse.id == excuse_id,
         )
     )
 
     if clinic_id is not None:
-        query = query.filter(
+        statement = statement.where(
             Staff.clinic_id == clinic_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    excuse = query.first()
+    excuse = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if excuse is None:
         raise NotFoundError(
@@ -137,26 +244,34 @@ def _get_leave_request(
     clinic_id: int,
     lock: bool = False,
 ) -> LeaveRequest:
-    """
-    Fetch a leave request belonging to the authenticated clinic.
-    """
+    leave_request_id = _validate_positive_id(
+        leave_request_id,
+        "leave_request_id",
+    )
 
-    query = (
-        LeaveRequest.query
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    statement = (
+        select(LeaveRequest)
         .join(
             Staff,
             LeaveRequest.staff_id == Staff.id,
         )
-        .filter(
+        .where(
             LeaveRequest.id == leave_request_id,
             Staff.clinic_id == clinic_id,
         )
     )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
-    leave_request = query.first()
+    leave_request = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if leave_request is None:
         raise NotFoundError(
@@ -166,19 +281,9 @@ def _get_leave_request(
     return leave_request
 
 
-# ----------------------------------------------------------------------
-# VALIDATION
-# ----------------------------------------------------------------------
-
-
 def _validate_staff_can_submit_excuse(
     staff: Staff,
 ) -> None:
-    """
-    Staff must not be suspended or terminated to submit
-    a new excuse.
-    """
-
     if staff.status in (
         StaffStatus.SUSPENDED,
         StaffStatus.TERMINATED,
@@ -192,7 +297,10 @@ def _validate_staff_can_submit_excuse(
 def _validate_excuse_type(
     excuse_type: ExcuseType,
 ) -> None:
-    if not isinstance(excuse_type, ExcuseType):
+    if not isinstance(
+        excuse_type,
+        ExcuseType,
+    ):
         raise ValidationError(
             "Invalid excuse type"
         )
@@ -201,7 +309,10 @@ def _validate_excuse_type(
 def _validate_description(
     description: str,
 ) -> str:
-    if description is None:
+    if not isinstance(
+        description,
+        str,
+    ):
         raise ValidationError(
             "Excuse description is required"
         )
@@ -227,6 +338,14 @@ def _validate_document_url(
     if document_url is None:
         return None
 
+    if not isinstance(
+        document_url,
+        str,
+    ):
+        raise ValidationError(
+            "Document URL must be a string"
+        )
+
     document_url = document_url.strip()
 
     if not document_url:
@@ -243,12 +362,16 @@ def _validate_document_url(
 def _validate_rejection_reason(
     reason: Optional[str],
 ) -> Optional[str]:
-    """
-    Normalize and validate the persistent rejection reason.
-    """
-
     if reason is None:
         return None
+
+    if not isinstance(
+        reason,
+        str,
+    ):
+        raise ValidationError(
+            "Rejection reason must be a string"
+        )
 
     reason = reason.strip()
 
@@ -297,11 +420,6 @@ def _validate_leave_request_for_staff(
         )
 
 
-# ----------------------------------------------------------------------
-# CREATE
-# ----------------------------------------------------------------------
-
-
 @transactional
 def create_excuse(
     *,
@@ -312,25 +430,27 @@ def create_excuse(
     leave_request_id: Optional[int] = None,
     document_url: Optional[str] = None,
 ) -> Excuse:
-    """
-    Create an excuse for a staff member.
-
-    The route should derive staff_id from the authenticated
-    user's linked Staff record rather than accepting it from
-    the client.
-    """
-
     staff = _get_staff(
         staff_id,
         clinic_id=clinic_id,
         lock=True,
     )
 
-    _validate_staff_can_submit_excuse(staff)
-    _validate_excuse_type(excuse_type)
+    _validate_staff_can_submit_excuse(
+        staff
+    )
 
-    description = _validate_description(description)
-    document_url = _validate_document_url(document_url)
+    _validate_excuse_type(
+        excuse_type
+    )
+
+    description = _validate_description(
+        description
+    )
+
+    document_url = _validate_document_url(
+        document_url
+    )
 
     leave_request = None
 
@@ -386,11 +506,6 @@ def create_excuse(
     return excuse
 
 
-# ----------------------------------------------------------------------
-# READ
-# ----------------------------------------------------------------------
-
-
 def get_excuse(
     excuse_id: int,
     clinic_id: int,
@@ -408,48 +523,120 @@ def list_excuses(
     leave_request_id: Optional[int] = None,
     excuse_type: Optional[ExcuseType] = None,
     status: Optional[ExcuseStatus] = None,
-):
-    """
-    List excuses belonging only to the authenticated clinic.
-    """
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    query = (
-        Excuse.query
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = (
+        select(Excuse)
         .join(
             Staff,
             Excuse.staff_id == Staff.id,
         )
-        .filter(
+        .where(
+            Staff.clinic_id == clinic_id,
+        )
+    )
+
+    count_statement = (
+        select(
+            func.count(
+                Excuse.id
+            )
+        )
+        .join(
+            Staff,
+            Excuse.staff_id == Staff.id,
+        )
+        .where(
             Staff.clinic_id == clinic_id,
         )
     )
 
     if staff_id is not None:
-        query = query.filter(
+        staff_id = _validate_positive_id(
+            staff_id,
+            "staff_id",
+        )
+
+        _get_staff(
+            staff_id,
+            clinic_id=clinic_id,
+        )
+
+        statement = statement.where(
+            Excuse.staff_id == staff_id,
+        )
+
+        count_statement = count_statement.where(
             Excuse.staff_id == staff_id,
         )
 
     if leave_request_id is not None:
-        query = query.filter(
-            Excuse.leave_request_id == leave_request_id,
+        leave_request_id = _validate_positive_id(
+            leave_request_id,
+            "leave_request_id",
+        )
+
+        statement = statement.where(
+            Excuse.leave_request_id
+            == leave_request_id,
+        )
+
+        count_statement = count_statement.where(
+            Excuse.leave_request_id
+            == leave_request_id,
         )
 
     if excuse_type is not None:
-        query = query.filter(
+        _validate_excuse_type(
+            excuse_type
+        )
+
+        statement = statement.where(
+            Excuse.excuse_type == excuse_type,
+        )
+
+        count_statement = count_statement.where(
             Excuse.excuse_type == excuse_type,
         )
 
     if status is not None:
-        query = query.filter(
+        if not isinstance(
+            status,
+            ExcuseStatus,
+        ):
+            raise ValidationError(
+                "Invalid excuse status"
+            )
+
+        statement = statement.where(
             Excuse.status == status,
         )
 
-    return (
-        query
-        .order_by(
-            Excuse.created_at.desc(),
+        count_statement = count_statement.where(
+            Excuse.status == status,
         )
-        .all()
+
+    statement = statement.order_by(
+        Excuse.created_at.desc(),
+        Excuse.id.desc(),
+    )
+
+    return _paginate(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -457,27 +644,53 @@ def list_staff_excuses(
     *,
     clinic_id: int,
     staff_id: int,
-):
-    """
-    Return excuses for one staff member.
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
 
-    The staff member must belong to the authenticated clinic.
-    """
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
+    )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     _get_staff(
         staff_id,
         clinic_id=clinic_id,
     )
 
-    return (
-        Excuse.query
-        .filter(
+    statement = (
+        select(Excuse)
+        .where(
             Excuse.staff_id == staff_id,
         )
         .order_by(
             Excuse.created_at.desc(),
+            Excuse.id.desc(),
         )
-        .all()
+    )
+
+    count_statement = select(
+        func.count(
+            Excuse.id
+        )
+    ).where(
+        Excuse.staff_id == staff_id,
+    )
+
+    return _paginate(
+        statement=statement,
+        count_statement=count_statement,
+        page=page,
+        per_page=per_page,
     )
 
 
@@ -485,20 +698,15 @@ def get_my_excuses(
     *,
     clinic_id: int,
     staff_id: int,
-):
-    """
-    Return only the authenticated staff member's excuses.
-    """
-
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> dict:
     return list_staff_excuses(
         clinic_id=clinic_id,
         staff_id=staff_id,
+        page=page,
+        per_page=per_page,
     )
-
-
-# ----------------------------------------------------------------------
-# APPROVE
-# ----------------------------------------------------------------------
 
 
 @transactional
@@ -508,12 +716,6 @@ def approve_excuse(
     clinic_id: int,
     reviewer_user_id: int,
 ) -> Excuse:
-    """
-    Approve a pending excuse.
-
-    Reviewer is always the authenticated User.
-    """
-
     excuse = _get_excuse(
         excuse_id,
         clinic_id=clinic_id,
@@ -532,7 +734,6 @@ def approve_excuse(
         )
 
     now = _db_now()
-
     old_status = excuse.status
 
     excuse.status = ExcuseStatus.APPROVED
@@ -565,11 +766,6 @@ def approve_excuse(
     return excuse
 
 
-# ----------------------------------------------------------------------
-# REJECT
-# ----------------------------------------------------------------------
-
-
 @transactional
 def reject_excuse(
     *,
@@ -578,13 +774,6 @@ def reject_excuse(
     reviewer_user_id: int,
     reason: Optional[str] = None,
 ) -> Excuse:
-    """
-    Reject a pending excuse.
-
-    The rejection reason is persisted on the Excuse record
-    and also captured in the audit log.
-    """
-
     excuse = _get_excuse(
         excuse_id,
         clinic_id=clinic_id,
@@ -602,10 +791,11 @@ def reject_excuse(
             f"'{excuse.status.value}' and cannot be rejected"
         )
 
-    reason = _validate_rejection_reason(reason)
+    reason = _validate_rejection_reason(
+        reason
+    )
 
     now = _db_now()
-
     old_status = excuse.status
 
     excuse.status = ExcuseStatus.REJECTED

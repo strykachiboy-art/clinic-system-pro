@@ -1,34 +1,37 @@
+from __future__ import annotations
+
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select, update
 
 from app.extensions import db
+from app.core.audit.services.audit_service import create_audit_log
+from app.core.enums.audit_enums import AuditAction
 from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
-from app.core.enums.audit_enums import AuditAction
 from app.core.utils.decorators import transactional
-from app.core.audit.services.audit_service import create_audit_log
 from app.core.utils.qrcode_util import generate_tracking_code
 
+from app.modules.clinic.services.clinic_service import ensure_clinic_active
 from app.modules.patient.models.patient_model import (
     Patient,
     PatientFamilyMember,
     PatientInsurance,
     PatientVitals,
 )
-from app.modules.clinic.services.clinic_service import ensure_clinic_active
 from app.modules.staff.models.staff_model import Staff
 
 
-# ============================================================================
-# Constants
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
 
 _EDITABLE_PATIENT_FIELDS = {
     "first_name",
@@ -75,22 +78,53 @@ _EDITABLE_VITAL_FIELDS = {
 }
 
 
-# ============================================================================
-# Internal helpers
-# ============================================================================
-
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _serialize_audit_value(value):
-    """
-    Convert common Python/SQLAlchemy values into JSON-safe values.
+def _validate_positive_id(
+    value: int,
+    field_name: str,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValidationError(
+            f"{field_name} must be a positive integer"
+        )
 
-    Supports nested dictionaries and collections so audit payloads
-    remain serializable even when old/new values contain dates,
-    datetimes, enums, or nested structures.
-    """
+    return value
+
+
+def _validate_pagination(
+    page: int,
+    per_page: int,
+) -> tuple[int, int]:
+    if (
+        isinstance(page, bool)
+        or not isinstance(page, int)
+        or page < 1
+    ):
+        raise ValidationError(
+            "Page must be a positive integer"
+        )
+
+    if (
+        isinstance(per_page, bool)
+        or not isinstance(per_page, int)
+        or per_page < 1
+    ):
+        raise ValidationError(
+            "Per page must be a positive integer"
+        )
+
+    if per_page > MAX_PER_PAGE:
+        raise ValidationError(
+            f"Per page cannot exceed {MAX_PER_PAGE}"
+        )
+
+    return page, per_page
+
+
+def _serialize_audit_value(value):
     if isinstance(value, Enum):
         return value.value
 
@@ -115,10 +149,9 @@ def _serialize_audit_value(value):
     return value
 
 
-def _serialize_audit_changes(changes: dict) -> dict:
-    """
-    Make audit changes safe for JSON-backed audit fields.
-    """
+def _serialize_audit_changes(
+    changes: dict,
+) -> dict:
     return {
         field: _serialize_audit_value(value)
         for field, value in changes.items()
@@ -134,34 +167,15 @@ def _audit(
     description: str,
     changes: Optional[dict] = None,
 ) -> None:
-    """
-    Write an audit record.
-
-    Audit records are intentionally created even when actor_id is None.
-    The audit model allows a nullable user_id so system/background/service
-    operations can still be recorded.
-
-    The audit service expects:
-        user_id
-        action
-        resource_type/resource_id
-        description
-        new_value
-
-    The surrounding transactional decorator is responsible for committing
-    the audit record together with the service operation.
-    """
-    audit_changes = _serialize_audit_changes(
-        changes or {}
-    )
-
     create_audit_log(
         user_id=actor_id,
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
         description=description,
-        new_value=audit_changes,
+        new_value=_serialize_audit_changes(
+            changes or {}
+        ),
     )
 
 
@@ -191,13 +205,6 @@ def _validate_date_of_birth(
 def _validate_timestamp(
     timestamp: Optional[datetime],
 ) -> None:
-    """
-    Validate timestamps used by patient records.
-
-    Naive timestamps are accepted for compatibility with existing SQLite
-    test environments. Timezone-aware timestamps are normalized by the
-    database/application as appropriate.
-    """
     if timestamp is None:
         return
 
@@ -222,27 +229,25 @@ def _validate_fields(
 def _generate_patient_number(
     clinic_id: int,
 ) -> str:
-    """
-    Generate a unique patient number.
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
 
-    The database unique constraint remains the final guarantee
-    against concurrent collisions. The retry loop handles normal
-    collisions.
-    """
     for _ in range(5):
         patient_number = generate_tracking_code(
             f"PT{clinic_id}"
         )
 
-        exists = (
-            db.session.query(Patient.id)
-            .filter(
+        exists = db.session.execute(
+            select(Patient.id)
+            .where(
                 Patient.patient_number == patient_number
             )
-            .first()
-        )
+            .limit(1)
+        ).scalar_one_or_none()
 
-        if not exists:
+        if exists is None:
             return patient_number
 
     raise ConflictError(
@@ -254,6 +259,11 @@ def _generate_patient_number(
 def _get_patient_or_404(
     patient_id: int,
 ) -> Patient:
+    patient_id = _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
     patient = db.session.get(
         Patient,
         patient_id,
@@ -271,14 +281,24 @@ def _get_family_member_or_404(
     patient_id: int,
     family_member_id: int,
 ) -> PatientFamilyMember:
-    member = (
-        PatientFamilyMember.query
-        .filter(
+    patient_id = _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
+    family_member_id = _validate_positive_id(
+        family_member_id,
+        "Family member ID",
+    )
+
+    member = db.session.execute(
+        select(PatientFamilyMember)
+        .where(
             PatientFamilyMember.id == family_member_id,
             PatientFamilyMember.patient_id == patient_id,
         )
-        .first()
-    )
+        .limit(1)
+    ).scalar_one_or_none()
 
     if member is None:
         raise NotFoundError(
@@ -293,14 +313,24 @@ def _get_insurance_or_404(
     patient_id: int,
     insurance_id: int,
 ) -> PatientInsurance:
-    insurance = (
-        PatientInsurance.query
-        .filter(
+    patient_id = _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
+    insurance_id = _validate_positive_id(
+        insurance_id,
+        "Insurance ID",
+    )
+
+    insurance = db.session.execute(
+        select(PatientInsurance)
+        .where(
             PatientInsurance.id == insurance_id,
             PatientInsurance.patient_id == patient_id,
         )
-        .first()
-    )
+        .limit(1)
+    ).scalar_one_or_none()
 
     if insurance is None:
         raise NotFoundError(
@@ -315,14 +345,24 @@ def _get_vitals_or_404(
     patient_id: int,
     vitals_id: int,
 ) -> PatientVitals:
-    vitals = (
-        PatientVitals.query
-        .filter(
+    patient_id = _validate_positive_id(
+        patient_id,
+        "Patient ID",
+    )
+
+    vitals_id = _validate_positive_id(
+        vitals_id,
+        "Vitals ID",
+    )
+
+    vitals = db.session.execute(
+        select(PatientVitals)
+        .where(
             PatientVitals.id == vitals_id,
             PatientVitals.patient_id == patient_id,
         )
-        .first()
-    )
+        .limit(1)
+    ).scalar_one_or_none()
 
     if vitals is None:
         raise NotFoundError(
@@ -339,6 +379,11 @@ def _validate_related_patient(
 ) -> Optional[Patient]:
     if related_patient_id is None:
         return None
+
+    related_patient_id = _validate_positive_id(
+        related_patient_id,
+        "Related patient ID",
+    )
 
     if related_patient_id == patient.id:
         raise ValidationError(
@@ -370,6 +415,16 @@ def _validate_staff_for_patient(
     if staff_id is None:
         return None
 
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+    staff_id = _validate_positive_id(
+        staff_id,
+        "Staff ID",
+    )
+
     staff = db.session.get(
         Staff,
         staff_id,
@@ -390,7 +445,10 @@ def _validate_staff_for_patient(
             f"Staff member {staff_id} is not active"
         )
 
-    if staff.user is not None and not staff.user.is_active:
+    if (
+        staff.user is not None
+        and not staff.user.is_active
+    ):
         raise ValidationError(
             f"User account for staff member {staff_id} is not active"
         )
@@ -404,6 +462,11 @@ def _validate_consultation_for_vitals(
 ):
     if consultation_id is None:
         return None
+
+    consultation_id = _validate_positive_id(
+        consultation_id,
+        "Consultation ID",
+    )
 
     from app.modules.consultation.models.consultation_model import (
         Consultation,
@@ -432,20 +495,9 @@ def _validate_consultation_for_vitals(
     return consultation
 
 
-# ============================================================================
-# Patient retrieval
-# ============================================================================
-
 def get_patient(
     patient_id: int,
 ) -> Patient:
-    """
-    Retrieve a patient.
-
-    This is intentionally a read operation and therefore does NOT require
-    the patient's clinic to be active. Historical patient data remains
-    accessible for inactive or suspended clinics.
-    """
     return _get_patient_or_404(patient_id)
 
 
@@ -453,32 +505,39 @@ def list_patients(
     clinic_id: Optional[int] = None,
     active_only: bool = False,
     search: Optional[str] = None,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    List patients.
-
-    Read operations remain available even when a clinic is inactive or
-    suspended.
-    """
-    query = Patient.query
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
 
     if clinic_id is not None:
-        query = query.filter(
+        clinic_id = _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+
+    statement = select(Patient)
+
+    if clinic_id is not None:
+        statement = statement.where(
             Patient.clinic_id == clinic_id
         )
 
     if active_only:
-        query = query.filter(
+        statement = statement.where(
             Patient.is_active.is_(True)
         )
 
-    if search:
+    if search is not None:
         search_term = search.strip()
 
         if search_term:
             pattern = f"%{search_term}%"
 
-            query = query.filter(
+            statement = statement.where(
                 or_(
                     Patient.first_name.ilike(pattern),
                     Patient.last_name.ilike(pattern),
@@ -488,15 +547,19 @@ def list_patients(
                 )
             )
 
-    return query.order_by(
+    statement = statement.order_by(
         Patient.last_name.asc(),
         Patient.first_name.asc(),
-    ).all()
+        Patient.id.asc(),
+    )
 
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
 
-# ============================================================================
-# Patient creation / update / lifecycle
-# ============================================================================
 
 @transactional
 def create_patient(
@@ -504,6 +567,11 @@ def create_patient(
     data: dict,
     actor_id: Optional[int] = None,
 ) -> Patient:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     ensure_clinic_active(clinic_id)
 
     _validate_fields(
@@ -663,11 +731,6 @@ def set_active_status(
     is_active: bool,
     actor_id: Optional[int] = None,
 ) -> Patient:
-    """
-    Activate/deactivate a patient.
-
-    This does NOT delete the patient or historical records.
-    """
     patient = _get_patient_or_404(
         patient_id
     )
@@ -675,6 +738,11 @@ def set_active_status(
     ensure_clinic_active(
         patient.clinic_id
     )
+
+    if not isinstance(is_active, bool):
+        raise ValidationError(
+            "is_active must be a boolean"
+        )
 
     if patient.is_active == is_active:
         return patient
@@ -705,31 +773,37 @@ def set_active_status(
     return patient
 
 
-# ============================================================================
-# Family members
-# ============================================================================
-
 def list_family_members(
     patient_id: int,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    Read operation. Historical family contacts remain accessible regardless
-    of clinic status.
-    """
     patient = _get_patient_or_404(
         patient_id
     )
 
-    return (
-        PatientFamilyMember.query
-        .filter(
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = (
+        select(PatientFamilyMember)
+        .where(
             PatientFamilyMember.patient_id == patient.id
         )
         .order_by(
             PatientFamilyMember.is_emergency_contact.desc(),
             PatientFamilyMember.full_name.asc(),
+            PatientFamilyMember.id.asc(),
         )
-        .all()
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
     )
 
 
@@ -938,32 +1012,38 @@ def remove_family_member(
     db.session.delete(member)
 
 
-# ============================================================================
-# Insurance
-# ============================================================================
-
 def list_insurances(
     patient_id: int,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    Read operation. Historical insurance records remain accessible even if
-    the clinic is inactive or suspended.
-    """
     patient = _get_patient_or_404(
         patient_id
     )
 
-    return (
-        PatientInsurance.query
-        .filter(
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = (
+        select(PatientInsurance)
+        .where(
             PatientInsurance.patient_id == patient.id
         )
         .order_by(
             PatientInsurance.is_primary.desc(),
             PatientInsurance.is_active.desc(),
             PatientInsurance.created_at.desc(),
+            PatientInsurance.id.desc(),
         )
-        .all()
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
     )
 
 
@@ -1032,16 +1112,22 @@ def add_insurance(
         False,
     )
 
+    if not isinstance(is_primary, bool):
+        raise ValidationError(
+            "is_primary must be a boolean"
+        )
+
     if is_primary:
-        PatientInsurance.query.filter(
-            PatientInsurance.patient_id == patient.id,
-            PatientInsurance.is_primary.is_(True),
-        ).update(
-            {
-                PatientInsurance.is_primary: False,
-                PatientInsurance.updated_at: _utcnow(),
-            },
-            synchronize_session=False,
+        db.session.execute(
+            update(PatientInsurance)
+            .where(
+                PatientInsurance.patient_id == patient.id,
+                PatientInsurance.is_primary.is_(True),
+            )
+            .values(
+                is_primary=False,
+                updated_at=_utcnow(),
+            )
         )
 
     insurance = PatientInsurance(
@@ -1147,17 +1233,24 @@ def update_insurance(
                 "Insurance policy number cannot be empty"
             )
 
+    if "is_primary" in data:
+        if not isinstance(data["is_primary"], bool):
+            raise ValidationError(
+                "is_primary must be a boolean"
+            )
+
     if data.get("is_primary") is True:
-        PatientInsurance.query.filter(
-            PatientInsurance.patient_id == patient.id,
-            PatientInsurance.id != insurance.id,
-            PatientInsurance.is_primary.is_(True),
-        ).update(
-            {
-                PatientInsurance.is_primary: False,
-                PatientInsurance.updated_at: _utcnow(),
-            },
-            synchronize_session=False,
+        db.session.execute(
+            update(PatientInsurance)
+            .where(
+                PatientInsurance.patient_id == patient.id,
+                PatientInsurance.id != insurance.id,
+                PatientInsurance.is_primary.is_(True),
+            )
+            .values(
+                is_primary=False,
+                updated_at=_utcnow(),
+            )
         )
 
     changed_fields = {}
@@ -1208,56 +1301,61 @@ def update_insurance(
     return insurance
 
 
-# ============================================================================
-# Vitals
-# ============================================================================
-
 def get_vitals_history(
     patient_id: int,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
 ):
-    """
-    Read operation. Historical vitals remain available regardless of clinic
-    status.
-    """
     patient = _get_patient_or_404(
         patient_id
     )
 
-    return (
-        PatientVitals.query
-        .filter(
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    statement = (
+        select(PatientVitals)
+        .where(
             PatientVitals.patient_id == patient.id
         )
         .order_by(
             PatientVitals.recorded_at.desc(),
             PatientVitals.id.desc(),
         )
-        .all()
+    )
+
+    return db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
     )
 
 
 def get_latest_vitals(
     patient_id: int,
 ) -> Optional[PatientVitals]:
-    """
-    Read operation. Historical vitals remain available regardless of clinic
-    status.
-    """
     patient = _get_patient_or_404(
         patient_id
     )
 
-    return (
-        PatientVitals.query
-        .filter(
+    statement = (
+        select(PatientVitals)
+        .where(
             PatientVitals.patient_id == patient.id
         )
         .order_by(
             PatientVitals.recorded_at.desc(),
             PatientVitals.id.desc(),
         )
-        .first()
+        .limit(1)
     )
+
+    return db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
 
 @transactional

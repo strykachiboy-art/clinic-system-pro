@@ -8,20 +8,18 @@ import pytest
 
 from app.core.enums.reports_enums import ReportFormat, ReportType
 from app.core.enums.role_enums import Role
-from app.core.exceptions import ValidationError
 from app.modules.reports.routes import reports_route
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
 
 
-def _json_headers(make_authenticated_staff, clinic, role):
+def _json_headers(
+    make_authenticated_staff,
+    clinic,
+    role,
+):
     staff, headers = make_authenticated_staff(
         clinic,
         role,
@@ -74,21 +72,7 @@ def _make_report(
     )
 
 
-# ============================================================================
-# POST /api/reports
-# ============================================================================
-
-
 class TestCreateReport:
-    """
-    Route-level tests for POST /api/reports.
-
-    generate_report is mocked so these tests verify the route contract,
-    authentication-derived clinic scope, Pydantic validation, service
-    invocation, error handling, and response serialization independently
-    from the Reports service implementation.
-    """
-
     def test_create_report_success(
         self,
         client,
@@ -136,13 +120,15 @@ class TestCreateReport:
             "Report generated successfully"
         )
 
-        assert body["data"]["id"] == 101
-        assert body["data"]["clinic_id"] == clinic.id
-        assert body["data"]["generated_by_id"] == staff.id
-        assert body["data"]["report_type"] == (
+        data = body["data"]
+
+        assert data["id"] == 101
+        assert data["clinic_id"] == clinic.id
+        assert data["generated_by_id"] == staff.id
+        assert data["report_type"] == (
             ReportType.PATIENTS.value
         )
-        assert body["data"]["report_format"] == (
+        assert data["report_format"] == (
             ReportFormat.CSV.value
         )
 
@@ -150,7 +136,7 @@ class TestCreateReport:
 
         call = create_mock.call_args
 
-        assert call.kwargs["requester_user_id"] > 0
+        assert call.kwargs["requester_user_id"] == staff.user_id
         assert call.kwargs["clinic_id"] == clinic.id
         assert call.kwargs["report_type"] == (
             ReportType.PATIENTS
@@ -211,7 +197,7 @@ class TestCreateReport:
 
         call = create_mock.call_args
 
-        assert call.kwargs["requester_user_id"] > 0
+        assert call.kwargs["requester_user_id"] == staff.user_id
         assert call.kwargs["clinic_id"] == clinic.id
         assert call.kwargs["report_type"] == (
             ReportType.PATIENTS
@@ -228,20 +214,13 @@ class TestCreateReport:
         make_authenticated_staff,
         monkeypatch,
     ):
-        headers, staff = _json_headers(
+        headers, _ = _json_headers(
             make_authenticated_staff,
             clinic,
             Role.ADMIN,
         )
 
-        report = _make_report(
-            clinic_id=clinic.id,
-            generated_by_id=staff.id,
-        )
-
-        create_mock = Mock(
-            return_value=report,
-        )
+        create_mock = Mock()
 
         monkeypatch.setattr(
             reports_route,
@@ -623,6 +602,8 @@ class TestCreateReport:
             Role.ADMIN,
         )
 
+        from app.core.exceptions import ValidationError
+
         error = ValidationError(
             "Clinic is inactive"
         )
@@ -795,7 +776,6 @@ class TestCreateReport:
         assert response.status_code == 201
 
         body = response.get_json()
-
         data = body["data"]
 
         assert data["id"] == 55
@@ -847,9 +827,94 @@ class TestCreateReport:
         assert body["error"] == "Validation failed"
 
 
-# ============================================================================
-# ROUTE EXISTENCE
-# ============================================================================
+class TestCreateReportAuthorization:
+    @pytest.mark.parametrize(
+        "role",
+        [
+            Role.ADMIN,
+            Role.DOCTOR,
+            Role.NURSE,
+            Role.RECEPTIONIST,
+            Role.ACCOUNTANT,
+            Role.PHARMACIST,
+            Role.LAB_TECHNICIAN,
+        ],
+    )
+    def test_generation_role_is_allowed(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+        role,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            role,
+        )
+
+        report = _make_report(
+            report_id=100,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+        )
+
+        create_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "generate_report",
+            create_mock,
+        )
+
+        response = client.post(
+            "/api/reports",
+            json=_report_payload(),
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+        create_mock.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "role",
+        [
+            Role.PATIENT,
+        ],
+    )
+    def test_unauthorized_generation_role_is_rejected(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+        role,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            role,
+        )
+
+        create_mock = Mock()
+
+        monkeypatch.setattr(
+            reports_route,
+            "generate_report",
+            create_mock,
+        )
+
+        response = client.post(
+            "/api/reports",
+            json=_report_payload(),
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        create_mock.assert_not_called()
 
 
 def test_create_report_route_exists(

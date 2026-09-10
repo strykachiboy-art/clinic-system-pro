@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import secrets
 from datetime import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.extensions import celery, db
-from app.core.utils.decorators import transactional
-from app.core.exceptions import (
-    NotFoundError,
-    ValidationError,
-    ConflictError,
-)
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.clinic_enums import (
     ClinicStatus,
     ClinicType,
 )
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from app.core.utils.decorators import transactional
+from app.extensions import celery, db
 from app.modules.clinic.models.clinic_model import Clinic
 
 
@@ -22,18 +24,12 @@ from app.modules.clinic.models.clinic_model import Clinic
 # HELPERS
 # =====================================================================
 
+
 def _enum_value(value):
-    """Return the underlying value when given an enum."""
     return value.value if hasattr(value, "value") else value
 
 
 def _audit_value(value):
-    """
-    Convert a value into a JSON-safe representation for audit logs.
-
-    Enum values are reduced to their underlying values and time objects
-    are serialized using ISO-8601 format.
-    """
     value = _enum_value(value)
 
     if isinstance(value, time):
@@ -42,21 +38,99 @@ def _audit_value(value):
     return value
 
 
-def _utcnow():
-    from datetime import datetime, timezone
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> int:
+    if isinstance(value, bool) or not isinstance(
+        value,
+        int,
+    ):
+        raise ValidationError(
+            f"{field_name} must be an integer"
+        )
 
-    return datetime.now(timezone.utc)
+    if value <= 0:
+        raise ValidationError(
+            f"Invalid {field_name}"
+        )
+
+    return value
 
 
-def _validate_name(name: str) -> str:
-    """Validate and normalize a clinic name."""
+def _validate_optional_positive_id(
+    value,
+    field_name: str,
+):
+    if value is None:
+        return None
+
+    return _validate_positive_id(
+        value,
+        field_name,
+    )
+
+
+def _validate_bool(
+    value,
+    field_name: str,
+) -> bool:
+    if not isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a boolean"
+        )
+
+    return value
+
+
+def _validate_enum(
+    value,
+    enum_class,
+    field_name: str,
+):
+    if isinstance(value, enum_class):
+        return value
+
+    try:
+        return enum_class(value)
+    except (
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise ValidationError(
+            f"Invalid {field_name}"
+        ) from exc
+
+
+def _validate_time(
+    value,
+    field_name: str,
+):
+    if value is not None and not isinstance(
+        value,
+        time,
+    ):
+        raise ValidationError(
+            f"{field_name} must be a valid time"
+        )
+
+    return value
+
+
+def _validate_name(
+    name: str,
+) -> str:
     if not isinstance(name, str):
-        raise ValidationError("Clinic name must be a string")
+        raise ValidationError(
+            "Clinic name must be a string"
+        )
 
     name = name.strip()
 
     if not name:
-        raise ValidationError("Clinic name is required")
+        raise ValidationError(
+            "Clinic name is required"
+        )
 
     return name
 
@@ -65,9 +139,16 @@ def _validate_operating_hours(
     opening_time: time | None,
     closing_time: time | None,
 ):
-    """
-    Validate clinic operating hours.
-    """
+    opening_time = _validate_time(
+        opening_time,
+        "Opening time",
+    )
+
+    closing_time = _validate_time(
+        closing_time,
+        "Closing time",
+    )
+
     if (
         opening_time is not None
         and closing_time is not None
@@ -78,22 +159,27 @@ def _validate_operating_hours(
         )
 
 
-def _validate_timezone(timezone: str) -> str:
-    """Validate that a timezone is a real IANA timezone."""
+def _validate_timezone(
+    timezone: str,
+) -> str:
     if not isinstance(timezone, str):
-        raise ValidationError("Timezone must be a string")
+        raise ValidationError(
+            "Timezone must be a string"
+        )
 
     timezone = timezone.strip()
 
     if not timezone:
-        raise ValidationError("Timezone is required")
+        raise ValidationError(
+            "Timezone is required"
+        )
 
     try:
         ZoneInfo(timezone)
-    except ZoneInfoNotFoundError:
+    except ZoneInfoNotFoundError as exc:
         raise ValidationError(
             f"Invalid timezone '{timezone}'"
-        )
+        ) from exc
 
     return timezone
 
@@ -103,20 +189,16 @@ def _get_parent_clinic(
     *,
     for_update: bool = False,
 ) -> Clinic:
-    """
-    Resolve a parent clinic.
-    """
-    if parent_clinic_id <= 0:
-        raise ValidationError("Invalid parent clinic ID")
-
-    query = Clinic.query.filter(
-        Clinic.id == parent_clinic_id
+    parent_clinic_id = _validate_positive_id(
+        parent_clinic_id,
+        "parent clinic ID",
     )
 
-    if for_update:
-        query = query.with_for_update()
-
-    parent = query.first()
+    parent = db.session.get(
+        Clinic,
+        parent_clinic_id,
+        with_for_update=for_update,
+    )
 
     if parent is None:
         raise NotFoundError(
@@ -131,15 +213,17 @@ def _check_name_conflict(
     parent_clinic_id: int | None,
     exclude_clinic_id: int | None = None,
 ):
-    """
-    Prevent duplicate clinic names within the same hierarchy.
-    """
     query = Clinic.query.filter(
         Clinic.name == name,
         Clinic.parent_clinic_id == parent_clinic_id,
     )
 
     if exclude_clinic_id is not None:
+        exclude_clinic_id = _validate_positive_id(
+            exclude_clinic_id,
+            "clinic ID",
+        )
+
         query = query.filter(
             Clinic.id != exclude_clinic_id
         )
@@ -153,8 +237,9 @@ def _check_name_conflict(
         )
 
 
-def _ensure_active_clinic(clinic: Clinic):
-    """Ensure a clinic can participate in operational writes."""
+def _ensure_active_clinic(
+    clinic: Clinic,
+):
     if clinic.status != ClinicStatus.ACTIVE:
         raise ValidationError(
             f"Clinic {clinic.id} is not active"
@@ -165,17 +250,7 @@ def _ensure_no_hierarchy_cycle(
     clinic: Clinic,
     proposed_parent: Clinic,
 ):
-    """
-    Ensure assigning proposed_parent cannot create a cycle.
-
-    Example:
-
-        A -> B -> C
-
-    C cannot become the parent of A.
-    """
     current = proposed_parent
-
     visited = set()
 
     while current is not None:
@@ -199,29 +274,22 @@ def _ensure_no_hierarchy_cycle(
 # GET CLINIC
 # =====================================================================
 
+
 def get_clinic(
     clinic_id: int,
     *,
     for_update: bool = False,
 ) -> Clinic:
-    """
-    Retrieve a clinic by ID.
-
-    Args:
-        clinic_id: Clinic primary key.
-        for_update: Lock the row for transactional mutation.
-    """
-    if clinic_id <= 0:
-        raise ValidationError("Invalid clinic ID")
-
-    query = Clinic.query.filter(
-        Clinic.id == clinic_id
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic ID",
     )
 
-    if for_update:
-        query = query.with_for_update()
-
-    clinic = query.first()
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+        with_for_update=for_update,
+    )
 
     if clinic is None:
         raise NotFoundError(
@@ -235,14 +303,17 @@ def get_clinic(
 # LIST CLINICS
 # =====================================================================
 
+
 def list_clinics(
     status: ClinicStatus | None = None,
 ) -> list[Clinic]:
-    """
-    List clinics optionally filtered by status.
+    if status is not None:
+        status = _validate_enum(
+            status,
+            ClinicStatus,
+            "clinic status",
+        )
 
-    Read-only operation.
-    """
     query = Clinic.query
 
     if status is not None:
@@ -260,12 +331,15 @@ def list_clinics(
 # LIST BRANCHES
 # =====================================================================
 
+
 def list_branches(
     clinic_id: int,
 ) -> list[Clinic]:
-    """
-    Return all direct branches belonging to a clinic.
-    """
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic ID",
+    )
+
     get_clinic(clinic_id)
 
     return (
@@ -285,6 +359,7 @@ def list_branches(
 # CREATE CLINIC
 # =====================================================================
 
+
 @transactional
 def create_clinic(
     name: str,
@@ -300,23 +375,39 @@ def create_clinic(
     opening_time=None,
     closing_time=None,
 ) -> Clinic:
-    """
-    Create a root clinic or a clinic attached to an existing parent.
-    """
     name = _validate_name(name)
-    timezone = _validate_timezone(timezone)
+
+    clinic_type = _validate_enum(
+        clinic_type,
+        ClinicType,
+        "clinic type",
+    )
+
+    parent_clinic_id = (
+        _validate_optional_positive_id(
+            parent_clinic_id,
+            "parent clinic ID",
+        )
+    )
+
+    is_headquarters = _validate_bool(
+        is_headquarters,
+        "is_headquarters",
+    )
+
+    timezone = _validate_timezone(
+        timezone
+    )
 
     _validate_operating_hours(
         opening_time,
         closing_time,
     )
 
-    if parent_clinic_id is not None and parent_clinic_id <= 0:
-        raise ValidationError(
-            "Invalid parent clinic ID"
-        )
-
-    if is_headquarters and parent_clinic_id is not None:
+    if (
+        is_headquarters
+        and parent_clinic_id is not None
+    ):
         raise ValidationError(
             "A headquarters clinic cannot have a parent clinic"
         )
@@ -376,8 +467,12 @@ def create_clinic(
             "status": _enum_value(
                 clinic.status
             ),
-            "parent_clinic_id": clinic.parent_clinic_id,
-            "is_headquarters": clinic.is_headquarters,
+            "parent_clinic_id": (
+                clinic.parent_clinic_id
+            ),
+            "is_headquarters": (
+                clinic.is_headquarters
+            ),
         },
     )
 
@@ -387,6 +482,7 @@ def create_clinic(
 # =====================================================================
 # CREATE BRANCH
 # =====================================================================
+
 
 @transactional
 def create_branch(
@@ -402,9 +498,11 @@ def create_branch(
     opening_time=None,
     closing_time=None,
 ) -> Clinic:
-    """
-    Create an active non-headquarters branch under an active clinic.
-    """
+    parent_clinic_id = _validate_positive_id(
+        parent_clinic_id,
+        "parent clinic ID",
+    )
+
     parent = _get_parent_clinic(
         parent_clinic_id,
         for_update=True,
@@ -413,7 +511,16 @@ def create_branch(
     _ensure_active_clinic(parent)
 
     name = _validate_name(name)
-    timezone = _validate_timezone(timezone)
+
+    clinic_type = _validate_enum(
+        clinic_type,
+        ClinicType,
+        "clinic type",
+    )
+
+    timezone = _validate_timezone(
+        timezone
+    )
 
     _validate_operating_hours(
         opening_time,
@@ -459,7 +566,9 @@ def create_branch(
             "clinic_type": _enum_value(
                 branch.clinic_type
             ),
-            "parent_clinic_id": branch.parent_clinic_id,
+            "parent_clinic_id": (
+                branch.parent_clinic_id
+            ),
             "is_headquarters": False,
         },
     )
@@ -471,21 +580,18 @@ def create_branch(
 # UPDATE CLINIC
 # =====================================================================
 
+
 @transactional
 def update_clinic(
     clinic_id: int,
     **fields,
 ) -> Clinic:
-    """
-    Update editable clinic profile fields.
-
-    Relationship configuration, status, AI credits and API tokens
-    are handled by dedicated operations.
-    """
     clinic = get_clinic(
         clinic_id,
         for_update=True,
     )
+
+    _ensure_active_clinic(clinic)
 
     allowed_fields = {
         "name",
@@ -505,17 +611,41 @@ def update_clinic(
     if unknown_fields:
         raise ValidationError(
             "Unsupported clinic fields: "
-            + ", ".join(sorted(unknown_fields))
+            + ", ".join(
+                sorted(unknown_fields)
+            )
         )
+
+    if not fields:
+        return clinic
 
     if "name" in fields:
         fields["name"] = _validate_name(
             fields["name"]
         )
 
+    if "clinic_type" in fields:
+        fields["clinic_type"] = _validate_enum(
+            fields["clinic_type"],
+            ClinicType,
+            "clinic type",
+        )
+
     if "timezone" in fields:
         fields["timezone"] = _validate_timezone(
             fields["timezone"]
+        )
+
+    if "opening_time" in fields:
+        fields["opening_time"] = _validate_time(
+            fields["opening_time"],
+            "Opening time",
+        )
+
+    if "closing_time" in fields:
+        fields["closing_time"] = _validate_time(
+            fields["closing_time"],
+            "Closing time",
         )
 
     opening_time = fields.get(
@@ -539,7 +669,9 @@ def update_clinic(
     ):
         _check_name_conflict(
             name=fields["name"],
-            parent_clinic_id=clinic.parent_clinic_id,
+            parent_clinic_id=(
+                clinic.parent_clinic_id
+            ),
             exclude_clinic_id=clinic.id,
         )
 
@@ -588,18 +720,18 @@ def update_clinic(
 # UPDATE BRANCH CONFIGURATION
 # =====================================================================
 
+
 @transactional
 def update_branch_configuration(
     clinic_id: int,
     **fields,
 ) -> Clinic:
-    """
-    Update parent/headquarters configuration.
-    """
     clinic = get_clinic(
         clinic_id,
         for_update=True,
     )
+
+    _ensure_active_clinic(clinic)
 
     allowed_fields = {
         "parent_clinic_id",
@@ -611,7 +743,26 @@ def update_branch_configuration(
     if unknown_fields:
         raise ValidationError(
             "Unsupported branch configuration fields: "
-            + ", ".join(sorted(unknown_fields))
+            + ", ".join(
+                sorted(unknown_fields)
+            )
+        )
+
+    if not fields:
+        return clinic
+
+    if "is_headquarters" in fields:
+        fields["is_headquarters"] = _validate_bool(
+            fields["is_headquarters"],
+            "is_headquarters",
+        )
+
+    if "parent_clinic_id" in fields:
+        fields["parent_clinic_id"] = (
+            _validate_optional_positive_id(
+                fields["parent_clinic_id"],
+                "parent clinic ID",
+            )
         )
 
     old_parent_id = clinic.parent_clinic_id
@@ -627,16 +778,10 @@ def update_branch_configuration(
         clinic.is_headquarters,
     )
 
-    if new_parent_id is not None:
-        if new_parent_id <= 0:
-            raise ValidationError(
-                "Invalid parent clinic ID"
-            )
-
-        if new_parent_id == clinic.id:
-            raise ValidationError(
-                "A clinic cannot be its own parent"
-            )
+    if new_parent_id == clinic.id:
+        raise ValidationError(
+            "A clinic cannot be its own parent"
+        )
 
     new_parent = None
 
@@ -659,23 +804,29 @@ def update_branch_configuration(
             exclude_clinic_id=clinic.id,
         )
 
-    if new_is_headquarters and new_parent_id is not None:
+    if (
+        new_is_headquarters
+        and new_parent_id is not None
+    ):
         raise ValidationError(
             "A headquarters clinic cannot have a parent clinic"
         )
-
-    # If a clinic is detached from a parent, it becomes a root.
-    clinic.parent_clinic_id = new_parent_id
-    clinic.is_headquarters = new_is_headquarters
 
     old_value = {
         "parent_clinic_id": old_parent_id,
         "is_headquarters": old_is_headquarters,
     }
 
+    clinic.parent_clinic_id = new_parent_id
+    clinic.is_headquarters = new_is_headquarters
+
     new_value = {
-        "parent_clinic_id": clinic.parent_clinic_id,
-        "is_headquarters": clinic.is_headquarters,
+        "parent_clinic_id": (
+            clinic.parent_clinic_id
+        ),
+        "is_headquarters": (
+            clinic.is_headquarters
+        ),
     }
 
     if old_value != new_value:
@@ -684,7 +835,8 @@ def update_branch_configuration(
             entity_type="Clinic",
             entity_id=clinic.id,
             description=(
-                f"Clinic '{clinic.name}' branch configuration updated"
+                f"Clinic '{clinic.name}' branch "
+                "configuration updated"
             ),
             old_value=old_value,
             new_value=new_value,
@@ -697,17 +849,21 @@ def update_branch_configuration(
 # CHANGE STATUS
 # =====================================================================
 
+
 @transactional
 def change_status(
     clinic_id: int,
     new_status: ClinicStatus,
 ) -> Clinic:
-    """
-    Change clinic status.
-    """
     clinic = get_clinic(
         clinic_id,
         for_update=True,
+    )
+
+    new_status = _validate_enum(
+        new_status,
+        ClinicStatus,
+        "clinic status",
     )
 
     if clinic.status == new_status:
@@ -740,18 +896,16 @@ def change_status(
 # ADD AI CREDITS
 # =====================================================================
 
+
 @transactional
 def add_ai_credits(
     clinic_id: int,
     amount: int,
 ) -> Clinic:
-    """
-    Add AI credits to a clinic.
-
-    The clinic row is locked so concurrent credit operations cannot
-    overwrite one another.
-    """
-    if not isinstance(amount, int):
+    if isinstance(amount, bool) or not isinstance(
+        amount,
+        int,
+    ):
         raise ValidationError(
             "AI credit amount must be an integer"
         )
@@ -793,21 +947,19 @@ def add_ai_credits(
 # REGENERATE API TOKEN
 # =====================================================================
 
+
 @transactional
 def regenerate_api_token(
     clinic_id: int,
 ) -> str:
-    """
-    Generate and store a new API token.
-
-    The previous token becomes invalid once the transaction commits.
-    """
     clinic = get_clinic(
         clinic_id,
         for_update=True,
     )
 
-    old_token_exists = clinic.api_token is not None
+    old_token_exists = (
+        clinic.api_token is not None
+    )
 
     new_token = secrets.token_urlsafe(48)
 
@@ -840,6 +992,7 @@ def regenerate_api_token(
 # CONSUME AI CREDIT
 # =====================================================================
 
+
 def _consume_ai_credit(
     clinic_id: int,
 ) -> Clinic:
@@ -856,7 +1009,9 @@ def _consume_ai_credit(
         )
 
     old_credits = clinic.ai_credits
-    old_requests = clinic.ai_requests_this_month
+    old_requests = (
+        clinic.ai_requests_this_month
+    )
 
     clinic.ai_credits -= 1
     clinic.ai_requests_this_month += 1
@@ -871,7 +1026,9 @@ def _consume_ai_credit(
         ),
         old_value={
             "ai_credits": old_credits,
-            "ai_requests_this_month": old_requests,
+            "ai_requests_this_month": (
+                old_requests
+            ),
         },
         new_value={
             "ai_credits": clinic.ai_credits,
@@ -888,21 +1045,25 @@ def _consume_ai_credit(
 def consume_ai_credit(
     clinic_id: int,
 ) -> Clinic:
-    return _consume_ai_credit(clinic_id)
+    return _consume_ai_credit(
+        clinic_id
+    )
 
 
 # =====================================================================
 # ENSURE CLINIC ACTIVE
 # =====================================================================
 
+
 def ensure_clinic_active(
     clinic_id: int,
 ) -> Clinic:
-    """
-    Return a clinic only when it is active for operational writes.
-    """
-    clinic = get_clinic(clinic_id)
+    clinic = get_clinic(
+        clinic_id
+    )
 
-    _ensure_active_clinic(clinic)
+    _ensure_active_clinic(
+        clinic
+    )
 
     return clinic

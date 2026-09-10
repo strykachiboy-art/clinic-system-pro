@@ -22,14 +22,8 @@ from app.extensions import db
 from app.modules.staff.models.staff_model import (
     LeaveRequest,
     PayrollRecord,
-    Staff,
 )
 from app.modules.staff.services import staff_service
-
-
-# ============================================================================
-# HELPERS
-# ============================================================================
 
 
 def _make_leave(
@@ -90,11 +84,6 @@ def _make_payroll(
     db.session.flush()
 
     return record
-
-
-# ============================================================================
-# STAFF LOOKUP
-# ============================================================================
 
 
 def test_get_staff_returns_staff(
@@ -159,11 +148,6 @@ def test_get_staff_missing_raises_not_found(
         )
 
 
-# ============================================================================
-# LIST STAFF
-# ============================================================================
-
-
 def test_list_staff_returns_only_clinic_staff(
     clinic,
     make_clinic,
@@ -181,14 +165,17 @@ def test_list_staff_returns_only_clinic_staff(
         role=Role.DOCTOR,
     )
 
-    results = staff_service.list_staff(
+    result = staff_service.list_staff(
         clinic_id=clinic.id,
     )
 
-    ids = {staff.id for staff in results}
+    ids = {staff.id for staff in result["items"]}
 
     assert staff_a.id in ids
     assert staff_b.id not in ids
+    assert result["total"] == 1
+    assert result["page"] == 1
+    assert result["per_page"] == staff_service.DEFAULT_PER_PAGE
 
 
 def test_list_staff_filters_by_status(
@@ -207,15 +194,16 @@ def test_list_staff_filters_by_status(
         status=StaffStatus.SUSPENDED,
     )
 
-    results = staff_service.list_staff(
+    result = staff_service.list_staff(
         clinic_id=clinic.id,
         status=StaffStatus.SUSPENDED,
     )
 
-    ids = {staff.id for staff in results}
+    ids = {staff.id for staff in result["items"]}
 
     assert suspended.id in ids
     assert active.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_staff_searches_first_and_last_name(
@@ -236,12 +224,12 @@ def test_list_staff_searches_first_and_last_name(
         last_name="Cardiology",
     )
 
-    results = staff_service.list_staff(
+    result = staff_service.list_staff(
         clinic_id=clinic.id,
         search="  cardiology  ",
     )
 
-    ids = {staff.id for staff in results}
+    ids = {staff.id for staff in result["items"]}
 
     assert second.id in ids
     assert first.id not in ids
@@ -256,19 +244,121 @@ def test_list_staff_blank_search_behaves_like_no_search(
         role=Role.DOCTOR,
     )
 
-    results = staff_service.list_staff(
+    result = staff_service.list_staff(
         clinic_id=clinic.id,
         search="   ",
     )
 
-    ids = {item.id for item in results}
+    ids = {item.id for item in result["items"]}
 
     assert staff.id in ids
 
 
-# ============================================================================
-# CREATE STAFF
-# ============================================================================
+def test_list_staff_paginates(
+    clinic,
+    make_staff,
+):
+    staff_records = [
+        make_staff(
+            clinic=clinic,
+            role=Role.DOCTOR,
+            first_name=f"First{index}",
+            last_name=f"Last{index}",
+        )
+        for index in range(5)
+    ]
+
+    page_one = staff_service.list_staff(
+        clinic_id=clinic.id,
+        page=1,
+        per_page=2,
+    )
+
+    page_two = staff_service.list_staff(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    page_three = staff_service.list_staff(
+        clinic_id=clinic.id,
+        page=3,
+        per_page=2,
+    )
+
+    assert page_one["total"] == 5
+    assert page_one["page"] == 1
+    assert page_one["per_page"] == 2
+    assert len(page_one["items"]) == 2
+
+    assert page_two["total"] == 5
+    assert page_two["page"] == 2
+    assert page_two["per_page"] == 2
+    assert len(page_two["items"]) == 2
+
+    assert page_three["total"] == 5
+    assert page_three["page"] == 3
+    assert page_three["per_page"] == 2
+    assert len(page_three["items"]) == 1
+
+    returned_ids = {
+        item.id
+        for result in (
+            page_one,
+            page_two,
+            page_three,
+        )
+        for item in result["items"]
+    }
+
+    assert returned_ids == {
+        item.id
+        for item in staff_records
+    }
+
+
+def test_list_staff_empty_page_returns_empty_items(
+    clinic,
+    make_staff,
+):
+    make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    result = staff_service.list_staff(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=1,
+    )
+
+    assert result["total"] == 1
+    assert result["page"] == 2
+    assert result["per_page"] == 1
+    assert result["items"] == []
+
+
+@pytest.mark.parametrize(
+    ("page", "per_page"),
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, staff_service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_list_staff_rejects_invalid_pagination(
+    clinic,
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        staff_service.list_staff(
+            clinic_id=clinic.id,
+            page=page,
+            per_page=per_page,
+        )
 
 
 def test_create_staff_success(
@@ -433,7 +523,6 @@ def test_create_staff_rejects_user_from_another_clinic(
 def test_create_staff_rejects_duplicate_user_link(
     clinic,
     make_staff,
-    make_user,
 ):
     existing_staff = make_staff(
         clinic=clinic,
@@ -450,11 +539,6 @@ def test_create_staff_rejects_duplicate_user_link(
             last_name="Smith",
             user_id=existing_staff.user_id,
         )
-
-
-# ============================================================================
-# UPDATE STAFF
-# ============================================================================
 
 
 def test_update_staff_updates_allowed_fields(
@@ -625,11 +709,6 @@ def test_update_staff_rejects_inactive_clinic(
         )
 
 
-# ============================================================================
-# STAFF STATUS
-# ============================================================================
-
-
 def test_change_staff_status_changes_status(
     clinic,
     make_staff,
@@ -695,15 +774,9 @@ def test_change_staff_status_same_status_is_noop(
     audit.assert_not_called()
 
 
-# ============================================================================
-# LEAVE REQUEST CREATION
-# ============================================================================
-
-
 def test_request_leave_success(
     clinic,
     make_staff,
-    make_user,
     monkeypatch,
 ):
     user_staff = make_staff(
@@ -890,11 +963,6 @@ def test_request_leave_rejects_overlapping_approved(
         )
 
 
-# ============================================================================
-# LEAVE LOOKUP / LIST
-# ============================================================================
-
-
 def test_get_leave_request_returns_clinic_owned_leave(
     clinic,
     make_staff,
@@ -955,14 +1023,17 @@ def test_list_leave_requests_filters_clinic(
     local_leave = _make_leave(local_staff.id)
     foreign_leave = _make_leave(foreign_staff.id)
 
-    results = staff_service.list_leave_requests(
+    result = staff_service.list_leave_requests(
         clinic_id=clinic.id,
     )
 
-    ids = {leave.id for leave in results}
+    ids = {leave.id for leave in result["items"]}
 
     assert local_leave.id in ids
     assert foreign_leave.id not in ids
+    assert result["total"] == 1
+    assert result["page"] == 1
+    assert result["per_page"] == staff_service.DEFAULT_PER_PAGE
 
 
 def test_list_leave_requests_filters_staff_and_status(
@@ -994,20 +1065,129 @@ def test_list_leave_requests_filters_staff_and_status(
         status=LeaveStatus.PENDING,
     )
 
-    results = staff_service.list_leave_requests(
+    result = staff_service.list_leave_requests(
         clinic_id=clinic.id,
         staff_id=staff_a.id,
         status=LeaveStatus.PENDING,
     )
 
-    ids = {leave.id for leave in results}
+    ids = {leave.id for leave in result["items"]}
 
     assert ids == {matching.id}
+    assert result["total"] == 1
 
 
-# ============================================================================
-# LEAVE APPROVAL
-# ============================================================================
+def test_list_leave_requests_paginates(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    leaves = [
+        _make_leave(
+            staff.id,
+            start_date=date(2026, 10, index + 1),
+            end_date=date(2026, 10, index + 2),
+        )
+        for index in range(5)
+    ]
+
+    page_one = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+        page=1,
+        per_page=2,
+    )
+
+    page_two = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    page_three = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+        page=3,
+        per_page=2,
+    )
+
+    assert page_one["total"] == 5
+    assert page_one["page"] == 1
+    assert page_one["per_page"] == 2
+    assert len(page_one["items"]) == 2
+
+    assert page_two["total"] == 5
+    assert page_two["page"] == 2
+    assert page_two["per_page"] == 2
+    assert len(page_two["items"]) == 2
+
+    assert page_three["total"] == 5
+    assert page_three["page"] == 3
+    assert page_three["per_page"] == 2
+    assert len(page_three["items"]) == 1
+
+    returned_ids = {
+        leave.id
+        for result in (
+            page_one,
+            page_two,
+            page_three,
+        )
+        for leave in result["items"]
+    }
+
+    assert returned_ids == {
+        leave.id
+        for leave in leaves
+    }
+
+
+def test_list_leave_requests_empty_page_returns_empty_items(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    _make_leave(staff.id)
+
+    result = staff_service.list_leave_requests(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=1,
+    )
+
+    assert result["total"] == 1
+    assert result["page"] == 2
+    assert result["per_page"] == 1
+    assert result["items"] == []
+
+
+@pytest.mark.parametrize(
+    ("page", "per_page"),
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, staff_service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_list_leave_requests_rejects_invalid_pagination(
+    clinic,
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        staff_service.list_leave_requests(
+            clinic_id=clinic.id,
+            page=page,
+            per_page=per_page,
+        )
 
 
 def test_approve_leave_success(
@@ -1189,11 +1369,6 @@ def test_approve_leave_rejects_overlapping_approved_leave(
         )
 
 
-# ============================================================================
-# LEAVE REJECTION
-# ============================================================================
-
-
 def test_reject_leave_success_with_reason(
     clinic,
     make_staff,
@@ -1323,11 +1498,6 @@ def test_reject_leave_requires_admin(
         )
 
 
-# ============================================================================
-# RESTORE EXPIRED LEAVE
-# ============================================================================
-
-
 def test_restore_staff_from_expired_leave(
     clinic,
     make_staff,
@@ -1399,11 +1569,6 @@ def test_restore_staff_keeps_current_leave_staff_on_leave(
     audit.assert_not_called()
 
 
-# ============================================================================
-# PAYROLL LOOKUP / LIST
-# ============================================================================
-
-
 def test_get_payroll_record_returns_record(
     clinic,
     make_staff,
@@ -1413,9 +1578,7 @@ def test_get_payroll_record_returns_record(
         role=Role.DOCTOR,
     )
 
-    record = _make_payroll(
-        staff.id,
-    )
+    record = _make_payroll(staff.id)
 
     result = staff_service.get_payroll_record(
         record_id=record.id,
@@ -1437,9 +1600,7 @@ def test_get_payroll_record_enforces_clinic(
         role=Role.DOCTOR,
     )
 
-    record = _make_payroll(
-        staff.id,
-    )
+    record = _make_payroll(staff.id)
 
     with pytest.raises(NotFoundError):
         staff_service.get_payroll_record(
@@ -1468,14 +1629,87 @@ def test_list_payroll_returns_only_clinic_records(
     local_record = _make_payroll(local_staff.id)
     foreign_record = _make_payroll(foreign_staff.id)
 
-    results = staff_service.list_payroll(
+    result = staff_service.list_payroll(
         clinic_id=clinic.id,
     )
 
-    ids = {record.id for record in results}
+    ids = {record.id for record in result["items"]}
 
     assert local_record.id in ids
     assert foreign_record.id not in ids
+    assert result["total"] == 1
+    assert result["page"] == 1
+    assert result["per_page"] == staff_service.DEFAULT_PER_PAGE
+
+
+def test_list_payroll_filters_by_staff(
+    clinic,
+    make_staff,
+):
+    staff_a = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    staff_b = make_staff(
+        clinic=clinic,
+        role=Role.NURSE,
+    )
+
+    matching = _make_payroll(staff_a.id)
+    _make_payroll(staff_b.id)
+
+    result = staff_service.list_payroll_for_staff(
+        clinic_id=clinic.id,
+        staff_id=staff_a.id,
+    )
+
+    ids = {
+        record.id
+        for record in result["items"]
+    }
+
+    assert ids == {matching.id}
+    assert result["total"] == 1
+    assert result["page"] == 1
+    assert (
+        result["per_page"]
+        == staff_service.DEFAULT_PER_PAGE
+    )
+
+
+def test_list_payroll_for_staff_returns_staff_records(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    first = _make_payroll(
+        staff.id,
+        pay_period_start=date(2026, 8, 1),
+        pay_period_end=date(2026, 8, 31),
+    )
+
+    second = _make_payroll(
+        staff.id,
+        pay_period_start=date(2026, 9, 1),
+        pay_period_end=date(2026, 9, 30),
+    )
+
+    result = staff_service.list_payroll_for_staff(
+        clinic_id=clinic.id,
+        staff_id=staff.id,
+    )
+
+    ids = {record.id for record in result["items"]}
+
+    assert ids == {first.id, second.id}
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["per_page"] == staff_service.DEFAULT_PER_PAGE
 
 
 def test_list_payroll_for_staff_requires_clinic_owned_staff(
@@ -1497,9 +1731,159 @@ def test_list_payroll_for_staff_requires_clinic_owned_staff(
         )
 
 
-# ============================================================================
-# CREATE PAYROLL
-# ============================================================================
+def test_list_payroll_paginates(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    records = [
+        _make_payroll(
+            staff.id,
+            pay_period_start=date(
+                2026,
+                index + 1,
+                1,
+            ),
+            pay_period_end=date(
+                2026,
+                index + 1,
+                28,
+            ),
+        )
+        for index in range(1, 5)
+    ]
+
+    page_one = staff_service.list_payroll(
+        clinic_id=clinic.id,
+        page=1,
+        per_page=2,
+    )
+
+    page_two = staff_service.list_payroll(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert page_one["total"] == 4
+    assert page_one["page"] == 1
+    assert page_one["per_page"] == 2
+    assert len(page_one["items"]) == 2
+
+    assert page_two["total"] == 4
+    assert page_two["page"] == 2
+    assert page_two["per_page"] == 2
+    assert len(page_two["items"]) == 2
+
+    returned_ids = {
+        record.id
+        for result in (
+            page_one,
+            page_two,
+        )
+        for record in result["items"]
+    }
+
+    assert returned_ids == {
+        record.id
+        for record in records
+    }
+
+
+def test_list_payroll_for_staff_paginates(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    records = [
+        _make_payroll(
+            staff.id,
+            pay_period_start=date(
+                2026,
+                index + 1,
+                1,
+            ),
+            pay_period_end=date(
+                2026,
+                index + 1,
+                28,
+            ),
+        )
+        for index in range(1, 5)
+    ]
+
+    result = staff_service.list_payroll_for_staff(
+        clinic_id=clinic.id,
+        staff_id=staff.id,
+        page=1,
+        per_page=2,
+    )
+
+    assert result["total"] == 4
+    assert result["page"] == 1
+    assert result["per_page"] == 2
+    assert len(result["items"]) == 2
+
+    assert {
+        record.id
+        for record in result["items"]
+    }.issubset(
+        {record.id for record in records}
+    )
+
+
+def test_list_payroll_empty_page_returns_empty_items(
+    clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    _make_payroll(staff.id)
+
+    result = staff_service.list_payroll(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=1,
+    )
+
+    assert result["total"] == 1
+    assert result["page"] == 2
+    assert result["per_page"] == 1
+    assert result["items"] == []
+
+
+@pytest.mark.parametrize(
+    ("page", "per_page"),
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, staff_service.MAX_PER_PAGE + 1),
+    ],
+)
+def test_list_payroll_rejects_invalid_pagination(
+    clinic,
+    page,
+    per_page,
+):
+    with pytest.raises(ValidationError):
+        staff_service.list_payroll(
+            clinic_id=clinic.id,
+            page=page,
+            per_page=per_page,
+        )
 
 
 def test_create_payroll_success(
@@ -1670,11 +2054,6 @@ def test_create_payroll_rejects_duplicate_period(
         )
 
 
-# ============================================================================
-# GENERATE PAYROLL
-# ============================================================================
-
-
 def test_generate_payroll_for_active_staff(
     clinic,
     make_staff,
@@ -1802,9 +2181,7 @@ def test_generate_payroll_skips_existing_records(
         status=StaffStatus.ACTIVE,
     )
 
-    existing = _make_payroll(
-        staff.id,
-    )
+    existing = _make_payroll(staff.id)
 
     results = staff_service.generate_payroll_for_period(
         clinic_id=clinic.id,
@@ -1853,11 +2230,6 @@ def test_generate_payroll_only_generates_for_requested_clinic(
     assert foreign_staff.id not in ids
 
 
-# ============================================================================
-# MARK PAYROLL PAID
-# ============================================================================
-
-
 def test_mark_payroll_paid_success(
     clinic,
     make_staff,
@@ -1868,9 +2240,7 @@ def test_mark_payroll_paid_success(
         role=Role.DOCTOR,
     )
 
-    record = _make_payroll(
-        staff.id,
-    )
+    record = _make_payroll(staff.id)
 
     audit = Mock()
 
@@ -1955,11 +2325,6 @@ def test_mark_payroll_paid_rejects_inactive_clinic(
             record_id=record.id,
             clinic_id=suspended_clinic.id,
         )
-
-
-# ============================================================================
-# ACTIVE CLINIC ENFORCEMENT
-# ============================================================================
 
 
 def test_active_clinic_required_for_status_change(

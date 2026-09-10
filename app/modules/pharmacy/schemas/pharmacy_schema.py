@@ -10,7 +10,20 @@ from pydantic import (
     field_validator,
 )
 
-from app.core.enums.pharmacy_enums import DispenseStatus, DrugCategory
+from app.core.enums.pharmacy_enums import (
+    DispenseStatus,
+    DrugCategory,
+)
+
+
+# ============================================================================
+# PAGINATION
+# ============================================================================
+
+
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
 
 
 # ============================================================================
@@ -18,7 +31,9 @@ from app.core.enums.pharmacy_enums import DispenseStatus, DrugCategory
 # ============================================================================
 
 
-def _normalize_text(value: str | None) -> str | None:
+def _normalize_text(
+    value: str | None,
+) -> str | None:
     if value is None:
         return None
 
@@ -30,13 +45,16 @@ def _normalize_text(value: str | None) -> str | None:
     return value or None
 
 
-def _validate_future_expiry(value: date) -> date:
-    """
-    Pharmacy batches must expire strictly after today.
-
-    A batch expiring today is treated as non-receivable because it cannot
-    safely be considered valid stock for dispensing.
-    """
+def _validate_future_expiry(
+    value: date,
+) -> date:
+    if (
+        isinstance(value, datetime)
+        or not isinstance(value, date)
+    ):
+        raise ValueError(
+            "Expiry date must be a valid date"
+        )
 
     if value <= date.today():
         raise ValueError(
@@ -44,6 +62,50 @@ def _validate_future_expiry(value: date) -> date:
         )
 
     return value
+
+
+# ============================================================================
+# PAGINATION SCHEMAS
+# ============================================================================
+
+
+class PaginationSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+
+class PaginationResponseSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
 
 
 # ============================================================================
@@ -116,7 +178,10 @@ class DrugCreateSchema(BaseModel):
         mode="before",
     )
     @classmethod
-    def normalize_text_fields(cls, value):
+    def normalize_text_fields(
+        cls,
+        value,
+    ):
         if isinstance(value, str):
             value = value.strip()
 
@@ -188,7 +253,10 @@ class DrugUpdateSchema(BaseModel):
         mode="before",
     )
     @classmethod
-    def normalize_text_fields(cls, value):
+    def normalize_text_fields(
+        cls,
+        value,
+    ):
         if isinstance(value, str):
             value = value.strip()
 
@@ -200,8 +268,16 @@ class DrugResponseSchema(BaseModel):
         from_attributes=True,
     )
 
-    id: int
-    clinic_id: int | None
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    clinic_id: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
     name: str
     generic_name: str | None
     category: DrugCategory
@@ -217,14 +293,20 @@ class DrugResponseSchema(BaseModel):
     updated_at: datetime
 
 
-class DrugFilterSchema(BaseModel):
+class DrugFilterSchema(PaginationSchema):
     model_config = ConfigDict(
-        extra="ignore",
+        extra="forbid",
     )
 
     include_inactive: bool = Field(
         default=False,
     )
+
+
+class DrugListResponseSchema(
+    PaginationResponseSchema
+):
+    items: list[DrugResponseSchema]
 
 
 # ============================================================================
@@ -270,15 +352,23 @@ class DrugBatchCreateSchema(BaseModel):
         mode="before",
     )
     @classmethod
-    def normalize_batch_number(cls, value):
+    def normalize_batch_number(
+        cls,
+        value,
+    ):
         return _normalize_text(value)
 
     @field_validator(
         "expiry_date",
     )
     @classmethod
-    def validate_expiry_date(cls, value: date) -> date:
-        return _validate_future_expiry(value)
+    def validate_expiry_date(
+        cls,
+        value: date,
+    ) -> date:
+        return _validate_future_expiry(
+            value
+        )
 
 
 class DrugBatchResponseSchema(BaseModel):
@@ -286,10 +376,26 @@ class DrugBatchResponseSchema(BaseModel):
         from_attributes=True,
     )
 
-    id: int
-    clinic_id: int
-    drug_id: int
-    supplier_id: int | None
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    drug_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    supplier_id: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
     batch_number: str
     quantity_on_hand: int
     reorder_level: int
@@ -299,9 +405,9 @@ class DrugBatchResponseSchema(BaseModel):
     updated_at: datetime
 
 
-class DrugBatchFilterSchema(BaseModel):
+class DrugBatchFilterSchema(PaginationSchema):
     model_config = ConfigDict(
-        extra="ignore",
+        extra="forbid",
     )
 
     include_expired: bool = Field(
@@ -309,23 +415,58 @@ class DrugBatchFilterSchema(BaseModel):
     )
 
 
-class ExpiringDrugBatchQuerySchema(BaseModel):
+class DrugBatchListResponseSchema(
+    PaginationResponseSchema
+):
+    items: list[DrugBatchResponseSchema]
+
+
+class ExpiringDrugBatchQuerySchema(
+    PaginationSchema
+):
     model_config = ConfigDict(
-        extra="ignore",
+        extra="forbid",
     )
 
     days: int = Field(
         default=30,
         ge=0,
+        le=3650,
     )
 
 
+class ExpiringDrugBatchListResponseSchema(
+    PaginationResponseSchema
+):
+    items: list[DrugBatchResponseSchema]
+
+
 class StockSummaryResponseSchema(BaseModel):
-    clinic_id: int
-    drug_id: int
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    drug_id: int = Field(
+        ...,
+        gt=0,
+    )
+
     drug_name: str
-    quantity_on_hand: int
-    batch_count: int
+
+    quantity_on_hand: int = Field(
+        ...,
+        ge=0,
+    )
+
+    batch_count: int = Field(
+        ...,
+        ge=0,
+    )
 
 
 # ============================================================================
@@ -371,6 +512,7 @@ class DispenseRecordCreateSchema(BaseModel):
 
     notes: str | None = Field(
         default=None,
+        max_length=2000,
     )
 
     @field_validator(
@@ -378,10 +520,15 @@ class DispenseRecordCreateSchema(BaseModel):
         mode="before",
     )
     @classmethod
-    def normalize_notes(cls, value):
+    def normalize_notes(
+        cls,
+        value,
+    ):
         return _normalize_text(value)
 
-    def to_service_items(self) -> list[dict]:
+    def to_service_items(
+        self,
+    ) -> list[dict]:
         return [
             item.model_dump()
             for item in self.items
@@ -399,11 +546,30 @@ class DispenseItemResponseSchema(BaseModel):
         from_attributes=True,
     )
 
-    id: int
-    dispense_record_id: int
-    batch_id: int
-    prescription_item_id: int | None
-    quantity_dispensed: int
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    dispense_record_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    batch_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    prescription_item_id: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    quantity_dispensed: int = Field(
+        ...,
+        ge=0,
+    )
 
 
 class DispenseRecordResponseSchema(BaseModel):
@@ -411,12 +577,35 @@ class DispenseRecordResponseSchema(BaseModel):
         from_attributes=True,
     )
 
-    id: int
-    prescription_id: int
-    dispensed_by_id: int
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    prescription_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    dispensed_by_id: int = Field(
+        ...,
+        gt=0,
+    )
+
     status: DispenseStatus
+
     notes: str | None
+
     dispensed_at: datetime | None
+
     created_at: datetime
+
     updated_at: datetime
+
     items: list[DispenseItemResponseSchema]
+
+
+class DispenseRecordListResponseSchema(
+    PaginationResponseSchema
+):
+    items: list[DispenseRecordResponseSchema]

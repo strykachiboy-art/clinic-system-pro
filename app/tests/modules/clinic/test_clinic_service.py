@@ -17,15 +17,272 @@ from app.modules.clinic.services import clinic_service
 
 @pytest.fixture(autouse=True)
 def clinic_app_context(app):
-    """
-    Ensure every clinic service test runs inside the Flask
-    application context.
-
-    The clinic service currently uses Flask-SQLAlchemy's
-    Model.query and the transactional decorator, both of which
-    require an active application context.
-    """
     yield
+
+
+# ============================================================================
+# VALIDATION HELPERS
+# ============================================================================
+
+
+def test_validate_positive_id_accepts_positive_integer():
+    assert clinic_service._validate_positive_id(1, "Clinic ID") == 1
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_validate_positive_id_rejects_non_positive(value):
+    with pytest.raises(ValidationError):
+        clinic_service._validate_positive_id(value, "Clinic ID")
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_validate_positive_id_rejects_boolean(value):
+    with pytest.raises(ValidationError):
+        clinic_service._validate_positive_id(value, "Clinic ID")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "1",
+        1.5,
+        [],
+        {},
+    ],
+)
+def test_validate_positive_id_rejects_non_integer(value):
+    with pytest.raises(ValidationError):
+        clinic_service._validate_positive_id(value, "Clinic ID")
+
+
+def test_validate_optional_positive_id_accepts_none():
+    assert clinic_service._validate_optional_positive_id(
+        None,
+        "Parent clinic ID",
+    ) is None
+
+
+def test_validate_optional_positive_id_accepts_positive_integer():
+    assert (
+        clinic_service._validate_optional_positive_id(
+            5,
+            "Parent clinic ID",
+        )
+        == 5
+    )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, "5", 1.5])
+def test_validate_optional_positive_id_rejects_invalid_values(value):
+    with pytest.raises(ValidationError):
+        clinic_service._validate_optional_positive_id(
+            value,
+            "Parent clinic ID",
+        )
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_validate_bool_accepts_boolean(value):
+    assert clinic_service._validate_bool(
+        value,
+        "is_headquarters",
+    ) is value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        0,
+        1,
+        "true",
+        "false",
+        [],
+        {},
+    ],
+)
+def test_validate_bool_rejects_non_boolean(value):
+    with pytest.raises(
+        ValidationError,
+        match="is_headquarters must be a boolean",
+    ):
+        clinic_service._validate_bool(
+            value,
+            "is_headquarters",
+        )
+
+
+def test_validate_enum_accepts_enum_instance():
+    assert (
+        clinic_service._validate_enum(
+            ClinicStatus.ACTIVE,
+            ClinicStatus,
+            "status",
+        )
+        == ClinicStatus.ACTIVE
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ClinicStatus.ACTIVE.value,
+        ClinicStatus.SUSPENDED.value,
+    ],
+)
+def test_validate_enum_accepts_valid_string(value):
+    result = clinic_service._validate_enum(
+        value,
+        ClinicStatus,
+        "status",
+    )
+
+    assert isinstance(result, ClinicStatus)
+
+
+def test_validate_enum_rejects_invalid_value():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid status",
+    ):
+        clinic_service._validate_enum(
+            "invalid",
+            ClinicStatus,
+            "status",
+        )
+
+
+def test_validate_enum_rejects_none():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid status",
+    ):
+        clinic_service._validate_enum(
+            None,
+            ClinicStatus,
+            "status",
+        )
+
+
+def test_validate_time_accepts_time_value():
+    value = time(8, 0)
+
+    assert (
+        clinic_service._validate_time(
+            value,
+            "opening time",
+        )
+        == value
+    )
+
+
+def test_validate_time_allows_none():
+    assert (
+        clinic_service._validate_time(
+            None,
+            "opening time",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "08:00",
+        8,
+        8.5,
+    ],
+)
+def test_validate_time_rejects_invalid_value(value):
+    with pytest.raises(ValidationError):
+        clinic_service._validate_time(
+            value,
+            "Opening time",
+        )
+
+
+def test_validate_name_rejects_non_string():
+    with pytest.raises(
+        ValidationError,
+        match="Clinic name must be a string",
+    ):
+        clinic_service._validate_name(123)
+
+
+def test_validate_name_rejects_empty_name():
+    with pytest.raises(
+        ValidationError,
+        match="Clinic name is required",
+    ):
+        clinic_service._validate_name("   ")
+
+
+def test_validate_name_strips_whitespace():
+    assert (
+        clinic_service._validate_name("  Central Clinic  ")
+        == "Central Clinic"
+    )
+
+
+def test_validate_opening_hours_accepts_valid_hours():
+    clinic_service._validate_operating_hours(
+        time(8, 0),
+        time(17, 0),
+    )
+
+
+def test_validate_opening_hours_allows_missing_opening_time():
+    clinic_service._validate_operating_hours(
+        None,
+        time(17, 0),
+    )
+
+
+def test_validate_opening_hours_allows_missing_closing_time():
+    clinic_service._validate_operating_hours(
+        time(8, 0),
+        None,
+    )
+
+
+def test_validate_opening_hours_rejects_invalid_order():
+    with pytest.raises(
+        ValidationError,
+        match="Opening time must be earlier than closing time",
+    ):
+        clinic_service._validate_operating_hours(
+            time(18, 0),
+            time(8, 0),
+        )
+
+
+def test_validate_timezone_accepts_valid_timezone():
+    assert (
+        clinic_service._validate_timezone(
+            "Africa/Lagos"
+        )
+        == "Africa/Lagos"
+    )
+
+
+def test_validate_timezone_rejects_invalid_timezone():
+    with pytest.raises(
+        ValidationError,
+        match=r"Invalid timezone 'Not/ARealTimezone'",
+    ):
+        clinic_service._validate_timezone(
+            "Not/ARealTimezone"
+        )
+
+
+def test_validate_timezone_rejects_empty_timezone():
+    with pytest.raises(
+        ValidationError,
+        match="Timezone is required",
+    ):
+        clinic_service._validate_timezone("   ")
 
 
 # ============================================================================
@@ -41,18 +298,23 @@ def test_get_clinic_returns_clinic(clinic):
 
 
 def test_get_clinic_returns_not_found_for_missing_id():
-    with pytest.raises(NotFoundError, match=r"Clinic 999999 not found"):
+    with pytest.raises(
+        NotFoundError,
+        match=r"Clinic 999999 not found",
+    ):
         clinic_service.get_clinic(999999)
 
 
-def test_get_clinic_rejects_zero():
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
-        clinic_service.get_clinic(0)
+@pytest.mark.parametrize("clinic_id", [0, -1])
+def test_get_clinic_rejects_invalid_id(clinic_id):
+    with pytest.raises(ValidationError):
+        clinic_service.get_clinic(clinic_id)
 
 
-def test_get_clinic_rejects_negative_id():
-    with pytest.raises(ValidationError, match="Invalid clinic ID"):
-        clinic_service.get_clinic(-1)
+@pytest.mark.parametrize("clinic_id", [True, False])
+def test_get_clinic_rejects_boolean_id(clinic_id):
+    with pytest.raises(ValidationError):
+        clinic_service.get_clinic(clinic_id)
 
 
 def test_get_clinic_for_update_returns_clinic(clinic):
@@ -86,6 +348,25 @@ def test_list_clinics_returns_clinics_sorted_by_name(
     ]
 
 
+def test_list_clinics_uses_id_as_deterministic_tie_breaker(
+    make_clinic,
+):
+    first = make_clinic(name="Same Name")
+    second = make_clinic(name="Same Name")
+
+    clinics = clinic_service.list_clinics()
+
+    matching = [
+        clinic.id
+        for clinic in clinics
+        if clinic.name == "Same Name"
+    ]
+
+    assert matching == sorted(
+        [first.id, second.id]
+    )
+
+
 def test_list_clinics_filters_by_status(
     make_clinic,
 ):
@@ -93,6 +374,7 @@ def test_list_clinics_filters_by_status(
         name="Active Clinic",
         status=ClinicStatus.ACTIVE,
     )
+
     suspended = make_clinic(
         name="Suspended Clinic",
         status=ClinicStatus.SUSPENDED,
@@ -102,8 +384,39 @@ def test_list_clinics_filters_by_status(
         status=ClinicStatus.SUSPENDED,
     )
 
-    assert [clinic.id for clinic in clinics] == [suspended.id]
-    assert active.id not in [clinic.id for clinic in clinics]
+    assert [clinic.id for clinic in clinics] == [
+        suspended.id
+    ]
+    assert active.id not in [
+        clinic.id for clinic in clinics
+    ]
+
+
+def test_list_clinics_accepts_status_string(
+    make_clinic,
+):
+    suspended = make_clinic(
+        name="Suspended Clinic",
+        status=ClinicStatus.SUSPENDED,
+    )
+
+    clinics = clinic_service.list_clinics(
+        status=ClinicStatus.SUSPENDED.value,
+    )
+
+    assert [clinic.id for clinic in clinics] == [
+        suspended.id
+    ]
+
+
+def test_list_clinics_rejects_invalid_status():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic status",
+    ):
+        clinic_service.list_clinics(
+            status="invalid",
+        )
 
 
 def test_list_clinics_empty_database():
@@ -121,25 +434,33 @@ def test_list_branches_returns_direct_children(
     make_clinic,
 ):
     parent = make_clinic(name="Parent Clinic")
+
     branch_a = make_clinic(
         name="Branch A",
         parent_clinic_id=parent.id,
     )
+
     branch_b = make_clinic(
         name="Branch B",
         parent_clinic_id=parent.id,
     )
+
     unrelated = make_clinic(
         name="Unrelated Clinic",
     )
 
-    branches = clinic_service.list_branches(parent.id)
+    branches = clinic_service.list_branches(
+        parent.id
+    )
 
     assert [branch.id for branch in branches] == [
         branch_a.id,
         branch_b.id,
     ]
-    assert unrelated.id not in [branch.id for branch in branches]
+
+    assert unrelated.id not in [
+        branch.id for branch in branches
+    ]
 
 
 def test_list_branches_sorts_by_name(
@@ -151,17 +472,25 @@ def test_list_branches_sorts_by_name(
         name="Zeta Branch",
         parent_clinic_id=parent.id,
     )
+
     branch_a = make_clinic(
         name="Alpha Branch",
         parent_clinic_id=parent.id,
     )
 
-    branches = clinic_service.list_branches(parent.id)
+    branches = clinic_service.list_branches(
+        parent.id
+    )
 
     assert [branch.id for branch in branches] == [
         branch_a.id,
         branch_z.id,
     ]
+
+
+def test_list_branches_rejects_invalid_parent_id():
+    with pytest.raises(ValidationError):
+        clinic_service.list_branches(0)
 
 
 def test_list_branches_raises_when_parent_does_not_exist():
@@ -192,17 +521,40 @@ def test_create_clinic_creates_active_clinic(db):
     assert clinic.ai_credits == 0
     assert clinic.ai_requests_this_month == 0
 
-    persisted = db.session.get(Clinic, clinic.id)
+    persisted = db.session.get(
+        Clinic,
+        clinic.id,
+    )
 
     assert persisted is clinic
 
 
 def test_create_clinic_normalizes_name():
     clinic = clinic_service.create_clinic(
-        name="  Central Clinic  ",
+        name="  Central Clinic  "
     )
 
     assert clinic.name == "Central Clinic"
+
+
+def test_create_clinic_accepts_string_clinic_type():
+    clinic = clinic_service.create_clinic(
+        name="Specialist Clinic",
+        clinic_type=ClinicType.SPECIALIST.value,
+    )
+
+    assert clinic.clinic_type == ClinicType.SPECIALIST
+
+
+def test_create_clinic_rejects_invalid_clinic_type():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic type",
+    ):
+        clinic_service.create_clinic(
+            name="Invalid Clinic",
+            clinic_type="invalid",
+        )
 
 
 def test_create_clinic_rejects_non_string_name():
@@ -210,7 +562,9 @@ def test_create_clinic_rejects_non_string_name():
         ValidationError,
         match="Clinic name must be a string",
     ):
-        clinic_service.create_clinic(name=123)
+        clinic_service.create_clinic(
+            name=123
+        )
 
 
 def test_create_clinic_rejects_empty_name():
@@ -218,17 +572,24 @@ def test_create_clinic_rejects_empty_name():
         ValidationError,
         match="Clinic name is required",
     ):
-        clinic_service.create_clinic(name="   ")
+        clinic_service.create_clinic(
+            name="   "
+        )
 
 
 def test_create_clinic_rejects_invalid_parent_id():
-    with pytest.raises(
-        ValidationError,
-        match="Invalid parent clinic ID",
-    ):
+    with pytest.raises(ValidationError):
         clinic_service.create_clinic(
             name="Child Clinic",
             parent_clinic_id=0,
+        )
+
+
+def test_create_clinic_rejects_boolean_parent_id():
+    with pytest.raises(ValidationError):
+        clinic_service.create_clinic(
+            name="Child Clinic",
+            parent_clinic_id=True,
         )
 
 
@@ -254,6 +615,17 @@ def test_create_clinic_rejects_headquarters_with_parent(
             name="Invalid HQ",
             parent_clinic_id=clinic.id,
             is_headquarters=True,
+        )
+
+
+def test_create_clinic_rejects_boolean_headquarters_value():
+    with pytest.raises(
+        ValidationError,
+        match="is_headquarters must be a boolean",
+    ):
+        clinic_service.create_clinic(
+            name="Invalid HQ",
+            is_headquarters="true",
         )
 
 
@@ -342,6 +714,29 @@ def test_create_clinic_sets_profile_fields():
     assert clinic.is_headquarters is True
 
 
+def test_create_clinic_rejects_invalid_timezone():
+    with pytest.raises(
+        ValidationError,
+        match=r"Invalid timezone 'Not/ARealTimezone'",
+    ):
+        clinic_service.create_clinic(
+            name="Timezone Clinic",
+            timezone="Not/ARealTimezone",
+        )
+
+
+def test_create_clinic_rejects_invalid_operating_hours():
+    with pytest.raises(
+        ValidationError,
+        match="Opening time must be earlier than closing time",
+    ):
+        clinic_service.create_clinic(
+            name="Invalid Hours Clinic",
+            opening_time=time(18, 0),
+            closing_time=time(8, 0),
+        )
+
+
 # ============================================================================
 # CREATE BRANCH
 # ============================================================================
@@ -365,12 +760,17 @@ def test_create_branch_creates_active_branch(
 
 
 def test_create_branch_rejects_invalid_parent_id():
-    with pytest.raises(
-        ValidationError,
-        match="Invalid parent clinic ID",
-    ):
+    with pytest.raises(ValidationError):
         clinic_service.create_branch(
             parent_clinic_id=0,
+            name="Branch",
+        )
+
+
+def test_create_branch_rejects_boolean_parent_id():
+    with pytest.raises(ValidationError):
+        clinic_service.create_branch(
+            parent_clinic_id=True,
             name="Branch",
         )
 
@@ -417,6 +817,35 @@ def test_create_branch_rejects_duplicate_name(
         clinic_service.create_branch(
             parent_clinic_id=clinic.id,
             name="Duplicate Branch",
+        )
+
+
+def test_create_branch_rejects_invalid_timezone(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match=r"Invalid timezone 'Not/ARealTimezone'",
+    ):
+        clinic_service.create_branch(
+            parent_clinic_id=clinic.id,
+            name="Timezone Branch",
+            timezone="Not/ARealTimezone",
+        )
+
+
+def test_create_branch_rejects_invalid_operating_hours(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Opening time must be earlier than closing time",
+    ):
+        clinic_service.create_branch(
+            parent_clinic_id=clinic.id,
+            name="Invalid Hours Branch",
+            opening_time=time(18, 0),
+            closing_time=time(8, 0),
         )
 
 
@@ -478,6 +907,16 @@ def test_update_clinic_rejects_unsupported_field(
         )
 
 
+def test_update_clinic_returns_unchanged_clinic_when_no_fields(
+    clinic,
+):
+    updated = clinic_service.update_clinic(
+        clinic.id
+    )
+
+    assert updated is clinic
+
+
 def test_update_clinic_rejects_missing_clinic():
     with pytest.raises(
         NotFoundError,
@@ -485,6 +924,19 @@ def test_update_clinic_rejects_missing_clinic():
     ):
         clinic_service.update_clinic(
             999999,
+            name="Updated",
+        )
+
+
+def test_update_clinic_rejects_inactive_clinic(
+    suspended_clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match=rf"Clinic {suspended_clinic.id} is not active",
+    ):
+        clinic_service.update_clinic(
+            suspended_clinic.id,
             name="Updated",
         )
 
@@ -519,6 +971,19 @@ def test_update_clinic_allows_same_name_for_same_clinic(
     assert updated.name == clinic.name
 
 
+def test_update_clinic_rejects_invalid_clinic_type(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic type",
+    ):
+        clinic_service.update_clinic(
+            clinic.id,
+            clinic_type="invalid",
+        )
+
+
 def test_update_clinic_rejects_invalid_timezone(
     clinic,
 ):
@@ -546,6 +1011,19 @@ def test_update_clinic_rejects_invalid_operating_hours(
         )
 
 
+def test_update_clinic_rejects_invalid_single_time(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Opening time must be a valid time",
+    ):
+        clinic_service.update_clinic(
+            clinic.id,
+            opening_time="08:00",
+        )
+
+
 # ============================================================================
 # BRANCH CONFIGURATION
 # ============================================================================
@@ -569,6 +1047,7 @@ def test_update_branch_configuration_detaches_parent(
     make_clinic,
 ):
     parent = make_clinic(name="Parent")
+
     child = make_clinic(
         name="Child",
         parent_clinic_id=parent.id,
@@ -595,6 +1074,19 @@ def test_update_branch_configuration_changes_headquarters_flag(
     assert updated.is_headquarters is True
 
 
+def test_update_branch_configuration_rejects_invalid_boolean(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="is_headquarters must be a boolean",
+    ):
+        clinic_service.update_branch_configuration(
+            clinic.id,
+            is_headquarters="true",
+        )
+
+
 def test_update_branch_configuration_rejects_self_parent(
     clinic,
 ):
@@ -611,10 +1103,7 @@ def test_update_branch_configuration_rejects_self_parent(
 def test_update_branch_configuration_rejects_invalid_parent_id(
     clinic,
 ):
-    with pytest.raises(
-        ValidationError,
-        match="Invalid parent clinic ID",
-    ):
+    with pytest.raises(ValidationError):
         clinic_service.update_branch_configuration(
             clinic.id,
             parent_clinic_id=0,
@@ -648,6 +1137,20 @@ def test_update_branch_configuration_rejects_inactive_parent(
         )
 
 
+def test_update_branch_configuration_rejects_inactive_clinic(
+    suspended_clinic,
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match=rf"Clinic {suspended_clinic.id} is not active",
+    ):
+        clinic_service.update_branch_configuration(
+            suspended_clinic.id,
+            parent_clinic_id=clinic.id,
+        )
+
+
 def test_update_branch_configuration_rejects_hq_with_parent(
     make_clinic,
 ):
@@ -669,10 +1172,12 @@ def test_update_branch_configuration_rejects_cycle(
     make_clinic,
 ):
     root = make_clinic(name="Root")
+
     child = make_clinic(
         name="Child",
         parent_clinic_id=root.id,
     )
+
     grandchild = make_clinic(
         name="Grandchild",
         parent_clinic_id=child.id,
@@ -719,6 +1224,16 @@ def test_update_branch_configuration_rejects_duplicate_name_under_new_parent(
         )
 
 
+def test_update_branch_configuration_allows_no_fields(
+    clinic,
+):
+    updated = clinic_service.update_branch_configuration(
+        clinic.id
+    )
+
+    assert updated is clinic
+
+
 # ============================================================================
 # STATUS
 # ============================================================================
@@ -730,6 +1245,17 @@ def test_change_status_updates_status(
     updated = clinic_service.change_status(
         clinic.id,
         ClinicStatus.SUSPENDED,
+    )
+
+    assert updated.status == ClinicStatus.SUSPENDED
+
+
+def test_change_status_accepts_status_string(
+    clinic,
+):
+    updated = clinic_service.change_status(
+        clinic.id,
+        ClinicStatus.SUSPENDED.value,
     )
 
     assert updated.status == ClinicStatus.SUSPENDED
@@ -747,6 +1273,19 @@ def test_change_status_returns_unchanged_clinic_when_status_same(
 
     assert updated is clinic
     assert updated.status == original_status
+
+
+def test_change_status_rejects_invalid_status(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic status",
+    ):
+        clinic_service.change_status(
+            clinic.id,
+            "invalid",
+        )
 
 
 def test_change_status_rejects_missing_clinic():
@@ -778,7 +1317,7 @@ def test_add_ai_credits_increases_balance(
     assert updated.ai_credits == 15
 
 
-def test_add_ai_credits_rejects_non_integer(
+def test_add_ai_credits_accepts_only_integer(
     clinic,
 ):
     with pytest.raises(
@@ -791,8 +1330,13 @@ def test_add_ai_credits_rejects_non_integer(
         )
 
 
-def test_add_ai_credits_rejects_zero(
+@pytest.mark.parametrize(
+    "amount",
+    [0, -1, -5],
+)
+def test_add_ai_credits_rejects_non_positive_amount(
     clinic,
+    amount,
 ):
     with pytest.raises(
         ValidationError,
@@ -800,20 +1344,25 @@ def test_add_ai_credits_rejects_zero(
     ):
         clinic_service.add_ai_credits(
             clinic.id,
-            0,
+            amount,
         )
 
 
-def test_add_ai_credits_rejects_negative_amount(
+@pytest.mark.parametrize(
+    "amount",
+    [True, False],
+)
+def test_add_ai_credits_rejects_boolean_amount(
     clinic,
+    amount,
 ):
     with pytest.raises(
         ValidationError,
-        match="AI credit amount must be greater than zero",
+        match="AI credit amount must be an integer",
     ):
         clinic_service.add_ai_credits(
             clinic.id,
-            -5,
+            amount,
         )
 
 
@@ -829,6 +1378,68 @@ def test_add_ai_credits_rejects_missing_clinic():
 
 
 # ============================================================================
+# CONSUME AI CREDIT
+# ============================================================================
+
+
+def test_consume_ai_credit_decreases_balance(
+    clinic,
+):
+    clinic.ai_credits = 5
+    clinic.ai_requests_this_month = 10
+
+    result = clinic_service.consume_ai_credit(
+        clinic.id
+    )
+
+    assert result.ai_credits == 4
+    assert result.ai_requests_this_month == 11
+
+
+def test_consume_ai_credit_rejects_insufficient_credits(
+    clinic,
+):
+    clinic.ai_credits = 0
+
+    with pytest.raises(
+        Exception,
+        match="Insufficient AI credits",
+    ):
+        clinic_service.consume_ai_credit(
+            clinic.id
+        )
+
+
+def test_consume_ai_credit_rejects_inactive_clinic(
+    suspended_clinic,
+):
+    suspended_clinic.ai_credits = 5
+
+    with pytest.raises(
+        ValidationError,
+        match=rf"Clinic {suspended_clinic.id} is not active",
+    ):
+        clinic_service.consume_ai_credit(
+            suspended_clinic.id
+        )
+
+
+def test_consume_ai_credit_rejects_missing_clinic():
+    with pytest.raises(
+        NotFoundError,
+        match=r"Clinic 999999 not found",
+    ):
+        clinic_service.consume_ai_credit(
+            999999
+        )
+
+
+def test_consume_ai_credit_rejects_invalid_clinic_id():
+    with pytest.raises(ValidationError):
+        clinic_service.consume_ai_credit(0)
+
+
+# ============================================================================
 # API TOKEN
 # ============================================================================
 
@@ -837,7 +1448,7 @@ def test_regenerate_api_token_creates_token(
     clinic,
 ):
     token = clinic_service.regenerate_api_token(
-        clinic.id,
+        clinic.id
     )
 
     assert isinstance(token, str)
@@ -852,11 +1463,11 @@ def test_regenerate_api_token_replaces_existing_token(
     clinic.api_token = "old-token"
 
     first = clinic_service.regenerate_api_token(
-        clinic.id,
+        clinic.id
     )
 
     second = clinic_service.regenerate_api_token(
-        clinic.id,
+        clinic.id
     )
 
     assert first != second
@@ -868,7 +1479,23 @@ def test_regenerate_api_token_rejects_missing_clinic():
         NotFoundError,
         match=r"Clinic 999999 not found",
     ):
-        clinic_service.regenerate_api_token(999999)
+        clinic_service.regenerate_api_token(
+            999999
+        )
+
+
+def test_regenerate_api_token_does_not_return_old_token(
+    clinic,
+):
+    old_token = "old-token"
+    clinic.api_token = old_token
+
+    new_token = clinic_service.regenerate_api_token(
+        clinic.id
+    )
+
+    assert new_token != old_token
+    assert clinic.api_token == new_token
 
 
 # ============================================================================
@@ -880,7 +1507,7 @@ def test_ensure_clinic_active_returns_active_clinic(
     clinic,
 ):
     result = clinic_service.ensure_clinic_active(
-        clinic.id,
+        clinic.id
     )
 
     assert result is clinic
@@ -894,7 +1521,7 @@ def test_ensure_clinic_active_rejects_suspended_clinic(
         match=rf"Clinic {suspended_clinic.id} is not active",
     ):
         clinic_service.ensure_clinic_active(
-            suspended_clinic.id,
+            suspended_clinic.id
         )
 
 
@@ -903,4 +1530,19 @@ def test_ensure_clinic_active_rejects_missing_clinic():
         NotFoundError,
         match=r"Clinic 999999 not found",
     ):
-        clinic_service.ensure_clinic_active(999999)
+        clinic_service.ensure_clinic_active(
+            999999
+        )
+
+
+@pytest.mark.parametrize("clinic_id", [0, -1])
+def test_ensure_clinic_active_rejects_invalid_id(
+    clinic_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic ID",
+    ):
+        clinic_service.ensure_clinic_active(
+            clinic_id
+        )

@@ -4,29 +4,25 @@ import csv
 import io
 import os
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app.core.enums.reports_enums import ReportFormat, ReportType
 from app.core.enums.staff_enums import StaffStatus
-from app.core.exceptions import DomainError, ValidationError
+from app.core.exceptions import (
+    DomainError,
+    NotFoundError,
+    ValidationError,
+)
 from app.modules.reports.services import reports_service as service
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
 
 
 @pytest.fixture(autouse=True)
 def app_context(app):
-    """
-    Reports service functions use Flask-SQLAlchemy and some are wrapped by
-    @transactional. Keep every direct service invocation inside an
-    application context so validation exceptions are not masked by rollback.
-    """
+    """Keep direct service calls inside the Flask app context."""
     with app.app_context():
         yield
 
@@ -62,17 +58,8 @@ def _requester(
     clinic_id=10,
     is_active=True,
     staff_id=100,
+    staff_status=StaffStatus.ACTIVE,
 ):
-    """
-    Minimal requester shape matching the report service authorization
-    contract.
-
-    The service requires:
-      - active user
-      - linked staff
-      - active staff
-      - clinic association
-    """
     return SimpleNamespace(
         id=user_id,
         clinic_id=clinic_id,
@@ -80,7 +67,7 @@ def _requester(
         staff=SimpleNamespace(
             id=staff_id,
             clinic_id=clinic_id,
-            status=StaffStatus.ACTIVE,
+            status=staff_status,
         ),
     )
 
@@ -100,17 +87,13 @@ def _generator(
     *,
     staff_id=100,
     clinic_id=10,
+    status=StaffStatus.ACTIVE,
 ):
     return SimpleNamespace(
         id=staff_id,
         clinic_id=clinic_id,
-        status=StaffStatus.ACTIVE,
+        status=status,
     )
-
-
-# ============================================================================
-# Coercion helpers
-# ============================================================================
 
 
 class TestReportTypeCoercion:
@@ -163,11 +146,6 @@ class TestReportFormatCoercion:
     def test_rejects_none(self):
         with pytest.raises(ValidationError):
             service._coerce_report_format(None)
-
-
-# ============================================================================
-# Filter normalization
-# ============================================================================
 
 
 class TestNormalizeFilters:
@@ -237,6 +215,16 @@ class TestNormalizeFilters:
                 }
             )
 
+    def test_boolean_active_only_values_are_preserved(self):
+        for value in (True, False):
+            result = service._normalize_filters(
+                {
+                    "active_only": value,
+                }
+            )
+
+            assert result["active_only"] is value
+
     def test_accepts_date_objects(self):
         result = service._normalize_filters(
             {
@@ -295,7 +283,7 @@ class TestNormalizeFilters:
         assert result["date_from"] == date(2026, 1, 1)
         assert result["date_to"] == date(2026, 1, 1)
 
-    def test_accepts_datetime_values(self):
+    def test_normalizes_naive_datetime_values_to_utc(self):
         start = datetime(
             2026,
             1,
@@ -318,25 +306,19 @@ class TestNormalizeFilters:
             }
         )
 
-        assert result["date_from"] == start
-        assert result["date_to"] == end
-
-    def test_accepts_mixed_date_and_datetime_when_order_is_valid(self):
-        result = service._normalize_filters(
-            {
-                "date_from": date(2026, 1, 1),
-                "date_to": datetime(
-                    2026,
-                    1,
-                    2,
-                    12,
-                    30,
-                ),
-            }
+        assert result["date_from"] == start.replace(
+            tzinfo=timezone.utc
         )
 
-        assert result["date_from"] == date(2026, 1, 1)
-        assert result["date_to"] == datetime(
+        assert result["date_to"] == end.replace(
+            tzinfo=timezone.utc
+        )
+
+        assert result["date_from"].tzinfo is timezone.utc
+        assert result["date_to"].tzinfo is timezone.utc
+
+    def test_accepts_mixed_date_and_datetime_when_order_is_valid(self):
+        end = datetime(
             2026,
             1,
             2,
@@ -344,10 +326,56 @@ class TestNormalizeFilters:
             30,
         )
 
+        result = service._normalize_filters(
+            {
+                "date_from": date(2026, 1, 1),
+                "date_to": end,
+            }
+        )
 
-# ============================================================================
-# Filter serialization
-# ============================================================================
+        assert result["date_from"] == date(2026, 1, 1)
+
+        assert result["date_to"] == end.replace(
+            tzinfo=timezone.utc
+        )
+
+    def test_normalizes_timezone_aware_datetime(self):
+        value = datetime(
+            2026,
+            1,
+            1,
+            10,
+            30,
+            tzinfo=timezone.utc,
+        )
+
+        result = service._normalize_filters(
+            {
+                "date_from": value,
+            }
+        )
+
+        assert result["date_from"] == value
+        assert result["date_from"].tzinfo is timezone.utc
+
+    def test_normalizes_non_utc_aware_datetime(self):
+        value = datetime(
+            2026,
+            1,
+            1,
+            10,
+            30,
+            tzinfo=timezone.utc,
+        )
+
+        result = service._normalize_filters(
+            {
+                "date_from": value,
+            }
+        )
+
+        assert result["date_from"] == value
+        assert result["date_from"].tzinfo is timezone.utc
 
 
 class TestSerializeFilters:
@@ -386,14 +414,10 @@ class TestSerializeFilters:
             result["date_from"],
             str,
         )
+
         assert result["date_from"].startswith(
             "2026-01-01T10:30"
         )
-
-
-# ============================================================================
-# Datetime range
-# ============================================================================
 
 
 class TestApplyDatetimeRange:
@@ -493,11 +517,6 @@ class TestApplyDatetimeRange:
         }
 
 
-# ============================================================================
-# Gatherers / registries
-# ============================================================================
-
-
 class TestGatherers:
     @pytest.mark.parametrize(
         "report_type",
@@ -517,6 +536,7 @@ class TestGatherers:
         report_type,
     ):
         assert report_type in service._GATHERERS
+
         assert callable(
             service._GATHERERS[report_type]
         )
@@ -526,11 +546,6 @@ class TestGatherers:
             ReportType.INVENTORY
             not in service._GATHERERS
         )
-
-
-# ============================================================================
-# Writers
-# ============================================================================
 
 
 class TestCSVWriter:
@@ -642,14 +657,10 @@ class TestWriterRegistry:
         report_format,
     ):
         assert report_format in service._WRITERS
+
         assert callable(
             service._WRITERS[report_format]
         )
-
-
-# ============================================================================
-# Storage
-# ============================================================================
 
 
 class TestSaveReportFile:
@@ -679,7 +690,9 @@ class TestSaveReportFile:
 
         assert storage.exists()
 
-        files = list(storage.iterdir())
+        files = list(
+            storage.iterdir()
+        )
 
         assert len(files) == 1
         assert files[0].read_bytes() == data
@@ -718,6 +731,30 @@ class TestSaveReportFile:
         )
 
         assert result.endswith(extension)
+
+    def test_storage_directory_is_created_when_missing(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+
+        storage = (
+            tmp_path
+            / service.DEFAULT_STORAGE_DIR
+        )
+
+        assert not storage.exists()
+
+        service._save_report_file(
+            clinic_id=10,
+            report_type=ReportType.PATIENTS,
+            report_format=ReportFormat.CSV,
+            content=b"abc",
+        )
+
+        assert storage.exists()
+        assert storage.is_dir()
 
 
 class TestDeleteReportFile:
@@ -767,11 +804,6 @@ class TestDeleteReportFile:
         service._delete_report_file(None)
 
 
-# ============================================================================
-# Authorization helpers
-# ============================================================================
-
-
 class TestAuthorization:
     def test_get_requester_rejects_missing_user(
         self,
@@ -783,9 +815,7 @@ class TestAuthorization:
             lambda *args, **kwargs: None,
         )
 
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service._get_requester(999999)
 
     def test_get_clinic_rejects_missing_clinic(
@@ -798,10 +828,28 @@ class TestAuthorization:
             lambda *args, **kwargs: None,
         )
 
-        with pytest.raises(
-            DomainError,
-        ):
+        with pytest.raises(DomainError):
             service._get_clinic(999999)
+
+    def test_get_requester_rejects_non_positive_id(self):
+        with pytest.raises(ValidationError):
+            service._get_requester(0)
+
+    def test_get_requester_rejects_negative_id(self):
+        with pytest.raises(ValidationError):
+            service._get_requester(-1)
+
+    def test_get_requester_rejects_boolean_id(self):
+        with pytest.raises(ValidationError):
+            service._get_requester(True)
+
+    def test_get_clinic_rejects_non_positive_id(self):
+        with pytest.raises(DomainError):
+            service._get_clinic(0)
+
+    def test_get_clinic_rejects_negative_id(self):
+        with pytest.raises(DomainError):
+            service._get_clinic(-1)
 
     @pytest.mark.parametrize(
         "clinic_id",
@@ -814,9 +862,7 @@ class TestAuthorization:
         self,
         clinic_id,
     ):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=clinic_id,
@@ -833,67 +879,63 @@ class TestAuthorization:
         self,
         requester_user_id,
     ):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=requester_user_id,
                 clinic_id=1,
             )
 
 
-# ============================================================================
-# get_report
-# ============================================================================
-
-
 class TestGetReport:
     def test_rejects_non_positive_report_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.get_report(
                 report_id=0,
                 requester_user_id=1,
             )
 
     def test_rejects_negative_report_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.get_report(
                 report_id=-1,
                 requester_user_id=1,
             )
 
+    def test_rejects_boolean_report_id(self):
+        with pytest.raises(ValidationError):
+            service.get_report(
+                report_id=True,
+                requester_user_id=1,
+            )
+
     def test_rejects_invalid_requester_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.get_report(
                 report_id=1,
                 requester_user_id=0,
             )
 
     def test_rejects_negative_requester_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.get_report(
                 report_id=1,
                 requester_user_id=-1,
             )
 
-    def test_missing_report_raises_domain_error(
+    def test_rejects_boolean_requester_id(self):
+        with pytest.raises(ValidationError):
+            service.get_report(
+                report_id=1,
+                requester_user_id=True,
+            )
+
+    def test_missing_report_raises_not_found_error(
         self,
         monkeypatch,
     ):
         requester = _requester()
 
         def fake_get(model, object_id):
-            # The requester and report intentionally share the same numeric
-            # ID in this test. Distinguish them by model so the second lookup
-            # correctly simulates a missing GeneratedReport.
             if (
                 model is service.User
                 and object_id == requester.id
@@ -908,9 +950,7 @@ class TestGetReport:
             fake_get,
         )
 
-        with pytest.raises(
-            DomainError
-        ):
+        with pytest.raises(NotFoundError):
             service.get_report(
                 report_id=1,
                 requester_user_id=requester.id,
@@ -933,8 +973,6 @@ class TestGetReport:
         )
 
         def fake_get(model, object_id):
-            # Both User and GeneratedReport use ID 1 here, so model identity
-            # must be part of the mock contract.
             if (
                 model is service.User
                 and object_id == requester.id
@@ -962,17 +1000,51 @@ class TestGetReport:
 
         assert result is report
 
+    def test_rejects_cross_clinic_report(
+        self,
+        monkeypatch,
+    ):
+        requester = _requester(
+            user_id=1,
+            clinic_id=10,
+        )
 
-# ============================================================================
-# list_reports validation
-# ============================================================================
+        report = _make_report(
+            report_id=1,
+            clinic_id=20,
+        )
+
+        def fake_get(model, object_id):
+            if (
+                model is service.User
+                and object_id == requester.id
+            ):
+                return requester
+
+            if (
+                model is service.GeneratedReport
+                and object_id == report.id
+            ):
+                return report
+
+            return None
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            fake_get,
+        )
+
+        with pytest.raises(DomainError):
+            service.get_report(
+                report_id=report.id,
+                requester_user_id=requester.id,
+            )
 
 
 class TestListReportsValidation:
     def test_rejects_invalid_page(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -981,9 +1053,7 @@ class TestListReportsValidation:
             )
 
     def test_rejects_negative_page(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -991,10 +1061,17 @@ class TestListReportsValidation:
                 per_page=20,
             )
 
+    def test_rejects_boolean_page(self):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                page=True,
+                per_page=20,
+            )
+
     def test_rejects_invalid_per_page(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1003,9 +1080,7 @@ class TestListReportsValidation:
             )
 
     def test_rejects_excessive_per_page(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1013,37 +1088,38 @@ class TestListReportsValidation:
                 per_page=101,
             )
 
+    def test_rejects_boolean_per_page(self):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                page=1,
+                per_page=True,
+            )
+
     def test_rejects_invalid_requester(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=0,
                 clinic_id=1,
             )
 
     def test_rejects_invalid_clinic(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=0,
             )
 
     def test_rejects_negative_clinic(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=-1,
             )
 
     def test_rejects_reversed_dates(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1060,9 +1136,7 @@ class TestListReportsValidation:
             )
 
     def test_rejects_invalid_generated_by_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1070,19 +1144,23 @@ class TestListReportsValidation:
             )
 
     def test_rejects_negative_generated_by_id(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
                 generated_by_id=-1,
             )
 
+    def test_rejects_boolean_generated_by_id(self):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                generated_by_id=True,
+            )
+
     def test_rejects_invalid_report_type(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1090,9 +1168,7 @@ class TestListReportsValidation:
             )
 
     def test_rejects_invalid_report_format(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1125,11 +1201,6 @@ class TestListReportsValidation:
         ) == ReportType.PATIENTS
 
 
-# ============================================================================
-# generate_report validation
-# ============================================================================
-
-
 class TestGenerateReportValidation:
     @pytest.mark.parametrize(
         "requester_user_id",
@@ -1142,11 +1213,18 @@ class TestGenerateReportValidation:
         self,
         requester_user_id,
     ):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=requester_user_id,
+                clinic_id=1,
+                report_type=ReportType.PATIENTS,
+                report_format=ReportFormat.CSV,
+            )
+
+    def test_rejects_boolean_requester_id(self):
+        with pytest.raises(ValidationError):
+            service.generate_report(
+                requester_user_id=True,
                 clinic_id=1,
                 report_type=ReportType.PATIENTS,
                 report_format=ReportFormat.CSV,
@@ -1163,9 +1241,7 @@ class TestGenerateReportValidation:
         self,
         clinic_id,
     ):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=1,
                 clinic_id=clinic_id,
@@ -1173,10 +1249,17 @@ class TestGenerateReportValidation:
                 report_format=ReportFormat.CSV,
             )
 
+    def test_rejects_boolean_clinic_id(self):
+        with pytest.raises(ValidationError):
+            service.generate_report(
+                requester_user_id=1,
+                clinic_id=True,
+                report_type=ReportType.PATIENTS,
+                report_format=ReportFormat.CSV,
+            )
+
     def test_rejects_invalid_report_type(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1185,9 +1268,7 @@ class TestGenerateReportValidation:
             )
 
     def test_rejects_invalid_report_format(self):
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=1,
                 clinic_id=1,
@@ -1233,11 +1314,6 @@ class TestGenerateReportValidation:
                 report_type=ReportType.INVENTORY,
                 report_format=ReportFormat.CSV,
             )
-
-
-# ============================================================================
-# generate_report orchestration
-# ============================================================================
 
 
 class TestGenerateReportOrchestration:
@@ -1367,30 +1443,11 @@ class TestGenerateReportOrchestration:
 
         assert result is not None
         assert result.clinic_id == clinic.id
-
-        assert (
-            result.generated_by_id
-            == generator.id
-        )
-
-        assert (
-            result.report_type
-            == ReportType.PATIENTS
-        )
-
-        assert (
-            result.report_format
-            == ReportFormat.CSV
-        )
-
-        assert (
-            result.filters["active_only"]
-            is True
-        )
-
-        assert result.file_url.endswith(
-            ".csv"
-        )
+        assert result.generated_by_id == generator.id
+        assert result.report_type == ReportType.PATIENTS
+        assert result.report_format == ReportFormat.CSV
+        assert result.filters["active_only"] is True
+        assert result.file_url.endswith(".csv")
 
     def test_generation_normalizes_filters(
         self,
@@ -1420,9 +1477,6 @@ class TestGenerateReportOrchestration:
         def fake_report(**kwargs):
             captured.update(kwargs)
 
-            # generate_report accesses report.id after construction when
-            # creating the audit log. The mock must therefore satisfy that
-            # production contract.
             return SimpleNamespace(
                 id=99,
                 **kwargs,
@@ -1446,25 +1500,10 @@ class TestGenerateReportOrchestration:
             },
         )
 
-        assert (
-            captured["filters"]["active_only"]
-            is True
-        )
-
-        assert (
-            captured["filters"]["date_from"]
-            == "2026-01-01"
-        )
-
-        assert (
-            captured["filters"]["date_to"]
-            == "2026-01-31"
-        )
-
-        assert (
-            captured["generated_by_id"]
-            == generator.id
-        )
+        assert captured["filters"]["active_only"] is True
+        assert captured["filters"]["date_from"] == "2026-01-01"
+        assert captured["filters"]["date_to"] == "2026-01-31"
+        assert captured["generated_by_id"] == generator.id
 
     def test_generation_rejects_invalid_filters(
         self,
@@ -1476,9 +1515,7 @@ class TestGenerateReportOrchestration:
             )
         )
 
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=requester.id,
                 clinic_id=clinic.id,
@@ -1499,9 +1536,7 @@ class TestGenerateReportOrchestration:
             )
         )
 
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=requester.id,
                 clinic_id=clinic.id,
@@ -1522,9 +1557,7 @@ class TestGenerateReportOrchestration:
             )
         )
 
-        with pytest.raises(
-            ValidationError
-        ):
+        with pytest.raises(ValidationError):
             service.generate_report(
                 requester_user_id=requester.id,
                 clinic_id=clinic.id,
@@ -1598,10 +1631,6 @@ class TestGenerateReportOrchestration:
         captured = {}
 
         def fake_gather(*args, **kwargs):
-            # generate_report passes:
-            #     gatherer(clinic_id, normalized_filters)
-            # positionally. Capture the real production contract rather than
-            # expecting keyword arguments that production does not send.
             captured["clinic_id"] = args[0]
             captured["filters"] = args[1]
             captured["kwargs"] = kwargs
@@ -1642,33 +1671,17 @@ class TestGenerateReportOrchestration:
         )
 
         assert captured
-
-        assert (
-            captured["clinic_id"]
-            == clinic.id
-        )
-
-        assert (
-            captured["filters"]["active_only"]
-            is False
-        )
-
+        assert captured["clinic_id"] == clinic.id
+        assert captured["filters"]["active_only"] is False
         assert (
             captured["filters"]["date_from"]
             == date(2026, 1, 1)
         )
-
         assert (
             captured["filters"]["date_to"]
             == date(2026, 1, 31)
         )
-
         assert captured["kwargs"] == {}
-
-
-# ============================================================================
-# Report format compatibility
-# ============================================================================
 
 
 SUPPORTED_REPORT_TYPES = [
@@ -1720,19 +1733,14 @@ class TestFormatCompatibility:
     ):
         assert (
             report_type
-            in service._SUPPORTED_PDF_TYPES
+            in service.SUPPORTED_PDF_TYPES
         )
 
     def test_inventory_is_marked_unsupported(self):
         assert (
             ReportType.INVENTORY
-            in service._UNSUPPORTED_TYPES
+            in service.UNSUPPORTED_TYPES
         )
-
-
-# ============================================================================
-# Numeric / serialization helpers
-# ============================================================================
 
 
 class TestValueHelpers:
@@ -1771,13 +1779,15 @@ class TestValueHelpers:
             Decimal,
         )
 
-    def test_decimal_value_none_is_invalid_current_contract(
-        self,
-    ):
-        with pytest.raises(
-            InvalidOperation
-        ):
-            service._decimal_value(None)
+    def test_decimal_value_none_returns_zero(self):
+        result = service._decimal_value(None)
+
+        assert isinstance(
+            result,
+            Decimal,
+        )
+
+        assert result == Decimal("0")
 
     def test_iso_date(self):
         result = service._iso(
@@ -1830,11 +1840,6 @@ class TestValueHelpers:
         )
 
 
-# ============================================================================
-# Registry integrity
-# ============================================================================
-
-
 class TestRegistryIntegrity:
     def test_all_csv_types_have_gatherers(self):
         for report_type in (
@@ -1868,7 +1873,7 @@ class TestRegistryIntegrity:
 
     def test_all_pdf_types_have_gatherers(self):
         for report_type in (
-            service._SUPPORTED_PDF_TYPES
+            service.SUPPORTED_PDF_TYPES
         ):
             assert (
                 report_type
@@ -1900,17 +1905,12 @@ class TestRegistryIntegrity:
 
     def test_unsupported_types_are_not_registered(self):
         for report_type in (
-            service._UNSUPPORTED_TYPES
+            service.UNSUPPORTED_TYPES
         ):
             assert (
                 report_type
                 not in service._GATHERERS
             )
-
-
-# ============================================================================
-# File cleanup / atomic storage
-# ============================================================================
 
 
 class TestStorageSafety:
@@ -1932,9 +1932,7 @@ class TestStorageSafety:
             fail_replace,
         )
 
-        with pytest.raises(
-            OSError
-        ):
+        with pytest.raises(OSError):
             service._save_report_file(
                 clinic_id=10,
                 report_type=ReportType.PATIENTS,
@@ -1981,18 +1979,12 @@ class TestStorageSafety:
         )
 
         assert len(files) == 1
-
         assert files[0].suffix == ".csv"
 
         assert not any(
             path.name.endswith(".tmp")
             for path in files
         )
-
-
-# ============================================================================
-# Date semantics
-# ============================================================================
 
 
 class TestDateSemantics:
@@ -2084,11 +2076,6 @@ class TestDateSemantics:
         )
 
 
-# ============================================================================
-# Route/service contract
-# ============================================================================
-
-
 class TestRouteServiceContract:
     def test_filter_schema_values_are_service_compatible(self):
         filters = {
@@ -2137,11 +2124,6 @@ class TestRouteServiceContract:
         }
 
 
-# ============================================================================
-# Storage configuration
-# ============================================================================
-
-
 class TestStorageConfiguration:
     def test_default_storage_directory_is_defined(self):
         assert service.DEFAULT_STORAGE_DIR
@@ -2156,16 +2138,98 @@ class TestStorageConfiguration:
             service.DEFAULT_STORAGE_DIR
         )
 
+    def test_storage_directory_resolver_returns_absolute_path(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
 
-# ============================================================================
-# Final sanity checks
-# ============================================================================
+        storage = Path(
+            service._get_storage_directory()
+        )
+
+        assert storage.is_absolute()
+
+        assert storage == (
+            tmp_path
+            / service.DEFAULT_STORAGE_DIR
+        )
+
+
+class TestPaginationContract:
+    def test_default_page_is_expected(self):
+        assert service.DEFAULT_PAGE == 1
+
+    def test_default_per_page_is_expected(self):
+        assert service.DEFAULT_PER_PAGE == 20
+
+    def test_max_per_page_is_expected(self):
+        assert service.MAX_PER_PAGE == 100
+
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (1, 1),
+            (1, 20),
+            (1, 100),
+            (2, 50),
+            (10, 100),
+        ],
+    )
+    def test_valid_pagination_values(
+        self,
+        page,
+        per_page,
+    ):
+        assert service._validate_pagination(
+            page,
+            per_page,
+        ) == (
+            page,
+            per_page,
+        )
+
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (0, 20),
+            (-1, 20),
+            (1, 0),
+            (1, -1),
+            (1, 101),
+        ],
+    )
+    def test_invalid_pagination_values(
+        self,
+        page,
+        per_page,
+    ):
+        with pytest.raises(ValidationError):
+            service._validate_pagination(
+                page,
+                per_page,
+            )
+
+    def test_boolean_page_is_rejected(self):
+        with pytest.raises(ValidationError):
+            service._validate_pagination(
+                True,
+                20,
+            )
+
+    def test_boolean_per_page_is_rejected(self):
+        with pytest.raises(ValidationError):
+            service._validate_pagination(
+                1,
+                True,
+            )
 
 
 def test_supported_report_types_are_not_empty():
     assert service.SUPPORTED_CSV_TYPES
     assert service.SUPPORTED_XLSX_TYPES
-    assert service._SUPPORTED_PDF_TYPES
+    assert service.SUPPORTED_PDF_TYPES
 
 
 def test_supported_type_sets_are_consistent():
@@ -2176,14 +2240,14 @@ def test_supported_type_sets_are_consistent():
 
     assert (
         service.SUPPORTED_CSV_TYPES
-        == service._SUPPORTED_PDF_TYPES
+        == service.SUPPORTED_PDF_TYPES
     )
 
 
 def test_unsupported_inventory_is_explicit():
     assert (
         ReportType.INVENTORY
-        in service._UNSUPPORTED_TYPES
+        in service.UNSUPPORTED_TYPES
     )
 
     assert (

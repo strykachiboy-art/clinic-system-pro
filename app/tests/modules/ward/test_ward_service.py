@@ -24,11 +24,6 @@ from app.modules.ward.models.ward_model import Ward
 from app.modules.ward.services import ward_service
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def _future_datetime(minutes: int = 30) -> datetime:
     return datetime.now(timezone.utc) + timedelta(
         minutes=minutes,
@@ -183,9 +178,7 @@ def _create_admission(
     )
 
 
-# ============================================================================
-# DATETIME HELPERS
-# ============================================================================
+# Datetime helpers
 
 
 def test_utcnow_returns_timezone_aware_datetime():
@@ -210,6 +203,28 @@ def test_normalize_db_datetime_converts_aware_datetime_to_naive_utc():
         12,
         30,
         tzinfo=timezone.utc,
+    )
+
+    result = ward_service._normalize_db_datetime(value)
+
+    assert result.tzinfo is None
+    assert result == datetime(
+        2026,
+        9,
+        9,
+        12,
+        30,
+    )
+
+
+def test_normalize_db_datetime_converts_non_utc_aware_datetime():
+    value = datetime(
+        2026,
+        9,
+        9,
+        14,
+        30,
+        tzinfo=timezone(timedelta(hours=2)),
     )
 
     result = ward_service._normalize_db_datetime(value)
@@ -256,9 +271,7 @@ def test_normalize_db_datetime_rejects_invalid_value():
         )
 
 
-# ============================================================================
-# GENERAL VALIDATION
-# ============================================================================
+# General validation
 
 
 @pytest.mark.parametrize(
@@ -268,6 +281,8 @@ def test_normalize_db_datetime_rejects_invalid_value():
         0,
         -1,
         "1",
+        True,
+        False,
     ],
 )
 def test_validate_positive_id_rejects_invalid_values(
@@ -290,6 +305,76 @@ def test_validate_positive_id_accepts_positive_integer():
             "test_id",
         )
         == 10
+    )
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        0,
+        -1,
+        True,
+        "1",
+        None,
+    ],
+)
+def test_validate_pagination_rejects_invalid_page(
+    page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="page",
+    ):
+        ward_service._validate_pagination(
+            page=page,
+            per_page=50,
+        )
+
+
+@pytest.mark.parametrize(
+    "per_page",
+    [
+        0,
+        -1,
+        True,
+        "50",
+        None,
+        ward_service.MAX_PER_PAGE + 1,
+    ],
+)
+def test_validate_pagination_rejects_invalid_per_page(
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+        match="per_page",
+    ):
+        ward_service._validate_pagination(
+            page=1,
+            per_page=per_page,
+        )
+
+
+def test_validate_pagination_accepts_defaults():
+    assert (
+        ward_service._validate_pagination()
+        == (
+            ward_service.DEFAULT_PAGE,
+            ward_service.DEFAULT_PER_PAGE,
+        )
+    )
+
+
+def test_validate_pagination_accepts_max_per_page():
+    assert (
+        ward_service._validate_pagination(
+            page=1,
+            per_page=ward_service.MAX_PER_PAGE,
+        )
+        == (
+            1,
+            ward_service.MAX_PER_PAGE,
+        )
     )
 
 
@@ -356,6 +441,8 @@ def test_validate_ward_type_rejects_invalid_value():
     [
         None,
         -1,
+        True,
+        False,
     ],
 )
 def test_validate_capacity_rejects_invalid_value(
@@ -387,6 +474,14 @@ def test_validate_capacity_accepts_zero():
         )
         == 0
     )
+
+
+def test_validate_bed_number_rejects_non_string():
+    with pytest.raises(
+        ValidationError,
+        match="bed_number must be a string",
+    ):
+        ward_service._validate_bed_number(123)
 
 
 def test_validate_bed_number_normalizes_text():
@@ -433,6 +528,14 @@ def test_validate_reason_normalizes_blank_to_none(
     )
 
 
+def test_validate_reason_rejects_non_string():
+    with pytest.raises(
+        ValidationError,
+        match="reason must be a string",
+    ):
+        ward_service._validate_reason(123)
+
+
 def test_validate_reason_strips_text():
     assert (
         ward_service._validate_reason(
@@ -452,9 +555,63 @@ def test_validate_reason_rejects_too_long():
         )
 
 
-# ============================================================================
-# WARD LOOKUP / LIST
-# ============================================================================
+def test_validate_bed_status_accepts_enum():
+    assert (
+        ward_service._validate_bed_status(
+            BedStatus.AVAILABLE
+        )
+        == BedStatus.AVAILABLE
+    )
+
+
+def test_validate_bed_status_accepts_value():
+    assert (
+        ward_service._validate_bed_status(
+            BedStatus.AVAILABLE.value
+        )
+        == BedStatus.AVAILABLE
+    )
+
+
+def test_validate_bed_status_rejects_invalid_value():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid bed status",
+    ):
+        ward_service._validate_bed_status(
+            "NOT_A_BED_STATUS"
+        )
+
+
+def test_validate_reservation_status_accepts_enum():
+    assert (
+        ward_service._validate_reservation_status(
+            ReservationStatus.PENDING
+        )
+        == ReservationStatus.PENDING
+    )
+
+
+def test_validate_reservation_status_accepts_value():
+    assert (
+        ward_service._validate_reservation_status(
+            ReservationStatus.PENDING.value
+        )
+        == ReservationStatus.PENDING
+    )
+
+
+def test_validate_reservation_status_rejects_invalid_value():
+    with pytest.raises(
+        ValidationError,
+        match="Invalid reservation status",
+    ):
+        ward_service._validate_reservation_status(
+            "NOT_A_RESERVATION_STATUS"
+        )
+
+
+# Ward lookup / list
 
 
 def test_get_ward_returns_clinic_owned_ward(
@@ -510,6 +667,34 @@ def test_get_ward_missing_raises_not_found(
         )
 
 
+def test_list_wards_returns_paginated_result(
+    clinic,
+):
+    first = _create_ward(
+        clinic,
+        name="Alpha Ward",
+    )
+
+    second = _create_ward(
+        clinic,
+        name="Beta Ward",
+    )
+
+    result = ward_service.list_wards(
+        clinic.id,
+    )
+
+    assert set(item.id for item in result["items"]) == {
+        first.id,
+        second.id,
+    }
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["per_page"] == (
+        ward_service.DEFAULT_PER_PAGE
+    )
+
+
 def test_list_wards_returns_only_clinic_wards(
     clinic,
     make_clinic,
@@ -526,14 +711,18 @@ def test_list_wards_returns_only_clinic_wards(
         name="Foreign Ward",
     )
 
-    results = ward_service.list_wards(
+    result = ward_service.list_wards(
         clinic.id,
     )
 
-    ids = {ward.id for ward in results}
+    ids = {
+        ward.id
+        for ward in result["items"]
+    }
 
     assert local.id in ids
     assert foreign.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_wards_filters_by_type(
@@ -557,15 +746,19 @@ def test_list_wards_filters_by_type(
         ward_type=other_type,
     )
 
-    results = ward_service.list_wards(
+    result = ward_service.list_wards(
         clinic.id,
         ward_type=other_type,
     )
 
-    ids = {ward.id for ward in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert specialty.id in ids
     assert general.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_wards_accepts_string_ward_type(
@@ -577,14 +770,18 @@ def test_list_wards_accepts_string_ward_type(
         ward_type=WardType.GENERAL,
     )
 
-    results = ward_service.list_wards(
+    result = ward_service.list_wards(
         clinic.id,
         ward_type=WardType.GENERAL.value,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert ward.id in ids
+    assert result["total"] == 1
 
 
 def test_list_wards_rejects_invalid_ward_type(
@@ -600,9 +797,61 @@ def test_list_wards_rejects_invalid_ward_type(
         )
 
 
-# ============================================================================
-# CREATE WARD
-# ============================================================================
+def test_list_wards_supports_custom_pagination(
+    clinic,
+):
+    wards = [
+        _create_ward(
+            clinic,
+            name=f"Ward {index:02d}",
+        )
+        for index in range(1, 6)
+    ]
+
+    result = ward_service.list_wards(
+        clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["total"] == 5
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+
+    returned_ids = [
+        ward.id
+        for ward in result["items"]
+    ]
+
+    expected_ids = [
+        wards[2].id,
+        wards[3].id,
+    ]
+
+    assert returned_ids == expected_ids
+
+
+def test_list_wards_supports_empty_last_page(
+    clinic,
+):
+    _create_ward(
+        clinic,
+        name="Only Ward",
+    )
+
+    result = ward_service.list_wards(
+        clinic.id,
+        page=2,
+        per_page=1,
+    )
+
+    assert result["items"] == []
+    assert result["total"] == 1
+    assert result["page"] == 2
+    assert result["per_page"] == 1
+
+
+# Create ward
 
 
 def test_create_ward_success(
@@ -658,6 +907,21 @@ def test_create_ward_defaults_none_type_to_general(
     )
 
     assert ward.ward_type == WardType.GENERAL
+
+
+def test_create_ward_rejects_non_string_name(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Ward name must be a string",
+    ):
+        ward_service.create_ward(
+            clinic_id=clinic.id,
+            name=123,
+            ward_type=WardType.GENERAL,
+            capacity=5,
+        )
 
 
 def test_create_ward_rejects_blank_name(
@@ -773,9 +1037,7 @@ def test_create_ward_rejects_invalid_actor_id(
         )
 
 
-# ============================================================================
-# UPDATE WARD
-# ============================================================================
+# Update ward
 
 
 def test_update_ward_updates_allowed_fields(
@@ -826,6 +1088,37 @@ def test_update_ward_updates_allowed_fields(
     assert kwargs["entity_id"] == ward.id
     assert kwargs["old_value"]["name"] == "Old Ward"
     assert kwargs["new_value"]["name"] == "New Ward"
+
+
+def test_update_ward_rejects_empty_update(
+    clinic,
+):
+    ward = _create_ward(clinic)
+
+    with pytest.raises(
+        ValidationError,
+        match="At least one ward field",
+    ):
+        ward_service.update_ward(
+            ward.id,
+            clinic.id,
+        )
+
+
+def test_update_ward_rejects_unknown_field(
+    clinic,
+):
+    ward = _create_ward(clinic)
+
+    with pytest.raises(
+        ValidationError,
+        match="Unsupported ward fields",
+    ):
+        ward_service.update_ward(
+            ward.id,
+            clinic.id,
+            invalid_field="value",
+        )
 
 
 def test_update_ward_rejects_blank_name(
@@ -973,9 +1266,7 @@ def test_update_ward_rejects_inactive_clinic(
         )
 
 
-# ============================================================================
-# WARD OCCUPANCY
-# ============================================================================
+# Ward occupancy
 
 
 def test_get_ward_occupancy_reports_bed_states(
@@ -1066,9 +1357,7 @@ def test_get_ward_occupancy_reports_bed_states(
     assert result["maintenance"] == 1
 
 
-# ============================================================================
-# BED LOOKUP / LIST
-# ============================================================================
+# Bed lookup / list
 
 
 def test_get_bed_returns_clinic_owned_bed(
@@ -1113,7 +1402,7 @@ def test_get_bed_missing_raises_not_found(
         )
 
 
-def test_list_beds_returns_ward_beds(
+def test_list_beds_returns_paginated_ordered_result(
     clinic,
 ):
     ward = _create_ward(
@@ -1134,15 +1423,90 @@ def test_list_beds_returns_ward_beds(
         clinic.id,
     )
 
-    results = ward_service.list_beds(
+    result = ward_service.list_beds(
         ward.id,
         clinic.id,
     )
 
-    assert [bed.id for bed in results] == [
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["per_page"] == (
+        ward_service.DEFAULT_PER_PAGE
+    )
+
+    assert [
+        bed.id
+        for bed in result["items"]
+    ] == [
         second.id,
         first.id,
     ]
+
+
+def test_list_beds_custom_pagination(
+    clinic,
+):
+    ward = _create_ward(
+        clinic,
+        name="Paged Bed Ward",
+        capacity=5,
+    )
+
+    beds = [
+        ward_service.add_bed(
+            ward.id,
+            f"B-{index:03d}",
+            clinic.id,
+        )
+        for index in range(1, 6)
+    ]
+
+    result = ward_service.list_beds(
+        ward.id,
+        clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["total"] == 5
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+
+    assert [
+        bed.id
+        for bed in result["items"]
+    ] == [
+        beds[2].id,
+        beds[3].id,
+    ]
+
+
+def test_list_beds_empty_page_returns_empty_items(
+    clinic,
+):
+    ward = _create_ward(
+        clinic,
+        name="Empty Page Ward",
+        capacity=1,
+    )
+
+    ward_service.add_bed(
+        ward.id,
+        "B-001",
+        clinic.id,
+    )
+
+    result = ward_service.list_beds(
+        ward.id,
+        clinic.id,
+        page=2,
+        per_page=1,
+    )
+
+    assert result["items"] == []
+    assert result["total"] == 1
+    assert result["page"] == 2
+    assert result["per_page"] == 1
 
 
 def test_list_beds_filters_by_status(
@@ -1172,16 +1536,20 @@ def test_list_beds_filters_by_status(
         clinic.id,
     )
 
-    results = ward_service.list_beds(
+    result = ward_service.list_beds(
         ward.id,
         clinic.id,
         status=BedStatus.MAINTENANCE,
     )
 
-    ids = {bed.id for bed in results}
+    ids = {
+        bed.id
+        for bed in result["items"]
+    }
 
     assert maintenance.id in ids
     assert available.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_beds_accepts_string_status(
@@ -1189,13 +1557,16 @@ def test_list_beds_accepts_string_status(
 ):
     ward, bed = _create_bed(clinic)
 
-    results = ward_service.list_beds(
+    result = ward_service.list_beds(
         ward.id,
         clinic.id,
         status=BedStatus.AVAILABLE.value,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert bed.id in ids
 
@@ -1239,9 +1610,7 @@ def test_list_beds_rejects_foreign_ward(
         )
 
 
-# ============================================================================
-# ADD BED
-# ============================================================================
+# Add bed
 
 
 def test_add_bed_success(
@@ -1406,9 +1775,7 @@ def test_add_bed_rejects_inactive_clinic(
         )
 
 
-# ============================================================================
-# BED MAINTENANCE
-# ============================================================================
+# Bed maintenance
 
 
 def test_set_bed_maintenance_places_available_bed_into_maintenance(
@@ -1467,6 +1834,26 @@ def test_set_bed_maintenance_restores_available_bed(
     assert result.status == BedStatus.AVAILABLE
 
 
+def test_set_bed_maintenance_is_idempotent_when_already_in_maintenance(
+    clinic,
+):
+    _, bed = _create_bed(clinic)
+
+    ward_service.set_bed_maintenance(
+        bed.id,
+        True,
+        clinic.id,
+    )
+
+    result = ward_service.set_bed_maintenance(
+        bed.id,
+        True,
+        clinic.id,
+    )
+
+    assert result.status == BedStatus.MAINTENANCE
+
+
 def test_set_bed_maintenance_rejects_non_boolean(
     clinic,
 ):
@@ -1488,7 +1875,13 @@ def test_set_bed_maintenance_rejects_occupied_bed(
     make_patient,
     make_staff,
 ):
-    _, bed, _, _, _ = _create_admission(
+    (
+        _,
+        bed,
+        _,
+        _,
+        _,
+    ) = _create_admission(
         clinic,
         make_patient,
         make_staff,
@@ -1549,9 +1942,7 @@ def test_set_bed_maintenance_rejects_restore_when_not_in_maintenance(
         )
 
 
-# ============================================================================
-# BED RESERVATIONS
-# ============================================================================
+# Bed reservations
 
 
 def test_get_bed_reservation_returns_clinic_owned_reservation(
@@ -1606,6 +1997,38 @@ def test_get_bed_reservation_enforces_clinic_isolation(
         )
 
 
+def test_list_bed_reservations_returns_paginated_result(
+    clinic,
+    make_patient,
+    make_staff,
+):
+    (
+        _,
+        _,
+        _,
+        _,
+        reservation,
+    ) = _create_reservation(
+        clinic,
+        make_patient,
+        make_staff,
+    )
+
+    result = ward_service.list_bed_reservations(
+        clinic_id=clinic.id,
+    )
+
+    assert result["total"] == 1
+    assert result["page"] == 1
+    assert result["per_page"] == (
+        ward_service.DEFAULT_PER_PAGE
+    )
+    assert [
+        item.id
+        for item in result["items"]
+    ] == [reservation.id]
+
+
 def test_list_bed_reservations_filters_status(
     clinic,
     make_patient,
@@ -1653,15 +2076,19 @@ def test_list_bed_reservations_filters_status(
         actor_user_id=actor.user_id,
     )
 
-    results = ward_service.list_bed_reservations(
+    result = ward_service.list_bed_reservations(
         clinic_id=clinic.id,
         status=ReservationStatus.PENDING,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert pending.id in ids
     assert cancelled.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_bed_reservations_filters_patient(
@@ -1710,15 +2137,19 @@ def test_list_bed_reservations_filters_patient(
         actor_user_id=actor.user_id,
     )
 
-    results = ward_service.list_bed_reservations(
+    result = ward_service.list_bed_reservations(
         clinic_id=clinic.id,
         patient_id=patient_a.id,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert ids == {first.id}
     assert second.id not in ids
+    assert result["total"] == 1
 
 
 def test_list_bed_reservations_filters_bed(
@@ -1767,15 +2198,103 @@ def test_list_bed_reservations_filters_bed(
         actor_user_id=actor.user_id,
     )
 
-    results = ward_service.list_bed_reservations(
+    result = ward_service.list_bed_reservations(
         clinic_id=clinic.id,
         bed_id=bed_a.id,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert ids == {first.id}
     assert second.id not in ids
+    assert result["total"] == 1
+
+
+def test_list_bed_reservations_rejects_invalid_patient_id(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="patient_id",
+    ):
+        ward_service.list_bed_reservations(
+            clinic_id=clinic.id,
+            patient_id=0,
+        )
+
+
+def test_list_bed_reservations_rejects_invalid_bed_id(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="bed_id",
+    ):
+        ward_service.list_bed_reservations(
+            clinic_id=clinic.id,
+            bed_id=0,
+        )
+
+
+def test_list_bed_reservations_rejects_invalid_status(
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid reservation status",
+    ):
+        ward_service.list_bed_reservations(
+            clinic_id=clinic.id,
+            status="INVALID_STATUS",
+        )
+
+
+def test_list_bed_reservations_supports_pagination(
+    clinic,
+    make_patient,
+    make_staff,
+):
+    actor = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    reservations = []
+
+    for index in range(1, 4):
+        patient = make_patient(
+            clinic=clinic,
+        )
+
+        _, bed = _create_bed(
+            clinic,
+            name=f"Reservation Ward {index}",
+            bed_number=f"B-{index:03d}",
+        )
+
+        reservation = ward_service.reserve_bed(
+            patient_id=patient.id,
+            bed_id=bed.id,
+            reserved_by_id=actor.id,
+            clinic_id=clinic.id,
+            actor_user_id=actor.user_id,
+        )
+
+        reservations.append(reservation)
+
+    result = ward_service.list_bed_reservations(
+        clinic_id=clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["total"] == 3
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert len(result["items"]) == 1
 
 
 def test_get_active_bed_reservation_for_patient_returns_pending_reservation(
@@ -1849,7 +2368,7 @@ def test_reserve_bed_success(
         clinic=clinic,
     )
 
-    ward, bed = _create_bed(
+    _, bed = _create_bed(
         clinic,
         name="Reservation Ward",
         bed_number="B-001",
@@ -1947,9 +2466,8 @@ def test_reserve_bed_rejects_expired_expiration(
             bed_id=bed.id,
             reserved_by_id=actor.id,
             clinic_id=clinic.id,
-            expires_at=_naive_utc_now() - timedelta(
-                minutes=1
-            ),
+            expires_at=_naive_utc_now()
+            - timedelta(minutes=1),
             actor_user_id=actor.user_id,
         )
 
@@ -2528,9 +3046,7 @@ def test_expire_due_bed_reservations_can_scan_all_clinics(
     )
 
 
-# ============================================================================
-# ADMISSION LOOKUPS
-# ============================================================================
+# Admission lookups
 
 
 def test_get_admission_returns_clinic_owned_admission(
@@ -2654,7 +3170,7 @@ def test_get_current_bed_returns_none_without_active_admission(
     assert result is None
 
 
-def test_list_admissions_for_patient_returns_patient_history(
+def test_list_admissions_for_patient_returns_paginated_history(
     clinic,
     make_patient,
     make_staff,
@@ -2692,20 +3208,126 @@ def test_list_admissions_for_patient_returns_patient_history(
         actor_user_id=actor.user_id,
     )
 
-    results = ward_service.list_admissions_for_patient(
+    result = ward_service.list_admissions_for_patient(
         patient.id,
         clinic.id,
     )
 
-    ids = {item.id for item in results}
+    ids = {
+        item.id
+        for item in result["items"]
+    }
 
     assert first.id in ids
     assert second.id in ids
+    assert result["total"] == 2
 
 
-# ============================================================================
-# ADMIT PATIENT
-# ============================================================================
+def test_list_admissions_for_patient_orders_newest_first(
+    clinic,
+    make_patient,
+    make_staff,
+):
+    (
+        _,
+        _,
+        patient,
+        actor,
+        first,
+    ) = _create_admission(
+        clinic,
+        make_patient,
+        make_staff,
+        bed_number="B-001",
+    )
+
+    ward_service.discharge_patient(
+        first.id,
+        clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    _, bed2 = _create_bed(
+        clinic,
+        name="Second Admission Ward",
+        bed_number="B-002",
+    )
+
+    second = ward_service.admit_patient(
+        patient.id,
+        bed2.id,
+        actor.id,
+        clinic.id,
+        actor_user_id=actor.user_id,
+    )
+
+    result = ward_service.list_admissions_for_patient(
+        patient.id,
+        clinic.id,
+    )
+
+    assert [
+        item.id
+        for item in result["items"]
+    ] == [
+        second.id,
+        first.id,
+    ]
+
+
+def test_list_admissions_for_patient_supports_pagination(
+    clinic,
+    make_patient,
+    make_staff,
+):
+    actor = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    patient = make_patient(
+        clinic=clinic,
+    )
+
+    admissions = []
+
+    for index in range(1, 4):
+        ward, bed = _create_bed(
+            clinic,
+            name=f"Admission Ward {index}",
+            bed_number=f"B-{index:03d}",
+        )
+
+        admission = ward_service.admit_patient(
+            patient_id=patient.id,
+            bed_id=bed.id,
+            admitted_by_id=actor.id,
+            clinic_id=clinic.id,
+            actor_user_id=actor.user_id,
+        )
+
+        admissions.append(admission)
+
+        ward_service.discharge_patient(
+            admission.id,
+            clinic.id,
+            actor_user_id=actor.user_id,
+        )
+
+    result = ward_service.list_admissions_for_patient(
+        patient.id,
+        clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["total"] == 3
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert len(result["items"]) == 1
+
+
+# Admit patient
 
 
 def test_admit_patient_success(
@@ -2723,7 +3345,7 @@ def test_admit_patient_success(
         clinic=clinic,
     )
 
-    ward, bed = _create_bed(
+    _, bed = _create_bed(
         clinic,
         name="Admission Ward",
         bed_number="B-001",
@@ -2931,9 +3553,7 @@ def test_admit_patient_rejects_inactive_admitting_staff(
         )
 
 
-# ============================================================================
-# ADMISSION FROM RESERVATION
-# ============================================================================
+# Admission from reservation
 
 
 def test_admit_patient_from_reservation_success(
@@ -3152,9 +3772,7 @@ def test_fulfill_bed_reservation_alias_matches_admission_function():
     )
 
 
-# ============================================================================
-# TRANSFER
-# ============================================================================
+# Transfer
 
 
 def test_transfer_bed_success(
@@ -3368,9 +3986,7 @@ def test_transfer_bed_rejects_foreign_destination(
         )
 
 
-# ============================================================================
-# DISCHARGE
-# ============================================================================
+# Discharge
 
 
 def test_discharge_patient_success(
@@ -3519,9 +4135,7 @@ def test_discharge_patient_rejects_foreign_admission(
         )
 
 
-# ============================================================================
-# CROSS-CUTTING CLINIC ENFORCEMENT
-# ============================================================================
+# Cross-cutting clinic enforcement
 
 
 def test_list_wards_rejects_invalid_clinic_id():

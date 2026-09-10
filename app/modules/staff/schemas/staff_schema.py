@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -16,23 +18,56 @@ from app.core.enums.staff_enums import (
 )
 
 
-# ============================================================================
-# STAFF
-# ============================================================================
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 50
+MAX_PER_PAGE = 500
+
+
+class PaginationSchema(BaseModel):
+    page: int = Field(
+        default=DEFAULT_PAGE,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        default=DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class PaginationResponseSchema(BaseModel):
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=MAX_PER_PAGE,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class StaffCreateSchema(BaseModel):
-    """
-    Create a staff profile.
-
-    clinic_id is intentionally excluded.
-    The clinic comes from the authenticated user's account.
-    """
+    """Create a staff profile."""
 
     user_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Optional user account to link to the staff profile",
     )
 
     first_name: str = Field(
@@ -64,7 +99,10 @@ class StaffCreateSchema(BaseModel):
 
     hired_at: Optional[date] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class StaffUpdateSchema(BaseModel):
@@ -97,16 +135,22 @@ class StaffUpdateSchema(BaseModel):
 
     hired_at: Optional[date] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class StaffStatusUpdateSchema(BaseModel):
     status: StaffStatus
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
-class StaffListQuerySchema(BaseModel):
+class StaffListQuerySchema(PaginationSchema):
     status: Optional[StaffStatus] = None
 
     search: Optional[str] = Field(
@@ -114,27 +158,20 @@ class StaffListQuerySchema(BaseModel):
         max_length=100,
     )
 
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ============================================================================
-# LEAVE
-# ============================================================================
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class LeaveRequestCreateSchema(BaseModel):
-    """
-    Create a leave request for the authenticated staff member.
+    """Create a leave request for the authenticated staff member."""
 
-    staff_id is intentionally excluded.
-    The staff member comes from the authenticated user.
-    """
+    leave_type: LeaveType
 
-    leave_type: LeaveType = Field(...)
+    start_date: date
 
-    start_date: date = Field(...)
-
-    end_date: date = Field(...)
+    end_date: date
 
     reason: Optional[str] = Field(
         default=None,
@@ -150,42 +187,36 @@ class LeaveRequestCreateSchema(BaseModel):
 
         return self
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class LeaveReviewSchema(BaseModel):
-    """
-    Approve a leave request.
+    """Approve a leave request."""
 
-    The reviewer is always the authenticated user.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class LeaveRejectSchema(BaseModel):
-    """
-    Reject a leave request.
-
-    The reviewer is always the authenticated user.
-    """
+    """Reject a leave request."""
 
     reason: Optional[str] = Field(
         default=None,
         max_length=2000,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
-class LeaveListQuerySchema(BaseModel):
-    """
-    Admins may filter by any staff member.
-
-    Non-admins are restricted by the route to their own
-    staff record.
-    """
-
+class LeaveListQuerySchema(PaginationSchema):
     staff_id: Optional[int] = Field(
         default=None,
         gt=0,
@@ -193,12 +224,10 @@ class LeaveListQuerySchema(BaseModel):
 
     status: Optional[LeaveStatus] = None
 
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ============================================================================
-# PAYROLL
-# ============================================================================
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class PayrollCreateSchema(BaseModel):
@@ -207,9 +236,9 @@ class PayrollCreateSchema(BaseModel):
         gt=0,
     )
 
-    pay_period_start: date = Field(...)
+    pay_period_start: date
 
-    pay_period_end: date = Field(...)
+    pay_period_end: date
 
     base_salary: Decimal = Field(
         ...,
@@ -228,6 +257,11 @@ class PayrollCreateSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_period(self):
+        if isinstance(self.staff_id, bool):
+            raise ValueError(
+                "Staff ID must be a positive integer"
+            )
+
         if self.pay_period_end < self.pay_period_start:
             raise ValueError(
                 "Pay period end cannot be before pay period start"
@@ -246,13 +280,16 @@ class PayrollCreateSchema(BaseModel):
 
         return self
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class PayrollGenerateSchema(BaseModel):
-    pay_period_start: date = Field(...)
+    pay_period_start: date
 
-    pay_period_end: date = Field(...)
+    pay_period_end: date
 
     salary_lookup: dict[int, Decimal] = Field(
         ...,
@@ -267,7 +304,7 @@ class PayrollGenerateSchema(BaseModel):
             )
 
         for staff_id, salary in self.salary_lookup.items():
-            if staff_id <= 0:
+            if isinstance(staff_id, bool) or staff_id <= 0:
                 raise ValueError(
                     "Salary lookup contains an invalid staff ID"
                 )
@@ -279,13 +316,52 @@ class PayrollGenerateSchema(BaseModel):
 
         return self
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
-class PayrollListQuerySchema(BaseModel):
+class PayrollListQuerySchema(PaginationSchema):
     staff_id: Optional[int] = Field(
         default=None,
         gt=0,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+class StaffListResponseSchema(
+    PaginationResponseSchema,
+):
+    items: list[StaffCreateSchema]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+class LeaveListResponseSchema(
+    PaginationResponseSchema,
+):
+    items: list[LeaveRequestCreateSchema]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+class PayrollListResponseSchema(
+    PaginationResponseSchema,
+):
+    items: list[PayrollCreateSchema]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )

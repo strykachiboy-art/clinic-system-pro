@@ -7,6 +7,7 @@ import pytest
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.prescription_enums import PrescriptionStatus
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -23,25 +24,17 @@ import app.modules.pharmacy.services.pharmacy_service as service
 
 @pytest.fixture()
 def pharmacy_service(monkeypatch):
-    """
-    Return the Pharmacy service module with audit logging mocked.
-
-    Business behavior remains real and database-backed.
-    """
     monkeypatch.setattr(
         service,
         "create_audit_log",
         Mock(),
     )
+
     return service
 
 
 @pytest.fixture()
 def active_clinic(clinic):
-    """
-    Ensure the standard clinic fixture is active when the model supports
-    an is_active attribute.
-    """
     if hasattr(clinic, "is_active"):
         clinic.is_active = True
 
@@ -57,13 +50,6 @@ def _future_datetime(days=30):
 
 
 def _make_second_clinic(db, source_clinic):
-    """
-    Create a second valid Clinic without assuming a specific Clinic
-    constructor signature.
-
-    Copies mapped scalar columns from the existing clinic fixture while
-    excluding primary-key and timestamp-managed fields.
-    """
     clinic_model = type(source_clinic)
     mapper = clinic_model.__mapper__
 
@@ -79,7 +65,11 @@ def _make_second_clinic(db, source_clinic):
         if column.name in excluded:
             continue
 
-        value = getattr(source_clinic, column.name, None)
+        value = getattr(
+            source_clinic,
+            column.name,
+            None,
+        )
 
         if value is not None:
             values[column.name] = value
@@ -90,7 +80,11 @@ def _make_second_clinic(db, source_clinic):
         )
 
     if hasattr(clinic_model, "code"):
-        source_code = getattr(source_clinic, "code", None)
+        source_code = getattr(
+            source_clinic,
+            "code",
+            None,
+        )
 
         if source_code:
             values["code"] = (
@@ -98,16 +92,25 @@ def _make_second_clinic(db, source_clinic):
             )
 
     if hasattr(clinic_model, "slug"):
-        source_slug = getattr(source_clinic, "slug", None)
+        source_slug = getattr(
+            source_clinic,
+            "slug",
+            None,
+        )
 
         if source_slug:
             values["slug"] = (
                 f"{source_slug}-pharmacy-{source_clinic.id}"
             )
 
-    other_clinic = clinic_model(**values)
+    other_clinic = clinic_model(
+        **values
+    )
 
-    db.session.add(other_clinic)
+    db.session.add(
+        other_clinic
+    )
+
     db.session.flush()
 
     return other_clinic
@@ -154,7 +157,6 @@ def test_get_drug_rejects_drug_from_another_clinic(
     pharmacy_service,
     make_drug,
     clinic,
-    db,
 ):
     drug = make_drug(clinic)
 
@@ -184,6 +186,33 @@ def test_get_drug_not_found(
         )
 
 
+def test_get_drug_rejects_invalid_drug_id(
+    pharmacy_service,
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="positive integer",
+    ):
+        pharmacy_service.get_drug(
+            0,
+            clinic.id,
+        )
+
+
+def test_get_drug_rejects_invalid_clinic_id(
+    pharmacy_service,
+):
+    with pytest.raises(
+        ValidationError,
+        match="positive integer",
+    ):
+        pharmacy_service.get_drug(
+            1,
+            0,
+        )
+
+
 def test_list_drugs_returns_global_and_clinic_drugs(
     pharmacy_service,
     make_drug,
@@ -192,14 +221,21 @@ def test_list_drugs_returns_global_and_clinic_drugs(
     global_drug = make_drug(None)
     clinic_drug = make_drug(clinic)
 
-    results = pharmacy_service.list_drugs(
+    result = pharmacy_service.list_drugs(
         clinic.id,
     )
 
-    ids = {drug.id for drug in results}
+    assert set(
+        drug.id
+        for drug in result["items"]
+    ) >= {
+        global_drug.id,
+        clinic_drug.id,
+    }
 
-    assert global_drug.id in ids
-    assert clinic_drug.id in ids
+    assert result["total"] >= 2
+    assert result["page"] == 1
+    assert result["per_page"] == 50
 
 
 def test_list_drugs_excludes_inactive_by_default(
@@ -217,11 +253,14 @@ def test_list_drugs_excludes_inactive_by_default(
         is_active=False,
     )
 
-    results = pharmacy_service.list_drugs(
+    result = pharmacy_service.list_drugs(
         clinic.id,
     )
 
-    ids = {drug.id for drug in results}
+    ids = {
+        drug.id
+        for drug in result["items"]
+    }
 
     assert active_drug.id in ids
     assert inactive_drug.id not in ids
@@ -237,14 +276,116 @@ def test_list_drugs_can_include_inactive(
         is_active=False,
     )
 
-    results = pharmacy_service.list_drugs(
+    result = pharmacy_service.list_drugs(
         clinic.id,
         include_inactive=True,
     )
 
-    ids = {drug.id for drug in results}
+    ids = {
+        drug.id
+        for drug in result["items"]
+    }
 
     assert inactive_drug.id in ids
+
+
+def test_list_drugs_paginates(
+    pharmacy_service,
+    make_drug,
+    clinic,
+):
+    drugs = [
+        make_drug(
+            clinic,
+            name=f"Drug {index:03d}",
+        )
+        for index in range(1, 6)
+    ]
+
+    result = pharmacy_service.list_drugs(
+        clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert result["total"] >= 5
+    assert len(result["items"]) == 2
+
+    returned_ids = {
+        drug.id
+        for drug in result["items"]
+    }
+
+    assert returned_ids.isdisjoint(
+        {
+            drugs[0].id,
+            drugs[1].id,
+        }
+    )
+
+
+def test_list_drugs_beyond_last_page_returns_empty(
+    pharmacy_service,
+    make_drug,
+    clinic,
+):
+    make_drug(
+        clinic,
+        name="Only Drug",
+    )
+
+    result = pharmacy_service.list_drugs(
+        clinic.id,
+        page=999,
+        per_page=50,
+    )
+
+    assert result["items"] == []
+    assert result["page"] == 999
+    assert result["per_page"] == 50
+    assert result["total"] >= 1
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, 501),
+    ],
+)
+def test_list_drugs_rejects_invalid_pagination(
+    pharmacy_service,
+    clinic,
+    page,
+    per_page,
+):
+    with pytest.raises(
+        ValidationError,
+    ):
+        pharmacy_service.list_drugs(
+            clinic.id,
+            page=page,
+            per_page=per_page,
+        )
+
+
+def test_list_drugs_rejects_invalid_include_inactive(
+    pharmacy_service,
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="include_inactive",
+    ):
+        pharmacy_service.list_drugs(
+            clinic.id,
+            include_inactive="true",
+        )
 
 
 # ============================================================================
@@ -255,7 +396,6 @@ def test_list_drugs_can_include_inactive(
 def test_create_drug_success(
     pharmacy_service,
     active_clinic,
-    db,
 ):
     drug = pharmacy_service.create_drug(
         clinic_id=active_clinic.id,
@@ -275,7 +415,6 @@ def test_create_drug_success(
 def test_create_drug_strips_name(
     pharmacy_service,
     active_clinic,
-    db,
 ):
     drug = pharmacy_service.create_drug(
         clinic_id=active_clinic.id,
@@ -296,7 +435,6 @@ def test_create_drug_strips_name(
 def test_create_drug_requires_name(
     pharmacy_service,
     active_clinic,
-    db,
     name,
 ):
     with pytest.raises(
@@ -312,7 +450,6 @@ def test_create_drug_requires_name(
 def test_create_drug_rejects_negative_price(
     pharmacy_service,
     active_clinic,
-    db,
 ):
     with pytest.raises(
         ValidationError,
@@ -324,10 +461,24 @@ def test_create_drug_rejects_negative_price(
         )
 
 
+def test_create_drug_rejects_invalid_controlled_flag(
+    pharmacy_service,
+    active_clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="is_controlled",
+    ):
+        pharmacy_service.create_drug(
+            clinic_id=active_clinic.id,
+            name="Drug A",
+            is_controlled="yes",
+        )
+
+
 def test_create_drug_rejects_duplicate_barcode(
     pharmacy_service,
     active_clinic,
-    db,
 ):
     pharmacy_service.create_drug(
         clinic_id=active_clinic.id,
@@ -368,7 +519,6 @@ def test_update_drug_success(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -392,7 +542,6 @@ def test_update_drug_rejects_global_drug(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(None)
 
@@ -411,7 +560,6 @@ def test_update_drug_rejects_unknown_field(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(active_clinic)
 
@@ -424,7 +572,9 @@ def test_update_drug_rejects_unknown_field(
             completely_unknown_field="x",
         )
 
-    message = str(exc_info.value).lower()
+    message = str(
+        exc_info.value
+    ).lower()
 
     assert (
         "unknown" in message
@@ -434,11 +584,29 @@ def test_update_drug_rejects_unknown_field(
     )
 
 
+def test_update_drug_rejects_empty_updates(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="field",
+    ):
+        pharmacy_service.update_drug(
+            drug_id=drug.id,
+            clinic_id=active_clinic.id,
+        )
+
+
 def test_update_drug_rejects_duplicate_barcode(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     first = make_drug(
         active_clinic,
@@ -461,6 +629,21 @@ def test_update_drug_rejects_duplicate_barcode(
         )
 
 
+def test_update_drug_rejects_invalid_drug_id(
+    pharmacy_service,
+    active_clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="positive integer",
+    ):
+        pharmacy_service.update_drug(
+            drug_id=0,
+            clinic_id=active_clinic.id,
+            name="Changed",
+        )
+
+
 # ============================================================================
 # DRUG ACTIVE STATUS
 # ============================================================================
@@ -470,7 +653,6 @@ def test_set_drug_active_status_deactivates_drug(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -490,7 +672,6 @@ def test_set_drug_active_status_reactivates_drug(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -506,6 +687,26 @@ def test_set_drug_active_status_reactivates_drug(
     assert result.is_active is True
 
 
+def test_set_drug_active_status_rejects_invalid_flag(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="is_active",
+    ):
+        pharmacy_service.set_drug_active_status(
+            drug_id=drug.id,
+            clinic_id=active_clinic.id,
+            is_active=1,
+        )
+
+
 # ============================================================================
 # BATCH LOOKUP / LISTING
 # ============================================================================
@@ -516,9 +717,10 @@ def test_get_batch_success(
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     batch = make_drug_batch(
         active_clinic,
@@ -538,9 +740,10 @@ def test_get_batch_rejects_other_clinic(
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     batch = make_drug_batch(
         active_clinic,
@@ -559,14 +762,29 @@ def test_get_batch_rejects_other_clinic(
         )
 
 
+def test_get_batch_rejects_invalid_batch_id(
+    pharmacy_service,
+    active_clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="positive integer",
+    ):
+        pharmacy_service.get_batch(
+            0,
+            active_clinic.id,
+        )
+
+
 def test_list_batches_returns_only_clinic_batches(
     pharmacy_service,
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     first = make_drug_batch(
         active_clinic,
@@ -578,15 +796,180 @@ def test_list_batches_returns_only_clinic_batches(
         drug,
     )
 
-    results = pharmacy_service.list_batches(
+    result = pharmacy_service.list_batches(
         drug.id,
         active_clinic.id,
     )
 
-    ids = {batch.id for batch in results}
+    ids = {
+        batch.id
+        for batch in result["items"]
+    }
 
     assert first.id in ids
     assert second.id in ids
+    assert result["total"] >= 2
+    assert result["page"] == 1
+    assert result["per_page"] == 50
+
+
+def test_list_batches_excludes_expired(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    valid_batch = make_drug_batch(
+        active_clinic,
+        drug,
+        expiry_date=_future_date(30),
+    )
+
+    expired_batch = make_drug_batch(
+        active_clinic,
+        drug,
+        expiry_date=date.today() - timedelta(days=1),
+    )
+
+    result = pharmacy_service.list_batches(
+        drug.id,
+        active_clinic.id,
+        include_expired=False,
+    )
+
+    ids = {
+        batch.id
+        for batch in result["items"]
+    }
+
+    assert valid_batch.id in ids
+    assert expired_batch.id not in ids
+
+
+def test_list_batches_can_include_expired(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    expired_batch = make_drug_batch(
+        active_clinic,
+        drug,
+        expiry_date=date.today() - timedelta(days=1),
+    )
+
+    result = pharmacy_service.list_batches(
+        drug.id,
+        active_clinic.id,
+        include_expired=True,
+    )
+
+    ids = {
+        batch.id
+        for batch in result["items"]
+    }
+
+    assert expired_batch.id in ids
+
+
+def test_list_batches_paginates(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    for index in range(1, 6):
+        make_drug_batch(
+            active_clinic,
+            drug,
+            batch_number=f"BATCH-{index:03d}",
+            expiry_date=_future_date(
+                index
+            ),
+        )
+
+    result = pharmacy_service.list_batches(
+        drug.id,
+        active_clinic.id,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert result["total"] == 5
+    assert len(result["items"]) == 2
+
+
+def test_list_batches_beyond_last_page_returns_empty(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    result = pharmacy_service.list_batches(
+        drug.id,
+        active_clinic.id,
+        page=100,
+        per_page=50,
+    )
+
+    assert result["items"] == []
+    assert result["page"] == 100
+    assert result["total"] == 1
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, 501),
+    ],
+)
+def test_list_batches_rejects_invalid_pagination(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    page,
+    per_page,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+    ):
+        pharmacy_service.list_batches(
+            drug.id,
+            active_clinic.id,
+            page=page,
+            per_page=per_page,
+        )
 
 
 # ============================================================================
@@ -598,7 +981,6 @@ def test_add_batch_success(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -625,7 +1007,6 @@ def test_add_batch_rejects_inactive_drug(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -649,9 +1030,10 @@ def test_add_batch_rejects_expired_batch(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     with pytest.raises(
         ValidationError,
@@ -666,13 +1048,36 @@ def test_add_batch_rejects_expired_batch(
         )
 
 
+def test_add_batch_rejects_datetime_as_expiry_date(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="valid date",
+    ):
+        pharmacy_service.add_batch(
+            clinic_id=active_clinic.id,
+            drug_id=drug.id,
+            batch_number="B-DATETIME",
+            quantity_on_hand=10,
+            expiry_date=_future_datetime(),
+        )
+
+
 def test_add_batch_rejects_negative_quantity(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     with pytest.raises(
         ValidationError,
@@ -686,13 +1091,36 @@ def test_add_batch_rejects_negative_quantity(
         )
 
 
+def test_add_batch_rejects_boolean_quantity(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="integer",
+    ):
+        pharmacy_service.add_batch(
+            clinic_id=active_clinic.id,
+            drug_id=drug.id,
+            batch_number="B-BOOL",
+            quantity_on_hand=True,
+            expiry_date=_future_date(),
+        )
+
+
 def test_add_batch_rejects_negative_reorder_level(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     with pytest.raises(
         ValidationError,
@@ -711,9 +1139,10 @@ def test_add_batch_rejects_duplicate_batch_number(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     pharmacy_service.add_batch(
         clinic_id=active_clinic.id,
@@ -734,13 +1163,37 @@ def test_add_batch_rejects_duplicate_batch_number(
             expiry_date=_future_date(),
         )
 
-    message = str(exc_info.value).lower()
+    message = str(
+        exc_info.value
+    ).lower()
 
     assert (
         "batch" in message
         or "duplicate" in message
         or "already" in message
     )
+
+
+def test_add_batch_allows_global_drug(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+):
+    drug = make_drug(
+        None,
+        is_active=True,
+    )
+
+    batch = pharmacy_service.add_batch(
+        clinic_id=active_clinic.id,
+        drug_id=drug.id,
+        batch_number="GLOBAL-001",
+        quantity_on_hand=100,
+        expiry_date=_future_date(90),
+    )
+
+    assert batch.clinic_id == active_clinic.id
+    assert batch.drug_id == drug.id
 
 
 # ============================================================================
@@ -753,9 +1206,10 @@ def test_list_expiring_batches_returns_batches_within_window(
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     expiring = make_drug_batch(
         active_clinic,
@@ -771,15 +1225,21 @@ def test_list_expiring_batches_returns_batches_within_window(
         quantity_on_hand=20,
     )
 
-    results = pharmacy_service.list_expiring_batches(
+    result = pharmacy_service.list_expiring_batches(
         active_clinic.id,
         days=30,
     )
 
-    ids = {batch.id for batch in results}
+    ids = {
+        batch.id
+        for batch in result["items"]
+    }
 
     assert expiring.id in ids
     assert far_future.id not in ids
+    assert result["page"] == 1
+    assert result["per_page"] == 50
+    assert result["total"] >= 1
 
 
 def test_list_expiring_batches_excludes_zero_stock(
@@ -787,9 +1247,10 @@ def test_list_expiring_batches_excludes_zero_stock(
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     empty_batch = make_drug_batch(
         active_clinic,
@@ -798,14 +1259,94 @@ def test_list_expiring_batches_excludes_zero_stock(
         quantity_on_hand=0,
     )
 
-    results = pharmacy_service.list_expiring_batches(
+    result = pharmacy_service.list_expiring_batches(
         active_clinic.id,
         days=30,
     )
 
-    ids = {batch.id for batch in results}
+    ids = {
+        batch.id
+        for batch in result["items"]
+    }
 
     assert empty_batch.id not in ids
+
+
+def test_list_expiring_batches_rejects_negative_days(
+    pharmacy_service,
+    active_clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="days",
+    ):
+        pharmacy_service.list_expiring_batches(
+            active_clinic.id,
+            days=-1,
+        )
+
+
+def test_list_expiring_batches_paginates(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    for index in range(1, 6):
+        make_drug_batch(
+            active_clinic,
+            drug,
+            batch_number=f"EXP-{index:03d}",
+            expiry_date=_future_date(
+                index
+            ),
+            quantity_on_hand=10,
+        )
+
+    result = pharmacy_service.list_expiring_batches(
+        active_clinic.id,
+        days=30,
+        page=2,
+        per_page=2,
+    )
+
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert result["total"] == 5
+    assert len(result["items"]) == 2
+
+
+def test_list_expiring_batches_beyond_last_page_returns_empty(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    make_drug_batch,
+):
+    drug = make_drug(
+        active_clinic,
+    )
+
+    make_drug_batch(
+        active_clinic,
+        drug,
+        expiry_date=_future_date(5),
+        quantity_on_hand=10,
+    )
+
+    result = pharmacy_service.list_expiring_batches(
+        active_clinic.id,
+        days=30,
+        page=99,
+        per_page=50,
+    )
+
+    assert result["items"] == []
+    assert result["page"] == 99
+    assert result["total"] == 1
 
 
 def test_get_stock_summary_counts_nonexpired_stock(
@@ -813,9 +1354,10 @@ def test_get_stock_summary_counts_nonexpired_stock(
     active_clinic,
     make_drug,
     make_drug_batch,
-    db,
 ):
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     make_drug_batch(
         active_clinic,
@@ -858,7 +1400,6 @@ def test_get_prescription_for_pharmacy_success(
     patient,
     make_authenticated_staff,
     make_prescription,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -886,7 +1427,6 @@ def test_get_prescription_rejects_other_clinic(
     patient,
     make_authenticated_staff,
     make_prescription,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -920,7 +1460,6 @@ def test_create_dispense_record_rejects_empty_items(
     patient,
     make_authenticated_staff,
     make_prescription,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -954,7 +1493,6 @@ def test_create_dispense_record_rejects_duplicate_entries(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -967,7 +1505,9 @@ def test_create_dispense_record_rejects_duplicate_entries(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1011,7 +1551,6 @@ def test_create_dispense_record_rejects_quantity_above_prescription(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1024,7 +1563,9 @@ def test_create_dispense_record_rejects_quantity_above_prescription(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1065,7 +1606,6 @@ def test_create_dispense_record_rejects_insufficient_stock(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1078,7 +1618,9 @@ def test_create_dispense_record_rejects_insufficient_stock(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1119,7 +1661,6 @@ def test_create_dispense_record_rejects_expired_batch(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1132,7 +1673,9 @@ def test_create_dispense_record_rejects_expired_batch(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1165,6 +1708,60 @@ def test_create_dispense_record_rejects_expired_batch(
         )
 
 
+def test_create_dispense_record_rejects_zero_quantity(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=10,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="positive integer",
+    ):
+        pharmacy_service.create_dispense_record(
+            clinic_id=active_clinic.id,
+            prescription_id=prescription.id,
+            dispensed_by_id=staff.id,
+            items=[
+                {
+                    "prescription_item_id": item.id,
+                    "batch_id": batch.id,
+                    "quantity": 0,
+                }
+            ],
+        )
+
+
 # ============================================================================
 # DISPENSING SUCCESS
 # ============================================================================
@@ -1179,7 +1776,6 @@ def test_create_dispense_record_partially_dispenses(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1192,7 +1788,9 @@ def test_create_dispense_record_partially_dispenses(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1234,7 +1832,6 @@ def test_create_dispense_record_fully_dispenses(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1247,7 +1844,9 @@ def test_create_dispense_record_fully_dispenses(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1288,7 +1887,6 @@ def test_create_dispense_record_can_use_multiple_batches(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1301,7 +1899,9 @@ def test_create_dispense_record_can_use_multiple_batches(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1358,7 +1958,6 @@ def test_get_dispense_record_success(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1371,7 +1970,9 @@ def test_get_dispense_record_success(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1405,13 +2006,15 @@ def test_get_dispense_record_success(
     assert result.id == record.id
 
 
-def test_list_dispense_records_for_prescription(
+def test_get_dispense_record_rejects_other_clinic(
     pharmacy_service,
     active_clinic,
     patient,
     make_authenticated_staff,
     make_prescription,
-    db,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1424,13 +2027,217 @@ def test_list_dispense_records_for_prescription(
         staff,
     )
 
-    results = pharmacy_service.list_dispense_records_for_prescription(
-        prescription.id,
-        active_clinic.id,
+    drug = make_drug(
+        active_clinic,
     )
 
-    assert isinstance(results, list)
-    assert results == []
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=10,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    record = pharmacy_service.create_dispense_record(
+        clinic_id=active_clinic.id,
+        prescription_id=prescription.id,
+        dispensed_by_id=staff.id,
+        items=[
+            {
+                "prescription_item_id": item.id,
+                "batch_id": batch.id,
+                "quantity": 5,
+            }
+        ],
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match=f"Dispense record {record.id} not found",
+    ):
+        pharmacy_service.get_dispense_record(
+            record.id,
+            active_clinic.id + 999,
+        )
+
+
+def test_list_dispense_records_for_prescription(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    result = (
+        pharmacy_service.list_dispense_records_for_prescription(
+            prescription.id,
+            active_clinic.id,
+        )
+    )
+
+    assert isinstance(
+        result,
+        dict,
+    )
+
+    assert result["items"] == []
+    assert result["total"] == 0
+    assert result["page"] == 1
+    assert result["per_page"] == 50
+
+
+def test_list_dispense_records_for_prescription_paginates(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=100,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+        quantity_on_hand=500,
+    )
+
+    for quantity in [5, 5, 5, 5, 5]:
+        pharmacy_service.create_dispense_record(
+            clinic_id=active_clinic.id,
+            prescription_id=prescription.id,
+            dispensed_by_id=staff.id,
+            items=[
+                {
+                    "prescription_item_id": item.id,
+                    "batch_id": batch.id,
+                    "quantity": quantity,
+                }
+            ],
+        )
+
+    result = (
+        pharmacy_service.list_dispense_records_for_prescription(
+            prescription.id,
+            active_clinic.id,
+            page=2,
+            per_page=2,
+        )
+    )
+
+    assert result["page"] == 2
+    assert result["per_page"] == 2
+    assert result["total"] == 5
+    assert len(result["items"]) == 2
+
+
+def test_list_dispense_records_beyond_last_page_returns_empty(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    result = (
+        pharmacy_service.list_dispense_records_for_prescription(
+            prescription.id,
+            active_clinic.id,
+            page=999,
+            per_page=50,
+        )
+    )
+
+    assert result["items"] == []
+    assert result["page"] == 999
+    assert result["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "page,per_page",
+    [
+        (0, 50),
+        (-1, 50),
+        (1, 0),
+        (1, -1),
+        (1, 501),
+    ],
+)
+def test_list_dispense_records_rejects_invalid_pagination(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    page,
+    per_page,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    with pytest.raises(
+        ValidationError,
+    ):
+        pharmacy_service.list_dispense_records_for_prescription(
+            prescription.id,
+            active_clinic.id,
+            page=page,
+            per_page=per_page,
+        )
 
 
 # ============================================================================
@@ -1447,7 +2254,6 @@ def test_cancel_dispense_record_restores_stock(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1460,7 +2266,9 @@ def test_cancel_dispense_record_restores_stock(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1508,7 +2316,6 @@ def test_cancel_dispense_record_cannot_cancel_fully_dispensed(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1521,7 +2328,9 @@ def test_cancel_dispense_record_cannot_cancel_fully_dispensed(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1569,7 +2378,6 @@ def test_cancel_dispense_record_cannot_cancel_twice(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1582,7 +2390,9 @@ def test_cancel_dispense_record_cannot_cancel_twice(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1624,6 +2434,72 @@ def test_cancel_dispense_record_cannot_cancel_twice(
         )
 
 
+def test_cancel_dispense_record_rejects_other_clinic(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+    db,
+):
+    other_clinic = _make_second_clinic(
+        db,
+        active_clinic,
+    )
+
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=20,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+        quantity_on_hand=100,
+    )
+
+    record = pharmacy_service.create_dispense_record(
+        clinic_id=active_clinic.id,
+        prescription_id=prescription.id,
+        dispensed_by_id=staff.id,
+        items=[
+            {
+                "prescription_item_id": item.id,
+                "batch_id": batch.id,
+                "quantity": 5,
+            }
+        ],
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match=f"Dispense record {record.id} not found",
+    ):
+        pharmacy_service.cancel_dispense_record(
+            record.id,
+            other_clinic.id,
+        )
+
+
 # ============================================================================
 # PRESCRIPTION STATUS / EXPIRY
 # ============================================================================
@@ -1638,7 +2514,6 @@ def test_dispensing_rejects_inactive_prescription(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1652,7 +2527,9 @@ def test_dispensing_rejects_inactive_prescription(
         status=PrescriptionStatus.CANCELLED,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1683,6 +2560,63 @@ def test_dispensing_rejects_inactive_prescription(
         )
 
 
+def test_dispensing_rejects_expired_prescription(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+        expires_at=datetime.now(
+            timezone.utc
+        ) - timedelta(days=1),
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=10,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="expired",
+    ):
+        pharmacy_service.create_dispense_record(
+            clinic_id=active_clinic.id,
+            prescription_id=prescription.id,
+            dispensed_by_id=staff.id,
+            items=[
+                {
+                    "prescription_item_id": item.id,
+                    "batch_id": batch.id,
+                    "quantity": 5,
+                }
+            ],
+        )
+
+
 # ============================================================================
 # STAFF VALIDATION
 # ============================================================================
@@ -1697,7 +2631,6 @@ def test_dispensing_rejects_wrong_staff_role(
     make_prescription_item,
     make_drug,
     make_drug_batch,
-    db,
 ):
     staff, _ = make_authenticated_staff(
         active_clinic,
@@ -1710,7 +2643,9 @@ def test_dispensing_rejects_wrong_staff_role(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1741,6 +2676,62 @@ def test_dispensing_rejects_wrong_staff_role(
         )
 
 
+def test_dispensing_rejects_inactive_staff(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    staff.status = StaffStatus.SUSPENDED
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=10,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="not active",
+    ):
+        pharmacy_service.create_dispense_record(
+            clinic_id=active_clinic.id,
+            prescription_id=prescription.id,
+            dispensed_by_id=staff.id,
+            items=[
+                {
+                    "prescription_item_id": item.id,
+                    "batch_id": batch.id,
+                    "quantity": 5,
+                }
+            ],
+        )
+
+
 def test_dispensing_rejects_staff_from_other_clinic(
     pharmacy_service,
     active_clinic,
@@ -1752,14 +2743,6 @@ def test_dispensing_rejects_staff_from_other_clinic(
     make_drug_batch,
     db,
 ):
-    """
-    A prescription belonging to Clinic A must not be usable through
-    Clinic B.
-
-    A real second clinic is created using the existing Clinic fixture
-    structure rather than assuming a nonexistent `is_active` constructor
-    argument.
-    """
     other_clinic = _make_second_clinic(
         db,
         active_clinic,
@@ -1776,7 +2759,9 @@ def test_dispensing_rejects_staff_from_other_clinic(
         staff,
     )
 
-    drug = make_drug(active_clinic)
+    drug = make_drug(
+        active_clinic,
+    )
 
     item = make_prescription_item(
         prescription,
@@ -1816,12 +2801,7 @@ def test_global_drug_can_have_clinic_batch(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    """
-    Global catalog drugs are usable by clinics, while inventory batches
-    remain clinic-owned.
-    """
     drug = make_drug(
         None,
         is_active=True,
@@ -1843,9 +2823,10 @@ def test_global_drug_cannot_be_updated_by_clinic(
     pharmacy_service,
     active_clinic,
     make_drug,
-    db,
 ):
-    drug = make_drug(None)
+    drug = make_drug(
+        None,
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1858,6 +2839,36 @@ def test_global_drug_cannot_be_updated_by_clinic(
         )
 
 
+def test_global_drug_is_visible_to_multiple_clinics(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    db,
+):
+    other_clinic = _make_second_clinic(
+        db,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        None,
+        is_active=True,
+    )
+
+    first_result = pharmacy_service.get_drug(
+        drug.id,
+        active_clinic.id,
+    )
+
+    second_result = pharmacy_service.get_drug(
+        drug.id,
+        other_clinic.id,
+    )
+
+    assert first_result.id == drug.id
+    assert second_result.id == drug.id
+
+
 # ============================================================================
 # AUDIT
 # ============================================================================
@@ -1867,7 +2878,6 @@ def test_create_drug_writes_audit_log(
     pharmacy_service,
     active_clinic,
     monkeypatch,
-    db,
 ):
     audit = Mock()
 
@@ -1896,7 +2906,6 @@ def test_update_drug_writes_audit_log(
     active_clinic,
     make_drug,
     monkeypatch,
-    db,
 ):
     drug = make_drug(
         active_clinic,
@@ -1924,3 +2933,179 @@ def test_update_drug_writes_audit_log(
     assert kwargs["action"] == AuditAction.UPDATE
     assert kwargs["entity_type"] == "Drug"
     assert kwargs["entity_id"] == drug.id
+
+
+def test_set_drug_active_status_writes_audit_log(
+    pharmacy_service,
+    active_clinic,
+    make_drug,
+    monkeypatch,
+):
+    drug = make_drug(
+        active_clinic,
+        is_active=True,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        service,
+        "create_audit_log",
+        audit,
+    )
+
+    pharmacy_service.set_drug_active_status(
+        drug_id=drug.id,
+        clinic_id=active_clinic.id,
+        is_active=False,
+    )
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.STATUS_CHANGE
+    assert kwargs["entity_type"] == "Drug"
+    assert kwargs["entity_id"] == drug.id
+
+
+def test_create_dispense_record_writes_audit_log(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+    monkeypatch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=10,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        service,
+        "create_audit_log",
+        audit,
+    )
+
+    record = pharmacy_service.create_dispense_record(
+        clinic_id=active_clinic.id,
+        prescription_id=prescription.id,
+        dispensed_by_id=staff.id,
+        items=[
+            {
+                "prescription_item_id": item.id,
+                "batch_id": batch.id,
+                "quantity": 5,
+            }
+        ],
+    )
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.CREATE
+    assert kwargs["entity_type"] == "DispenseRecord"
+    assert kwargs["entity_id"] == record.id
+    assert kwargs["user_id"] == staff.user.id
+
+
+def test_cancel_dispense_record_writes_audit_log(
+    pharmacy_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_prescription,
+    make_prescription_item,
+    make_drug,
+    make_drug_batch,
+    monkeypatch,
+):
+    staff, _ = make_authenticated_staff(
+        active_clinic,
+        Role.PHARMACIST,
+    )
+
+    prescription = make_prescription(
+        active_clinic,
+        patient,
+        staff,
+    )
+
+    drug = make_drug(
+        active_clinic,
+    )
+
+    item = make_prescription_item(
+        prescription,
+        drug,
+        quantity=20,
+    )
+
+    batch = make_drug_batch(
+        active_clinic,
+        drug,
+        quantity_on_hand=100,
+    )
+
+    record = pharmacy_service.create_dispense_record(
+        clinic_id=active_clinic.id,
+        prescription_id=prescription.id,
+        dispensed_by_id=staff.id,
+        items=[
+            {
+                "prescription_item_id": item.id,
+                "batch_id": batch.id,
+                "quantity": 5,
+            }
+        ],
+    )
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        service,
+        "create_audit_log",
+        audit,
+    )
+
+    pharmacy_service.cancel_dispense_record(
+        record.id,
+        active_clinic.id,
+    )
+
+    audit.assert_called_once()
+
+    kwargs = audit.call_args.kwargs
+
+    assert kwargs["action"] == AuditAction.STATUS_CHANGE
+    assert kwargs["entity_type"] == "DispenseRecord"
+    assert kwargs["entity_id"] == record.id
+    assert kwargs["details"]["new_status"] == "cancelled"

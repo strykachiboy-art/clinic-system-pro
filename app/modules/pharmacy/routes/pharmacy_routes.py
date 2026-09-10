@@ -2,26 +2,30 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy import select
 
 from app.extensions import db
+
+from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
 
-from app.core.auth.user.models.user_model import User
-from app.modules.staff.models.staff_model import Staff
-
 from app.modules.pharmacy.schemas.pharmacy_schema import (
     DispenseRecordCancelSchema,
     DispenseRecordCreateSchema,
+    DispenseRecordListResponseSchema,
     DispenseRecordResponseSchema,
     DrugBatchCreateSchema,
     DrugBatchFilterSchema,
+    DrugBatchListResponseSchema,
     DrugBatchResponseSchema,
     DrugCreateSchema,
     DrugFilterSchema,
+    DrugListResponseSchema,
     DrugResponseSchema,
     DrugUpdateSchema,
+    ExpiringDrugBatchListResponseSchema,
     ExpiringDrugBatchQuerySchema,
     StockSummaryResponseSchema,
 )
@@ -43,6 +47,8 @@ from app.modules.pharmacy.services.pharmacy_service import (
     update_drug,
 )
 
+from app.modules.staff.models.staff_model import Staff
+
 
 pharmacy_bp = Blueprint(
     "pharmacy",
@@ -57,7 +63,9 @@ pharmacy_bp = Blueprint(
 
 
 def _json_body() -> dict:
-    payload = request.get_json(silent=True)
+    payload = request.get_json(
+        silent=True
+    )
 
     if payload is None:
         return {}
@@ -70,32 +78,33 @@ def _json_body() -> dict:
     return payload
 
 
-def _serialize(schema, value):
-    return schema.model_validate(
-        value
-    ).model_dump(
-        mode="json"
+def _serialize(
+    schema,
+    value,
+) -> dict:
+    return (
+        schema
+        .model_validate(value)
+        .model_dump(
+            mode="json"
+        )
     )
 
 
-def _serialize_many(schema, values):
-    return [
-        schema.model_validate(
-            value
-        ).model_dump(
-            mode="json"
-        )
-        for value in values
-    ]
-
-
 def _get_current_user() -> User:
-
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (TypeError, ValueError):
+    except (
+        TypeError,
+        ValueError,
+    ):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    if user_id <= 0:
         raise ValidationError(
             "Invalid authentication identity"
         )
@@ -119,13 +128,6 @@ def _get_current_user() -> User:
 
 
 def _get_current_clinic_id() -> int:
-    """
-    Resolve the authenticated user's clinic.
-
-    Pharmacy operations are tenant-scoped and therefore must never
-    trust a client-supplied clinic_id.
-    """
-
     user = _get_current_user()
 
     if user.clinic_id is None:
@@ -137,12 +139,6 @@ def _get_current_clinic_id() -> int:
 
 
 def _get_current_staff() -> Staff:
-    """
-    Resolve the Staff record belonging to the authenticated user.
-
-    The dispensing actor is always derived from authentication.
-    """
-
     user = _get_current_user()
 
     if user.clinic_id is None:
@@ -150,14 +146,17 @@ def _get_current_staff() -> Staff:
             "Authenticated user is not associated with a clinic"
         )
 
-    staff = (
-        Staff.query
-        .filter(
+    stmt = (
+        select(Staff)
+        .where(
             Staff.user_id == user.id,
             Staff.clinic_id == user.clinic_id,
         )
-        .first()
     )
+
+    staff = db.session.execute(
+        stmt
+    ).scalar_one_or_none()
 
     if staff is None:
         raise ValidationError(
@@ -184,23 +183,27 @@ def list_drugs_route():
         request.args.to_dict()
     )
 
-    drugs = list_drugs(
+    result = list_drugs(
         clinic_id=clinic_id,
         include_inactive=filters.include_inactive,
+        page=filters.page,
+        per_page=filters.per_page,
     )
 
     return jsonify(
         {
             "success": True,
-            "data": _serialize_many(
-                DrugResponseSchema,
-                drugs,
+            "data": _serialize(
+                DrugListResponseSchema,
+                result,
             ),
         }
     ), 200
 
 
-@pharmacy_bp.get("/drugs/<int:drug_id>")
+@pharmacy_bp.get(
+    "/drugs/<int:drug_id>"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -256,7 +259,9 @@ def create_drug_route():
     ), 201
 
 
-@pharmacy_bp.patch("/drugs/<int:drug_id>")
+@pharmacy_bp.patch(
+    "/drugs/<int:drug_id>"
+)
 @role_required(
     Role.ADMIN,
     Role.PHARMACIST,
@@ -366,18 +371,20 @@ def list_batches_route(
         request.args.to_dict()
     )
 
-    batches = list_batches(
+    result = list_batches(
         drug_id=drug_id,
         clinic_id=clinic_id,
         include_expired=filters.include_expired,
+        page=filters.page,
+        per_page=filters.per_page,
     )
 
     return jsonify(
         {
             "success": True,
-            "data": _serialize_many(
-                DrugBatchResponseSchema,
-                batches,
+            "data": _serialize(
+                DrugBatchListResponseSchema,
+                result,
             ),
         }
     ), 200
@@ -397,17 +404,19 @@ def list_expiring_batches_route():
         request.args.to_dict()
     )
 
-    batches = list_expiring_batches(
+    result = list_expiring_batches(
         clinic_id=clinic_id,
         days=filters.days,
+        page=filters.page,
+        per_page=filters.per_page,
     )
 
     return jsonify(
         {
             "success": True,
-            "data": _serialize_many(
-                DrugBatchResponseSchema,
-                batches,
+            "data": _serialize(
+                ExpiringDrugBatchListResponseSchema,
+                result,
             ),
         }
     ), 200
@@ -510,13 +519,6 @@ def get_stock_summary_route(
     Role.PHARMACIST,
 )
 def create_dispense_record_route():
-    """
-    Create a pharmacy dispensing transaction.
-
-    clinic_id and dispensed_by_id are never accepted from the client.
-    Both are derived from the authenticated user.
-    """
-
     user = _get_current_user()
 
     if user.clinic_id is None:
@@ -526,19 +528,7 @@ def create_dispense_record_route():
 
     clinic_id = user.clinic_id
 
-    staff = (
-        Staff.query
-        .filter(
-            Staff.user_id == user.id,
-            Staff.clinic_id == clinic_id,
-        )
-        .first()
-    )
-
-    if staff is None:
-        raise ValidationError(
-            "Authenticated user is not associated with a staff record"
-        )
+    staff = _get_current_staff()
 
     payload = DispenseRecordCreateSchema.model_validate(
         _json_body()
@@ -603,17 +593,79 @@ def list_dispense_records_route(
 ):
     clinic_id = _get_current_clinic_id()
 
-    records = list_dispense_records_for_prescription(
+    filters = {
+        "page": request.args.get(
+            "page",
+            1,
+            type=int,
+        ),
+        "per_page": request.args.get(
+            "per_page",
+            50,
+            type=int,
+        ),
+    }
+
+    class _DispenseRecordPaginationInput:
+        def __init__(
+            self,
+            page: int,
+            per_page: int,
+        ):
+            self.page = page
+            self.per_page = per_page
+
+    pagination = _DispenseRecordPaginationInput(
+        page=filters["page"],
+        per_page=filters["per_page"],
+    )
+
+    if pagination.page < 1:
+        raise ValidationError(
+            "page must be a positive integer"
+        )
+
+    if pagination.per_page < 1:
+        raise ValidationError(
+            "per_page must be a positive integer"
+        )
+
+    if pagination.per_page > 500:
+        raise ValidationError(
+            "per_page cannot exceed 500"
+        )
+
+    allowed_query_keys = {
+        "page",
+        "per_page",
+    }
+
+    unknown_keys = (
+        set(request.args.keys())
+        - allowed_query_keys
+    )
+
+    if unknown_keys:
+        raise ValidationError(
+            "Unknown query parameters: "
+            + ", ".join(
+                sorted(unknown_keys)
+            )
+        )
+
+    result = list_dispense_records_for_prescription(
         prescription_id=prescription_id,
         clinic_id=clinic_id,
+        page=pagination.page,
+        per_page=pagination.per_page,
     )
 
     return jsonify(
         {
             "success": True,
-            "data": _serialize_many(
-                DispenseRecordResponseSchema,
-                records,
+            "data": _serialize(
+                DispenseRecordListResponseSchema,
+                result,
             ),
         }
     ), 200
@@ -629,14 +681,6 @@ def list_dispense_records_route(
 def cancel_dispense_record_route(
     dispense_record_id: int,
 ):
-    """
-    Cancel a dispensing transaction.
-
-    The authenticated clinic is passed to the service.
-    The service performs tenant validation, transactional updates,
-    and stock restoration.
-    """
-
     clinic_id = _get_current_clinic_id()
 
     DispenseRecordCancelSchema.model_validate(

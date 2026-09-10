@@ -445,7 +445,7 @@ class TestCreateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -470,7 +470,7 @@ class TestCreateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         assert (
             response.get_json()["error"]
@@ -501,7 +501,7 @@ class TestCreateClinicRoute:
             == "Parent clinic 99999 not found"
         )
 
-    def test_create_clinic_duplicate_name_returns_400(
+    def test_create_clinic_duplicate_name_returns_409(
         self,
         client,
         clinic,
@@ -518,9 +518,33 @@ class TestCreateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
 
         assert clinic.name in response.get_json()["error"]
+
+    def test_create_clinic_rejects_forbidden_extra_field(
+        self,
+        client,
+        user,
+        auth_headers_for,
+    ):
+        headers = admin_headers(auth_headers_for, user)
+
+        response = client.post(
+            "/api/clinics",
+            json={
+                "name": "Extra Field Clinic",
+                "clinic_id": 999,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["error"] == "Validation error"
+        assert body["details"]
 
     def test_create_headquarters_clinic(
         self,
@@ -704,7 +728,8 @@ class TestListClinicsRoute:
         )
 
         headers = user_headers(
-            auth_headers_for, doctor
+            auth_headers_for,
+            doctor,
         )
 
         response = client.get(
@@ -1017,7 +1042,32 @@ class TestCreateClinicBranchRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["error"] == "Validation error"
+        assert body["details"]
+
+    def test_create_branch_rejects_client_supplied_parent_id(
+        self,
+        client,
+        clinic,
+        user,
+        auth_headers_for,
+    ):
+        headers = admin_headers(auth_headers_for, user)
+
+        response = client.post(
+            f"/api/clinics/{clinic.id}/branches",
+            json={
+                "name": "Branch",
+                "parent_clinic_id": clinic.id,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -1047,7 +1097,7 @@ class TestCreateClinicBranchRoute:
             == "Parent clinic 99999 not found"
         )
 
-    def test_create_branch_duplicate_name_returns_400(
+    def test_create_branch_duplicate_name_returns_409(
         self,
         client,
         clinic,
@@ -1070,7 +1120,7 @@ class TestCreateClinicBranchRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
 
         assert "already exists" in response.get_json()["error"]
 
@@ -1207,7 +1257,7 @@ class TestUpdateClinicBranchConfigurationRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         assert (
             response.get_json()["error"]
@@ -1238,7 +1288,7 @@ class TestUpdateClinicBranchConfigurationRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         assert (
             response.get_json()["error"]
@@ -1327,7 +1377,7 @@ class TestUpdateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         assert (
             response.get_json()["error"]
@@ -1352,7 +1402,7 @@ class TestUpdateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -1360,7 +1410,7 @@ class TestUpdateClinicRoute:
         assert "details" in body
         assert body["details"]
 
-    def test_update_clinic_duplicate_name_returns_400(
+    def test_update_clinic_duplicate_name_returns_409(
         self,
         client,
         clinic,
@@ -1382,7 +1432,7 @@ class TestUpdateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
 
         assert "already exists" in response.get_json()["error"]
 
@@ -1403,9 +1453,34 @@ class TestUpdateClinicRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         assert response.get_json()["error"] == "Validation error"
+
+    def test_update_clinic_rejects_forbidden_extra_field(
+        self,
+        client,
+        clinic,
+        user,
+        auth_headers_for,
+    ):
+        headers = admin_headers(auth_headers_for, user)
+
+        response = client.patch(
+            f"/api/clinics/{clinic.id}",
+            json={
+                "name": "Updated Clinic",
+                "clinic_id": 999,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["error"] == "Validation error"
+        assert body["details"]
 
 
 # ============================================================================
@@ -1483,7 +1558,7 @@ class TestUpdateClinicStatusRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -1542,7 +1617,7 @@ class TestUpdateClinicAICreditsRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_add_ai_credits_rejects_negative_amount(
         self,
@@ -1561,7 +1636,7 @@ class TestUpdateClinicAICreditsRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_add_ai_credits_missing_clinic_returns_404(
         self,
@@ -1601,7 +1676,7 @@ class TestUpdateClinicAICreditsRoute:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -1739,7 +1814,7 @@ class TestClinicRouteExceptionMapping:
             == "Parent clinic not found"
         )
 
-    def test_create_clinic_maps_validation_to_400(
+    def test_create_clinic_maps_validation_to_422(
         self,
         client,
         user,
@@ -1765,10 +1840,10 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert response.get_json()["error"] == "Invalid clinic"
 
-    def test_create_clinic_maps_conflict_to_400(
+    def test_create_clinic_maps_conflict_to_409(
         self,
         client,
         user,
@@ -1794,7 +1869,8 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
+
         assert (
             response.get_json()["error"]
             == "Clinic already exists"
@@ -1824,6 +1900,7 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic lookup failed"
@@ -1853,6 +1930,7 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic 123 not found"
@@ -1882,12 +1960,13 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic 123 not found"
         )
 
-    def test_create_branch_maps_validation_to_400(
+    def test_create_branch_maps_validation_to_422(
         self,
         client,
         clinic,
@@ -1914,10 +1993,14 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
-        assert response.get_json()["error"] == "Invalid branch"
+        assert response.status_code == 422
 
-    def test_update_branch_configuration_maps_validation_to_400(
+        assert (
+            response.get_json()["error"]
+            == "Invalid branch"
+        )
+
+    def test_update_branch_configuration_maps_validation_to_422(
         self,
         client,
         clinic,
@@ -1944,13 +2027,14 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
+
         assert (
             response.get_json()["error"]
             == "Invalid configuration"
         )
 
-    def test_update_clinic_maps_validation_to_400(
+    def test_update_clinic_maps_validation_to_422(
         self,
         client,
         clinic,
@@ -1977,7 +2061,8 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
+
         assert (
             response.get_json()["error"]
             == "Invalid clinic update"
@@ -2010,12 +2095,13 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic 123 not found"
         )
 
-    def test_update_status_maps_validation_to_400(
+    def test_update_status_maps_validation_to_422(
         self,
         client,
         clinic,
@@ -2042,7 +2128,8 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
+
         assert (
             response.get_json()["error"]
             == "Invalid status transition"
@@ -2075,12 +2162,13 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic 123 not found"
         )
 
-    def test_ai_credits_maps_validation_to_400(
+    def test_ai_credits_maps_validation_to_422(
         self,
         client,
         clinic,
@@ -2107,7 +2195,8 @@ class TestClinicRouteExceptionMapping:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
+
         assert (
             response.get_json()["error"]
             == "Invalid AI credit amount"
@@ -2137,6 +2226,7 @@ class TestClinicRouteExceptionMapping:
         )
 
         assert response.status_code == 404
+
         assert (
             response.get_json()["error"]
             == "Clinic 123 not found"
@@ -2166,7 +2256,7 @@ class TestClinicRouteValidation:
             },
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -2188,7 +2278,7 @@ class TestClinicRouteValidation:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -2212,7 +2302,7 @@ class TestClinicRouteValidation:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -2236,7 +2326,7 @@ class TestClinicRouteValidation:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         body = response.get_json()
 
@@ -2325,7 +2415,10 @@ class TestClinicTenantIsolation:
             name="Other Clinic",
         )
 
-        headers = admin_headers(auth_headers_for, user)
+        headers = admin_headers(
+            auth_headers_for,
+            user,
+        )
 
         response = client.get(
             f"/api/clinics/{other.id}",

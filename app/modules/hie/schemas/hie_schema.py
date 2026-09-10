@@ -16,36 +16,27 @@ from app.core.enums.hie_enums import (
 )
 
 
-# ======================================================================
-# HIE INTEGRATION
-# ======================================================================
-
-
 class HIEIntegrationCreateSchema(BaseModel):
     provider: str = Field(
         default="malaffi",
         min_length=1,
         max_length=50,
-        description="HIE provider name",
     )
 
     endpoint_url: Optional[AnyHttpUrl] = Field(
         default=None,
-        description="External HIE endpoint URL",
     )
 
     organization_id: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=100,
-        description="External healthcare organization identifier",
     )
 
     facility_id: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=100,
-        description="External healthcare facility identifier",
     )
 
     @field_validator("provider")
@@ -70,11 +61,14 @@ class HIEIntegrationCreateSchema(BaseModel):
         value = value.strip()
 
         if not value:
-            raise ValueError("Identifier cannot be empty")
+            raise ValueError(
+                "Identifier cannot be empty"
+            )
 
         return value
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -84,31 +78,26 @@ class HIEIntegrationUpdateSchema(BaseModel):
         default=None,
         min_length=1,
         max_length=50,
-        description="HIE provider name",
     )
 
     status: Optional[HIEIntegrationStatus] = Field(
         default=None,
-        description="Current HIE integration status",
     )
 
     endpoint_url: Optional[AnyHttpUrl] = Field(
         default=None,
-        description="External HIE endpoint URL",
     )
 
     organization_id: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=100,
-        description="External healthcare organization identifier",
     )
 
     facility_id: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=100,
-        description="External healthcare facility identifier",
     )
 
     @field_validator("provider")
@@ -123,7 +112,9 @@ class HIEIntegrationUpdateSchema(BaseModel):
         value = value.strip().lower()
 
         if not value:
-            raise ValueError("Provider cannot be empty")
+            raise ValueError(
+                "Provider cannot be empty"
+            )
 
         return value
 
@@ -139,11 +130,14 @@ class HIEIntegrationUpdateSchema(BaseModel):
         value = value.strip()
 
         if not value:
-            raise ValueError("Identifier cannot be empty")
+            raise ValueError(
+                "Identifier cannot be empty"
+            )
 
         return value
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -161,39 +155,32 @@ class HIEIntegrationResponseSchema(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
-
-
-# ======================================================================
-# HIE SUBMISSION
-# ======================================================================
 
 
 class HIESubmissionCreateSchema(BaseModel):
     integration_id: int = Field(
         ...,
         gt=0,
-        description="ID of the HIE integration to use",
     )
 
     patient_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="ID of the patient associated with the operation",
     )
 
     operation: HIEOperation = Field(
         ...,
-        description="HIE operation being performed",
     )
 
     request_data: Optional[dict[str, Any]] = Field(
         default=None,
-        description="Payload sent to the external HIE provider",
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -216,62 +203,64 @@ class HIESubmissionResponseSchema(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
-
-
-# ======================================================================
-# HIE SUBMISSION QUERY
-# ======================================================================
 
 
 class HIESubmissionQuerySchema(BaseModel):
     integration_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Filter by HIE integration",
     )
 
     patient_id: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Filter by patient",
     )
 
     operation: Optional[HIEOperation] = Field(
         default=None,
-        description="Filter by HIE operation",
     )
 
     status: Optional[HIESubmissionStatus] = Field(
         default=None,
-        description="Filter by submission status",
     )
 
     page: int = Field(
         default=1,
         ge=1,
-        description="Page number",
     )
 
     per_page: int = Field(
         default=20,
         ge=1,
         le=100,
-        description="Number of records per page",
     )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )
 
 
 class HIESubmissionListResponseSchema(BaseModel):
     items: list[HIESubmissionResponseSchema]
-    total: int
-    page: int
-    per_page: int
+    total: int = Field(
+        ...,
+        ge=0,
+    )
+    page: int = Field(
+        ...,
+        ge=1,
+    )
+    per_page: int = Field(
+        ...,
+        ge=1,
+        le=100,
+    )
 
     model_config = ConfigDict(
+        extra="forbid",
         from_attributes=True,
     )

@@ -25,6 +25,9 @@ from app.modules.patient.models.patient_model import (
 from app.modules.staff.models.staff_model import Staff
 
 from app.modules.patient.services.patient_service import (
+    DEFAULT_PAGE,
+    DEFAULT_PER_PAGE,
+    MAX_PER_PAGE,
     get_patient,
     list_patients,
     create_patient,
@@ -42,10 +45,6 @@ from app.modules.patient.services.patient_service import (
     record_vitals,
 )
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def patient_payload(**overrides):
     data = {
@@ -108,12 +107,6 @@ def vitals_payload(**overrides):
 
 
 def make_patient(db_session, clinic_id, **overrides):
-    """
-    Create a raw Patient for service-level tests.
-
-    Uses a deterministic per-test counter instead of id(overrides), because
-    id(dict) can be reused and therefore cannot safely guarantee uniqueness.
-    """
     if not hasattr(make_patient, "_counter"):
         make_patient._counter = 0
 
@@ -156,11 +149,6 @@ def make_staff(
     user=None,
     **overrides,
 ):
-    """
-    Create a valid Staff record.
-
-    Staff requires first_name and last_name, so provide safe defaults.
-    """
     staff = Staff(
         clinic_id=clinic_id,
         first_name=overrides.pop(
@@ -186,32 +174,33 @@ def make_staff(
 
 
 def suspend_clinic(clinic, db_session):
-    """
-    Put a clinic into the project's actual inactive lifecycle state.
-
-    The clinic model uses ClinicStatus rather than an is_active boolean.
-    """
     clinic.status = ClinicStatus.SUSPENDED
     db_session.flush()
 
 
 def normalize_datetime(value):
-    """
-    Normalize aware/naive datetimes so SQLite-backed tests do not fail merely
-    because timezone information was stripped during persistence.
-    """
     if value is None:
         return None
 
     if value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.astimezone(timezone.utc).replace(
+            tzinfo=None
+        )
 
     return value
 
 
-# ===========================================================================
-# PATIENT RETRIEVAL
-# ===========================================================================
+def assert_page(
+    page,
+    *,
+    expected_page=DEFAULT_PAGE,
+    expected_per_page=DEFAULT_PER_PAGE,
+):
+    assert page.page == expected_page
+    assert page.per_page == expected_per_page
+    assert page.total >= 0
+    assert isinstance(page.items, list)
+
 
 class TestGetPatient:
 
@@ -238,29 +227,18 @@ class TestGetPatient:
         with pytest.raises(NotFoundError):
             get_patient(999999999)
 
-    def test_get_patient_does_not_require_active_clinic(
+    def test_get_patient_rejects_invalid_id(
         self,
-        db_session,
-        clinic,
     ):
-        patient = make_patient(
-            db_session,
-            clinic.id,
-        )
+        with pytest.raises(ValidationError):
+            get_patient(0)
 
-        suspend_clinic(
-            clinic,
-            db_session,
-        )
+        with pytest.raises(ValidationError):
+            get_patient(-1)
 
-        result = get_patient(patient.id)
+        with pytest.raises(ValidationError):
+            get_patient(True)
 
-        assert result.id == patient.id
-
-
-# ===========================================================================
-# PATIENT LISTING
-# ===========================================================================
 
 class TestListPatients:
 
@@ -287,9 +265,11 @@ class TestListPatients:
             clinic_id=clinic.id,
         )
 
+        assert_page(results)
+
         ids = {
             patient.id
-            for patient in results
+            for patient in results.items
         }
 
         assert patient1.id in ids
@@ -319,7 +299,7 @@ class TestListPatients:
 
         ids = {
             patient.id
-            for patient in results
+            for patient in results.items
         }
 
         assert patient1.id in ids
@@ -352,7 +332,7 @@ class TestListPatients:
 
         ids = {
             patient.id
-            for patient in results
+            for patient in results.items
         }
 
         assert active.id in ids
@@ -377,7 +357,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_search_by_first_name(
@@ -399,7 +379,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_search_by_last_name(
@@ -421,7 +401,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_search_by_patient_number(
@@ -442,7 +422,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_search_by_phone(
@@ -463,7 +443,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_search_by_email(
@@ -484,7 +464,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_blank_search_behaves_like_no_search(
@@ -504,7 +484,7 @@ class TestListPatients:
 
         assert patient.id in {
             p.id
-            for p in results
+            for p in results.items
         }
 
     def test_patients_are_ordered_by_last_then_first_name(
@@ -539,7 +519,7 @@ class TestListPatients:
 
         relevant = [
             patient.id
-            for patient in results
+            for patient in results.items
             if patient.id in {
                 first.id,
                 second.id,
@@ -553,10 +533,140 @@ class TestListPatients:
             second.id,
         ]
 
+    def test_list_patients_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patients = []
 
-# ===========================================================================
-# PATIENT CREATION
-# ===========================================================================
+        for index in range(5):
+            patients.append(
+                make_patient(
+                    db_session,
+                    clinic.id,
+                    first_name=f"Patient{index}",
+                    last_name="Pagination",
+                )
+            )
+
+        page = list_patients(
+            clinic_id=clinic.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert_page(
+            page,
+            expected_page=2,
+            expected_per_page=2,
+        )
+
+        assert page.total == 5
+        assert len(page.items) == 2
+
+    def test_list_patients_first_page(
+        self,
+        db_session,
+        clinic,
+    ):
+        for index in range(3):
+            make_patient(
+                db_session,
+                clinic.id,
+                first_name=f"Patient{index}",
+                last_name="FirstPage",
+            )
+
+        page = list_patients(
+            clinic_id=clinic.id,
+            page=1,
+            per_page=2,
+        )
+
+        assert page.page == 1
+        assert page.per_page == 2
+        assert page.total == 3
+        assert len(page.items) == 2
+
+    def test_list_patients_last_partial_page(
+        self,
+        db_session,
+        clinic,
+    ):
+        for index in range(5):
+            make_patient(
+                db_session,
+                clinic.id,
+                first_name=f"Patient{index}",
+                last_name="LastPage",
+            )
+
+        page = list_patients(
+            clinic_id=clinic.id,
+            page=3,
+            per_page=2,
+        )
+
+        assert page.page == 3
+        assert page.total == 5
+        assert len(page.items) == 1
+
+    def test_list_patients_beyond_last_page_is_empty(
+        self,
+        db_session,
+        clinic,
+    ):
+        for index in range(2):
+            make_patient(
+                db_session,
+                clinic.id,
+                first_name=f"Patient{index}",
+                last_name="EmptyPage",
+            )
+
+        page = list_patients(
+            clinic_id=clinic.id,
+            page=99,
+            per_page=2,
+        )
+
+        assert page.page == 99
+        assert page.total == 2
+        assert page.items == []
+
+    def test_list_patients_rejects_invalid_page(
+        self,
+        clinic,
+    ):
+        with pytest.raises(ValidationError):
+            list_patients(
+                clinic_id=clinic.id,
+                page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            list_patients(
+                clinic_id=clinic.id,
+                page=-1,
+            )
+
+    def test_list_patients_rejects_invalid_per_page(
+        self,
+        clinic,
+    ):
+        with pytest.raises(ValidationError):
+            list_patients(
+                clinic_id=clinic.id,
+                per_page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            list_patients(
+                clinic_id=clinic.id,
+                per_page=MAX_PER_PAGE + 1,
+            )
+
 
 class TestCreatePatient:
 
@@ -774,10 +884,16 @@ class TestCreatePatient:
         assert patient.first_name == "John"
         assert patient.last_name == "Doe"
 
+    def test_create_rejects_invalid_clinic_id(
+        self,
+        db_session,
+    ):
+        with pytest.raises(ValidationError):
+            create_patient(
+                0,
+                patient_payload(),
+            )
 
-# ===========================================================================
-# PATIENT UPDATE
-# ===========================================================================
 
 class TestUpdatePatient:
 
@@ -957,10 +1073,18 @@ class TestUpdatePatient:
                 },
             )
 
+    def test_update_rejects_invalid_patient_id(
+        self,
+        db_session,
+    ):
+        with pytest.raises(ValidationError):
+            update_patient(
+                0,
+                {
+                    "first_name": "John",
+                },
+            )
 
-# ===========================================================================
-# PATIENT STATUS
-# ===========================================================================
 
 class TestPatientStatus:
 
@@ -1046,10 +1170,22 @@ class TestPatientStatus:
                 False,
             )
 
+    def test_status_rejects_non_boolean(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
 
-# ===========================================================================
-# FAMILY MEMBERS
-# ===========================================================================
+        with pytest.raises(ValidationError):
+            set_active_status(
+                patient.id,
+                1,
+            )
+
 
 class TestPatientFamilyMembers:
 
@@ -1067,7 +1203,9 @@ class TestPatientFamilyMembers:
             patient.id,
         )
 
-        assert result == []
+        assert_page(result)
+        assert result.total == 0
+        assert result.items == []
 
     def test_add_family_member(
         self,
@@ -1240,7 +1378,7 @@ class TestPatientFamilyMembers:
 
         ids = [
             member.id
-            for member in results
+            for member in results.items
         ]
 
         assert ids.index(
@@ -1248,6 +1386,86 @@ class TestPatientFamilyMembers:
         ) < ids.index(
             normal.id
         )
+
+    def test_list_family_members_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        for index in range(5):
+            add_family_member(
+                patient.id,
+                family_payload(
+                    full_name=f"Member {index}",
+                    is_emergency_contact=False,
+                ),
+            )
+
+        page = list_family_members(
+            patient.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert_page(
+            page,
+            expected_page=2,
+            expected_per_page=2,
+        )
+
+        assert page.total == 5
+        assert len(page.items) == 2
+
+    def test_list_family_members_beyond_last_page_is_empty(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        add_family_member(
+            patient.id,
+            family_payload(),
+        )
+
+        page = list_family_members(
+            patient.id,
+            page=99,
+            per_page=50,
+        )
+
+        assert page.total == 1
+        assert page.items == []
+
+    def test_list_family_members_rejects_invalid_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        with pytest.raises(ValidationError):
+            list_family_members(
+                patient.id,
+                page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            list_family_members(
+                patient.id,
+                per_page=MAX_PER_PAGE + 1,
+            )
 
     def test_update_family_member(
         self,
@@ -1376,10 +1594,6 @@ class TestPatientFamilyMembers:
             )
 
 
-# ===========================================================================
-# INSURANCE
-# ===========================================================================
-
 class TestPatientInsurance:
 
     def test_list_insurances_empty(
@@ -1392,9 +1606,13 @@ class TestPatientInsurance:
             clinic.id,
         )
 
-        assert list_insurances(
+        result = list_insurances(
             patient.id
-        ) == []
+        )
+
+        assert_page(result)
+        assert result.total == 0
+        assert result.items == []
 
     def test_add_insurance(
         self,
@@ -1734,10 +1952,86 @@ class TestPatientInsurance:
                 },
             )
 
+    def test_list_insurances_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
 
-# ===========================================================================
-# VITALS
-# ===========================================================================
+        for index in range(5):
+            add_insurance(
+                patient.id,
+                insurance_payload(
+                    policy_number=f"POL-{index}",
+                    is_primary=False,
+                ),
+            )
+
+        page = list_insurances(
+            patient.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert_page(
+            page,
+            expected_page=2,
+            expected_per_page=2,
+        )
+
+        assert page.total == 5
+        assert len(page.items) == 2
+
+    def test_list_insurances_beyond_last_page_is_empty(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        add_insurance(
+            patient.id,
+            insurance_payload(),
+        )
+
+        page = list_insurances(
+            patient.id,
+            page=99,
+            per_page=50,
+        )
+
+        assert page.total == 1
+        assert page.items == []
+
+    def test_list_insurances_rejects_invalid_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        with pytest.raises(ValidationError):
+            list_insurances(
+                patient.id,
+                page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            list_insurances(
+                patient.id,
+                per_page=MAX_PER_PAGE + 1,
+            )
+
 
 class TestPatientVitals:
 
@@ -1751,9 +2045,13 @@ class TestPatientVitals:
             clinic.id,
         )
 
-        assert get_vitals_history(
+        result = get_vitals_history(
             patient.id
-        ) == []
+        )
+
+        assert_page(result)
+        assert result.total == 0
+        assert result.items == []
 
     def test_get_latest_vitals_empty(
         self,
@@ -1900,7 +2198,7 @@ class TestPatientVitals:
 
         ids = [
             v.id
-            for v in results
+            for v in results.items
         ]
 
         assert first.id in ids
@@ -1964,8 +2262,89 @@ class TestPatientVitals:
             patient.id
         )
 
-        assert results[0].id == second.id
-        assert results[1].id == first.id
+        assert results.items[0].id == second.id
+        assert results.items[1].id == first.id
+
+    def test_vitals_history_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        for index in range(5):
+            record_vitals(
+                patient.id,
+                {
+                    "heart_rate": 70 + index,
+                },
+            )
+
+        page = get_vitals_history(
+            patient.id,
+            page=2,
+            per_page=2,
+        )
+
+        assert_page(
+            page,
+            expected_page=2,
+            expected_per_page=2,
+        )
+
+        assert page.total == 5
+        assert len(page.items) == 2
+
+    def test_vitals_history_beyond_last_page_is_empty(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        record_vitals(
+            patient.id,
+            {
+                "heart_rate": 80,
+            },
+        )
+
+        page = get_vitals_history(
+            patient.id,
+            page=99,
+            per_page=50,
+        )
+
+        assert page.total == 1
+        assert page.items == []
+
+    def test_vitals_history_rejects_invalid_pagination(
+        self,
+        db_session,
+        clinic,
+    ):
+        patient = make_patient(
+            db_session,
+            clinic.id,
+        )
+
+        with pytest.raises(ValidationError):
+            get_vitals_history(
+                patient.id,
+                page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            get_vitals_history(
+                patient.id,
+                per_page=MAX_PER_PAGE + 1,
+            )
 
     def test_record_vitals_missing_patient(
         self,
@@ -1979,10 +2358,6 @@ class TestPatientVitals:
                 },
             )
 
-
-# ===========================================================================
-# VITALS CONSULTATION VALIDATION
-# ===========================================================================
 
 class TestVitalsConsultationValidation:
 
@@ -2005,10 +2380,6 @@ class TestVitalsConsultationValidation:
                 consultation_id=999999999,
             )
 
-
-# ===========================================================================
-# VITALS STAFF VALIDATION
-# ===========================================================================
 
 class TestVitalsStaffValidation:
 
@@ -2084,10 +2455,6 @@ class TestVitalsStaffValidation:
                 recorded_by_id=staff.id,
             )
 
-
-# ===========================================================================
-# INACTIVE CLINIC PROTECTION
-# ===========================================================================
 
 class TestInactiveClinicProtection:
 
@@ -2215,10 +2582,6 @@ class TestInactiveClinicProtection:
             )
 
 
-# ===========================================================================
-# CROSS-PATIENT / OWNERSHIP SAFETY
-# ===========================================================================
-
 class TestPatientOwnershipSafety:
 
     def test_family_member_cannot_be_updated_through_wrong_patient(
@@ -2319,10 +2682,6 @@ class TestPatientOwnershipSafety:
 
         assert insurance.plan_type == "Premium"
 
-
-# ===========================================================================
-# TRANSACTION / PERSISTENCE SAFETY
-# ===========================================================================
 
 class TestPatientPersistenceSafety:
 
@@ -2472,10 +2831,6 @@ class TestPatientPersistenceSafety:
 
         assert after == before
 
-
-# ===========================================================================
-# AUDIT COVERAGE
-# ===========================================================================
 
 class TestPatientAuditCoverage:
 

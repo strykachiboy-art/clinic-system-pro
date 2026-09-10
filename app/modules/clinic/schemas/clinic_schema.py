@@ -1,7 +1,14 @@
 from datetime import time
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    model_validator,
+)
 
 from app.core.enums.clinic_enums import ClinicStatus, ClinicType
 
@@ -19,13 +26,13 @@ class ClinicCreateSchema(BaseModel):
         description="Type of clinic",
     )
 
-    parent_clinic_id: Optional[int] = Field(
+    parent_clinic_id: Optional[StrictInt] = Field(
         None,
         gt=0,
         description="ID of the parent clinic when creating a branch",
     )
 
-    is_headquarters: bool = Field(
+    is_headquarters: StrictBool = Field(
         default=False,
         description="Whether this clinic is a headquarters",
     )
@@ -252,7 +259,7 @@ class ClinicUpdateSchema(BaseModel):
 
 
 class ClinicBranchConfigurationSchema(BaseModel):
-    parent_clinic_id: Optional[int] = Field(
+    parent_clinic_id: Optional[StrictInt] = Field(
         None,
         gt=0,
         description=(
@@ -261,7 +268,7 @@ class ClinicBranchConfigurationSchema(BaseModel):
         ),
     )
 
-    is_headquarters: Optional[bool] = Field(
+    is_headquarters: Optional[StrictBool] = Field(
         None,
         description="Whether this clinic is a headquarters",
     )
@@ -285,7 +292,7 @@ class ClinicStatusUpdateSchema(BaseModel):
 
 
 class ClinicAICreditsUpdateSchema(BaseModel):
-    amount: int = Field(
+    amount: StrictInt = Field(
         ...,
         gt=0,
         description="Number of AI credits to add",

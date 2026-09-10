@@ -3,18 +3,17 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
-from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
-from app.modules.staff.models.staff_model import Staff
-
+from app.extensions import db
 from app.modules.prescription.schemas.prescription_schema import (
     DrugInteractionCheckSchema,
     DrugInteractionCreateSchema,
     PrescriptionCancelSchema,
     PrescriptionCreateSchema,
+    PrescriptionListQuerySchema,
 )
 from app.modules.prescription.services.prescription_service import (
     cancel_prescription,
@@ -25,6 +24,7 @@ from app.modules.prescription.services.prescription_service import (
     get_prescription,
     list_prescriptions_for_patient,
 )
+from app.modules.staff.models.staff_model import Staff
 
 
 prescription_bp = Blueprint(
@@ -73,9 +73,9 @@ def _json_body() -> dict:
     return payload
 
 
-def _get_current_user():
+def _get_current_user() -> User:
     """
-    Return the authenticated user.
+    Return the authenticated active user.
     """
     identity = get_jwt_identity()
 
@@ -86,7 +86,10 @@ def _get_current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -122,10 +125,14 @@ def _get_current_staff() -> Staff:
     """
     Resolve the Staff record belonging to the authenticated user.
 
-    Prescription creation must use the authenticated doctor rather
-    than accepting prescribed_by_id from the request.
+    The authenticated doctor is always used as the prescriber.
     """
     user = _get_current_user()
+
+    if user.clinic_id is None:
+        raise ValidationError(
+            "Authenticated user is not associated with a clinic"
+        )
 
     staff = (
         Staff.query
@@ -165,7 +172,9 @@ def _ensure_prescription_clinic(
 # SERIALIZERS
 # ============================================================================
 
-def _serialize_prescription_item(item):
+def _serialize_prescription_item(
+    item,
+) -> dict:
     return {
         "id": item.id,
         "prescription_id": item.prescription_id,
@@ -180,7 +189,7 @@ def _serialize_prescription_item(item):
 
 def _serialize_prescription(
     prescription,
-):
+) -> dict:
     return {
         "id": prescription.id,
         "clinic_id": prescription.clinic_id,
@@ -210,13 +219,29 @@ def _serialize_prescription(
 
 def _serialize_drug_interaction(
     interaction,
-):
+) -> dict:
     return {
         "id": interaction.id,
         "drug_a_id": interaction.drug_a_id,
         "drug_b_id": interaction.drug_b_id,
         "severity": interaction.severity.value,
         "description": interaction.description,
+    }
+
+
+def _serialize_paginated_prescriptions(
+    result: dict,
+) -> dict:
+    return {
+        "items": [
+            _serialize_prescription(
+                prescription
+            )
+            for prescription in result["items"]
+        ],
+        "total": result["total"],
+        "page": result["page"],
+        "per_page": result["per_page"],
     }
 
 
@@ -235,11 +260,6 @@ def create_prescription_route():
     payload = PrescriptionCreateSchema.model_validate(
         _json_body()
     )
-
-    if staff.id != payload.prescribed_by_id:
-        raise ValidationError(
-            "Authenticated doctor must be the prescribing staff member"
-        )
 
     prescription, warnings = create_prescription(
         clinic_id=clinic_id,
@@ -307,31 +327,24 @@ def list_patient_prescriptions_route(
 ):
     clinic_id = _get_current_clinic_id()
 
-    active_only = (
-        request.args
-        .get(
-            "active_only",
-            "false",
-        )
-        .lower()
-        == "true"
+    query = PrescriptionListQuerySchema.model_validate(
+        request.args.to_dict()
     )
 
-    prescriptions = list_prescriptions_for_patient(
+    result = list_prescriptions_for_patient(
         patient_id=patient_id,
         clinic_id=clinic_id,
-        active_only=active_only,
+        active_only=query.active_only,
+        page=query.page,
+        per_page=query.per_page,
     )
 
     return jsonify(
         {
             "success": True,
-            "data": [
-                _serialize_prescription(
-                    prescription
-                )
-                for prescription in prescriptions
-            ],
+            "data": _serialize_paginated_prescriptions(
+                result
+            ),
         }
     ), 200
 

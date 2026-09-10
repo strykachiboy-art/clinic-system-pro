@@ -120,6 +120,7 @@ class Clinic(db.Model):
     api_token = db.Column(
         db.String(255),
         nullable=True,
+        unique = True,
     )
 
     ai_requests_this_month = db.Column(

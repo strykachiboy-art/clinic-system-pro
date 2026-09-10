@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
-
 from sqlalchemy import select
 
 from app.extensions import db
@@ -44,6 +45,10 @@ from app.modules.lab.services.lab_service import (
 from app.modules.staff.models.staff_model import Staff
 
 
+# ============================================================================
+# BLUEPRINT
+# ============================================================================
+
 lab_bp = Blueprint(
     "lab",
     __name__,
@@ -51,9 +56,9 @@ lab_bp = Blueprint(
 )
 
 
-# ---------------------------------------------------------------------
-# Role groups
-# ---------------------------------------------------------------------
+# ============================================================================
+# ROLE GROUPS
+# ============================================================================
 
 LAB_MANAGEMENT_ROLES = (
     Role.ADMIN,
@@ -79,16 +84,14 @@ LAB_VIEW_ROLES = (
 )
 
 
-# ---------------------------------------------------------------------
-# Authentication / tenancy helpers
-# ---------------------------------------------------------------------
+# ============================================================================
+# AUTHENTICATION / TENANCY HELPERS
+# ============================================================================
 
-
-def _get_current_user():
+def _get_current_user() -> User:
     """
-    Return the authenticated user.
+    Return the authenticated active user.
     """
-
     identity = get_jwt_identity()
 
     try:
@@ -98,7 +101,10 @@ def _get_current_user():
             "Invalid authentication identity"
         )
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise ValidationError(
@@ -117,10 +123,9 @@ def _get_current_clinic_id() -> int:
     """
     Return the clinic associated with the authenticated user.
 
-    This is the only clinic ID source used by tenant-owned
-    Lab routes.
+    The clinic is never accepted from a request payload or query
+    parameter.
     """
-
     user = _get_current_user()
 
     clinic_id = getattr(
@@ -135,7 +140,11 @@ def _get_current_clinic_id() -> int:
             "with a clinic"
         )
 
-    if clinic_id <= 0:
+    if (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
         raise DomainError(
             "Authenticated user has an invalid clinic"
         )
@@ -147,15 +156,17 @@ def _get_current_staff() -> Staff:
     """
     Resolve the authenticated user's Staff record.
 
-    The authenticated user must have a staff record belonging
-    to the same clinic.
-
     Actor IDs are never accepted from the client.
     """
-
     user = _get_current_user()
 
-    if user.clinic_id is None:
+    clinic_id = getattr(
+        user,
+        "clinic_id",
+        None,
+    )
+
+    if clinic_id is None:
         raise DomainError(
             "Authenticated user is not associated "
             "with a clinic"
@@ -165,7 +176,7 @@ def _get_current_staff() -> Staff:
         select(Staff)
         .where(
             Staff.user_id == user.id,
-            Staff.clinic_id == user.clinic_id,
+            Staff.clinic_id == clinic_id,
         )
     )
 
@@ -188,19 +199,16 @@ def _get_current_staff_id() -> int:
     return _get_current_staff().id
 
 
-# ---------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# ERROR HANDLING
+# ============================================================================
 
 def _handle_route_error(exc):
     """
     Convert application/domain errors into consistent API responses.
 
-    Unexpected exceptions are intentionally not exposed with stack
-    traces or internal framework/database details.
+    Unexpected exceptions are intentionally not exposed.
     """
-
     if isinstance(exc, DomainError):
         return jsonify({
             "success": False,
@@ -213,7 +221,9 @@ def _handle_route_error(exc):
     }), 400
 
 
-def _validation_error_response(exc):
+def _validation_error_response(
+    exc: PydanticValidationError,
+):
     details = []
 
     for error in exc.errors():
@@ -235,10 +245,9 @@ def _validation_error_response(exc):
     }), 422
 
 
-# ---------------------------------------------------------------------
-# Serializers
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# SERIALIZERS
+# ============================================================================
 
 def _serialize_lab_test(test):
     return {
@@ -315,80 +324,52 @@ def _serialize_lab_order(order):
         "clinic_id": order.clinic_id,
         "patient_id": order.patient_id,
         "consultation_id": order.consultation_id,
-
-        # -------------------------------------------------------------
-        # Actor tracking
-        # -------------------------------------------------------------
-
         "ordered_by_id": order.ordered_by_id,
         "collected_by_id": order.collected_by_id,
         "processed_by_id": order.processed_by_id,
         "verified_by_id": order.verified_by_id,
-
-        # -------------------------------------------------------------
-        # Status
-        # -------------------------------------------------------------
-
         "status": (
             order.status.value
             if order.status
             else None
         ),
-
         "qr_code": order.qr_code,
-
-        # -------------------------------------------------------------
-        # Lifecycle timestamps
-        # -------------------------------------------------------------
-
         "sample_collected_at": (
             order.sample_collected_at.isoformat()
             if order.sample_collected_at
             else None
         ),
-
         "processed_at": (
             order.processed_at.isoformat()
             if order.processed_at
             else None
         ),
-
         "verified_at": (
             order.verified_at.isoformat()
             if order.verified_at
             else None
         ),
-
         "completed_at": (
             order.completed_at.isoformat()
             if order.completed_at
             else None
         ),
-
-        # -------------------------------------------------------------
-        # Other order information
-        # -------------------------------------------------------------
-
         "equipment_reference_id": (
             order.equipment_reference_id
         ),
-
         "cancellation_reason": (
             order.cancellation_reason
         ),
-
         "created_at": (
             order.created_at.isoformat()
             if order.created_at
             else None
         ),
-
         "updated_at": (
             order.updated_at.isoformat()
             if order.updated_at
             else None
         ),
-
         "items": [
             _serialize_lab_order_item(item)
             for item in order.items
@@ -396,10 +377,33 @@ def _serialize_lab_order(order):
     }
 
 
-# ---------------------------------------------------------------------
-# Lab test catalog
-# ---------------------------------------------------------------------
+def _serialize_lab_test_page(result):
+    return {
+        "items": [
+            _serialize_lab_test(test)
+            for test in result.items
+        ],
+        "total": result.total,
+        "page": result.page,
+        "per_page": result.per_page,
+    }
 
+
+def _serialize_lab_order_page(result):
+    return {
+        "items": [
+            _serialize_lab_order(order)
+            for order in result.items
+        ],
+        "total": result.total,
+        "page": result.page,
+        "per_page": result.per_page,
+    }
+
+
+# ============================================================================
+# LAB TEST CATALOG
+# ============================================================================
 
 @lab_bp.post("/tests")
 @role_required(*LAB_MANAGEMENT_ROLES)
@@ -446,21 +450,18 @@ def list_lab_tests_route():
             request.args.to_dict()
         )
 
-        # Never trust data.clinic_id.
-        # The clinic comes exclusively from authentication.
         clinic_id = _get_current_clinic_id()
 
-        tests = list_lab_tests(
+        result = list_lab_tests(
             clinic_id=clinic_id,
             active_only=data.active_only,
+            page=data.page,
+            per_page=data.per_page,
         )
 
         return jsonify({
             "success": True,
-            "data": [
-                _serialize_lab_test(test)
-                for test in tests
-            ],
+            "data": _serialize_lab_test_page(result),
         }), 200
 
     except PydanticValidationError as exc:
@@ -523,10 +524,9 @@ def update_lab_test_route(test_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Lab orders
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# LAB ORDERS
+# ============================================================================
 
 @lab_bp.post("/orders")
 @role_required(*LAB_CLINICAL_ROLES)
@@ -590,17 +590,16 @@ def list_orders_for_patient_route():
 
         clinic_id = _get_current_clinic_id()
 
-        orders = list_orders_for_patient(
+        result = list_orders_for_patient(
             patient_id=data.patient_id,
             clinic_id=clinic_id,
+            page=data.page,
+            per_page=data.per_page,
         )
 
         return jsonify({
             "success": True,
-            "data": [
-                _serialize_lab_order(order)
-                for order in orders
-            ],
+            "data": _serialize_lab_order_page(result),
         }), 200
 
     except PydanticValidationError as exc:
@@ -610,10 +609,9 @@ def list_orders_for_patient_route():
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Sample collection
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# SAMPLE COLLECTION
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/collect-sample"
@@ -648,10 +646,9 @@ def collect_sample_route(order_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Equipment
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# EQUIPMENT
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/equipment"
@@ -688,10 +685,9 @@ def link_equipment_route(order_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Sample processing
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# SAMPLE PROCESSING
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/process"
@@ -728,10 +724,9 @@ def process_sample_route(order_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Result entry
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESULT ENTRY
+# ============================================================================
 
 @lab_bp.post(
     "/order-items/<int:order_item_id>/result"
@@ -767,10 +762,9 @@ def enter_result_route(order_item_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Result verification
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# RESULT VERIFICATION
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/verify"
@@ -778,8 +772,6 @@ def enter_result_route(order_item_id: int):
 @role_required(*LAB_TECHNICIAN_ROLES)
 def verify_results_route(order_id: int):
     try:
-        # Verification accepts an empty JSON object.
-        # No actor ID is accepted from the client.
         LabVerificationSchema.model_validate(
             request.get_json(silent=True) or {}
         )
@@ -806,10 +798,9 @@ def verify_results_route(order_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Order completion
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# ORDER COMPLETION
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/complete"
@@ -834,10 +825,9 @@ def complete_order_route(order_id: int):
         return _handle_route_error(exc)
 
 
-# ---------------------------------------------------------------------
-# Cancellation
-# ---------------------------------------------------------------------
-
+# ============================================================================
+# CANCELLATION
+# ============================================================================
 
 @lab_bp.post(
     "/orders/<int:order_id>/cancel"
