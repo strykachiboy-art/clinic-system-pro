@@ -573,7 +573,10 @@ def test_deliver_notification_provider_exception_marks_failed(
             failing_provider,
         )
 
-        with pytest.raises(RuntimeError, match="Provider timeout"):
+        with pytest.raises(
+            RuntimeError,
+            match="Provider timeout",
+        ):
             notification_service.deliver_notification(
                 notification_id
             )

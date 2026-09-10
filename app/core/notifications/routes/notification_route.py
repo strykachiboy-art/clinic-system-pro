@@ -1,23 +1,20 @@
+from __future__ import annotations
+
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import (
-    get_jwt_identity,
-    jwt_required,
-)
-from pydantic import ValidationError as PydanticValidationError
+from flask_jwt_extended import get_jwt_identity
 
 from app.core.auth.user.models.user_model import User
+from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     ValidationError,
 )
-
 from app.core.notifications.schemas.notification_schema import (
     NotificationCreateSchema,
     NotificationListQuerySchema,
     NotificationReadSchema,
 )
-
 from app.core.notifications.services.notification_service import (
     create_notification,
     get_notification_for_user,
@@ -25,6 +22,8 @@ from app.core.notifications.services.notification_service import (
     mark_all_notifications_read,
     mark_notification_read,
 )
+from app.core.utils.decorators import role_required
+from app.extensions import db
 
 
 notification_bp = Blueprint(
@@ -34,61 +33,55 @@ notification_bp = Blueprint(
 )
 
 
+NOTIFICATION_ROLES = (
+    Role.DOCTOR,
+    Role.NURSE,
+    Role.PATIENT,
+    Role.PHARMACIST,
+    Role.LAB_TECHNICIAN,
+    Role.RECEPTIONIST,
+    Role.ADMIN,
+    Role.ACCOUNTANT,
+    Role.PARAMEDIC,
+    Role.EMT,
+    Role.DRIVER,
+    Role.AMBULANCE_DISPATCHER,
+    Role.AMBULANCE_COORDINATOR,
+    Role.OTHER,
+)
+
+
 def _payload(schema):
-    """
-    Validate and parse a JSON request payload.
-    """
-    try:
-        return schema.model_validate(
-            request.get_json(silent=True) or {}
-        )
-    except PydanticValidationError as exc:
-        return (
-            jsonify({
-                "success": False,
-                "error": exc.errors(),
-            }),
-            422,
-        )
+    return schema.model_validate(
+        request.get_json(silent=True) or {}
+    )
 
 
 def _query_payload(schema):
-    """
-    Validate and parse query-string parameters.
-    """
-    try:
-        return schema.model_validate(
-            request.args.to_dict()
-        )
-    except PydanticValidationError as exc:
-        return (
-            jsonify({
-                "success": False,
-                "error": exc.errors(),
-            }),
-            422,
-        )
+    return schema.model_validate(
+        request.args.to_dict()
+    )
 
 
 def _get_authenticated_user():
-    """
-    Return the active authenticated user.
-
-    Clinic ownership is derived from the authenticated
-    user and is never accepted from the client.
-    """
     identity = get_jwt_identity()
 
     try:
         user_id = int(identity)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
         raise ValidationError(
-            "Invalid authenticated user identity"
+            "Invalid authentication identity"
+        ) from exc
+
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
         )
 
-    user = User.query.filter(
-        User.id == user_id,
-    ).first()
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         raise NotFoundError(
@@ -96,12 +89,12 @@ def _get_authenticated_user():
         )
 
     if not user.is_active:
-        raise ConflictError(
+        raise ValidationError(
             "Authenticated user is inactive"
         )
 
     if user.clinic_id is None:
-        raise ConflictError(
+        raise ValidationError(
             "Authenticated user is not assigned to a clinic"
         )
 
@@ -109,9 +102,6 @@ def _get_authenticated_user():
 
 
 def _serialize_notification(notification):
-    """
-    Serialize a notification model into an API-safe dictionary.
-    """
     return {
         "id": notification.id,
         "clinic_id": notification.clinic_id,
@@ -163,9 +153,6 @@ def _serialize_notification(notification):
 
 
 def _serialize_notification_page(result):
-    """
-    Serialize a paginated notification service result.
-    """
     return {
         "items": [
             _serialize_notification(notification)
@@ -180,16 +167,25 @@ def _serialize_notification_page(result):
     }
 
 
-@notification_bp.post("/")
-@jwt_required()
-def create():
-    """
-    Create a notification for the authenticated user.
-    """
-    payload = _payload(NotificationCreateSchema)
+def _domain_error_response(exc):
+    status_code = (
+        404
+        if isinstance(exc, NotFoundError)
+        else 400
+    )
 
-    if isinstance(payload, tuple):
-        return payload
+    return jsonify({
+        "success": False,
+        "error": str(exc),
+    }), status_code
+
+
+@notification_bp.post("/")
+@role_required(*NOTIFICATION_ROLES)
+def create():
+    payload = _payload(
+        NotificationCreateSchema
+    )
 
     try:
         user = _get_authenticated_user()
@@ -201,41 +197,25 @@ def create():
 
         return jsonify({
             "success": True,
-            "data": _serialize_notification(notification),
+            "data": _serialize_notification(
+                notification
+            ),
         }), 201
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)
 
 
 @notification_bp.get("/")
-@jwt_required()
+@role_required(*NOTIFICATION_ROLES)
 def list_notifications():
-    """
-    Return paginated notifications for the authenticated user.
-
-    Default:
-        page=1
-        per_page=50
-
-    Maximum:
-        per_page=500
-    """
     query_payload = _query_payload(
         NotificationListQuerySchema
     )
-
-    if isinstance(query_payload, tuple):
-        return query_payload
 
     try:
         user = _get_authenticated_user()
@@ -255,32 +235,20 @@ def list_notifications():
             ),
         }), 200
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)
 
 
 @notification_bp.get("/unread")
-@jwt_required()
+@role_required(*NOTIFICATION_ROLES)
 def unread_notifications():
-    """
-    Return paginated unread notifications for
-    the authenticated user.
-    """
     query_payload = _query_payload(
         NotificationListQuerySchema
     )
-
-    if isinstance(query_payload, tuple):
-        return query_payload
 
     try:
         user = _get_authenticated_user()
@@ -300,26 +268,17 @@ def unread_notifications():
             ),
         }), 200
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)
 
 
 @notification_bp.get("/<int:notification_id>")
-@jwt_required()
+@role_required(*NOTIFICATION_ROLES)
 def get(notification_id: int):
-    """
-    Return one notification belonging to the
-    authenticated user and clinic.
-    """
     try:
         user = _get_authenticated_user()
 
@@ -336,29 +295,20 @@ def get(notification_id: int):
             ),
         }), 200
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)
 
 
 @notification_bp.post("/<int:notification_id>/read")
-@jwt_required()
+@role_required(*NOTIFICATION_ROLES)
 def read(notification_id: int):
-    """
-    Mark one notification as read.
-    """
-    payload = _payload(NotificationReadSchema)
-
-    if isinstance(payload, tuple):
-        return payload
+    payload = _payload(
+        NotificationReadSchema
+    )
 
     try:
         user = _get_authenticated_user()
@@ -376,30 +326,20 @@ def read(notification_id: int):
             ),
         }), 200
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)
 
 
 @notification_bp.post("/read-all")
-@jwt_required()
+@role_required(*NOTIFICATION_ROLES)
 def read_all():
-    """
-    Mark all unread notifications for the authenticated
-    user and clinic as read.
-    """
-    payload = _payload(NotificationReadSchema)
-
-    if isinstance(payload, tuple):
-        return payload
+    payload = _payload(
+        NotificationReadSchema
+    )
 
     try:
         user = _get_authenticated_user()
@@ -416,14 +356,9 @@ def read_all():
             },
         }), 200
 
-    except NotFoundError as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 404
-
-    except (ValidationError, ConflictError) as exc:
-        return jsonify({
-            "success": False,
-            "error": str(exc),
-        }), 400
+    except (
+        NotFoundError,
+        ValidationError,
+        ConflictError,
+    ) as exc:
+        return _domain_error_response(exc)

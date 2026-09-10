@@ -37,6 +37,7 @@ from app.modules.clinic.services.clinic_service import (
 DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 50
 MAX_PER_PAGE = 500
+MAX_DELIVERY_RETRIES = 5
 
 
 # ============================================================================
@@ -129,12 +130,15 @@ def _normalize_enum(
     if isinstance(value, enum_class):
         return value
 
+    if isinstance(value, str):
+        value = value.strip().lower()
+
     try:
         return enum_class(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise ValidationError(
             f"Invalid {field_name}"
-        )
+        ) from exc
 
 
 def _validate_pagination(
@@ -178,6 +182,18 @@ def _validate_pagination(
     return page, per_page
 
 
+def _validate_bool(
+    value,
+    field_name,
+):
+    if not isinstance(value, bool):
+        raise ValidationError(
+            f"{field_name} must be a boolean"
+        )
+
+    return value
+
+
 # ============================================================================
 # USER / CLINIC HELPERS
 # ============================================================================
@@ -193,18 +209,26 @@ def _get_user(
         "User ID",
     )
 
-    query = User.query.filter(
-        User.id == user_id,
-    )
-
     if clinic_id is not None:
-        query = query.filter(
-            User.clinic_id == clinic_id,
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
         )
 
-    user = query.first()
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
+        raise NotFoundError(
+            f"User {user_id} not found"
+        )
+
+    if (
+        clinic_id is not None
+        and user.clinic_id != clinic_id
+    ):
         raise NotFoundError(
             f"User {user_id} not found"
         )
@@ -254,21 +278,27 @@ def _get_notification(
         "Notification ID",
     )
 
-    query = Notification.query.filter(
-        Notification.id == notification_id,
-    )
-
     if clinic_id is not None:
-        query = query.filter(
-            Notification.clinic_id == clinic_id,
+        _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
         )
 
-    if lock:
-        query = query.with_for_update()
-
-    notification = query.first()
+    notification = db.session.get(
+        Notification,
+        notification_id,
+        with_for_update=lock,
+    )
 
     if notification is None:
+        raise NotFoundError(
+            f"Notification {notification_id} not found"
+        )
+
+    if (
+        clinic_id is not None
+        and notification.clinic_id != clinic_id
+    ):
         raise NotFoundError(
             f"Notification {notification_id} not found"
         )
@@ -324,21 +354,16 @@ def _deliver_with_provider(notification):
     """
 
     if notification.channel == NotificationChannel.EMAIL:
-        # Email provider integration goes here.
-        #
-        # Example future behavior:
-        # return email_provider.send(...)
-        #
-        # Keep this boundary isolated from routes and Celery.
-        return True
+        # Email provider integration will replace this boundary.
+        return False
 
     if notification.channel == NotificationChannel.SMS:
-        # SMS provider integration goes here.
-        return True
+        # SMS provider integration will replace this boundary.
+        return False
 
     if notification.channel == NotificationChannel.PUSH:
-        # Push provider integration goes here.
-        return True
+        # Push provider integration will replace this boundary.
+        return False
 
     raise ValidationError(
         "Unsupported notification channel for delivery"
@@ -462,6 +487,9 @@ def create_notification(
 
 def queue_notification_delivery(
     notification_id,
+    *,
+    clinic_id=None,
+    user_id=None,
 ):
     """
     Queue an external notification for asynchronous
@@ -472,7 +500,19 @@ def queue_notification_delivery(
 
     notification = _get_notification(
         notification_id,
+        clinic_id=clinic_id,
     )
+
+    if user_id is not None:
+        _validate_positive_id(
+            user_id,
+            "User ID",
+        )
+
+        if notification.user_id != user_id:
+            raise NotFoundError(
+                f"Notification {notification.id} not found"
+            )
 
     if notification.channel == NotificationChannel.IN_APP:
         return notification
@@ -485,6 +525,16 @@ def queue_notification_delivery(
             f"Notification {notification.id} "
             f"cannot be queued from status "
             f"'{notification.status.value}'"
+        )
+
+    if (
+        notification.status == NotificationStatus.FAILED
+        and notification.retry_count >= MAX_DELIVERY_RETRIES
+    ):
+        raise ConflictError(
+            f"Notification {notification.id} has reached "
+            f"the maximum delivery retry limit of "
+            f"{MAX_DELIVERY_RETRIES}"
         )
 
     deliver_notification.delay(
@@ -525,12 +575,12 @@ def deliver_notification(
     except ValidationError:
         return False
 
-    notification = db.session.get(
-        Notification,
-        notification_id,
-    )
-
-    if notification is None:
+    try:
+        notification = _get_notification(
+            notification_id,
+            lock=True,
+        )
+    except NotFoundError:
         return False
 
     # Terminal states are idempotent.
@@ -650,6 +700,11 @@ def get_user_notifications(
     page, per_page = _validate_pagination(
         page,
         per_page,
+    )
+
+    unread_only = _validate_bool(
+        unread_only,
+        "Unread-only",
     )
 
     query = Notification.query.filter(
@@ -973,6 +1028,8 @@ def retry_notification(
     old_status = notification.status
 
     notification.status = NotificationStatus.PENDING
+    notification.sent_at = None
+    notification.delivered_at = None
     notification.failed_at = None
     notification.error_message = None
 

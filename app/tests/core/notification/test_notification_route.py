@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -1723,7 +1725,6 @@ def test_authenticated_user_must_exist(
 def test_authenticated_user_identity_must_be_integer(
     app,
     client,
-    assert_domain_error,
 ):
     with app.test_request_context():
         token = create_access_token(
@@ -1740,11 +1741,12 @@ def test_authenticated_user_identity_must_be_integer(
         },
     )
 
-    body = assert_domain_error(response, 400)
+    body = response.get_json()
 
-    assert body["error"] == (
-        "Invalid authenticated user identity"
-    )
+    assert response.status_code == 401
+    assert body == {
+        "error": "Invalid authentication identity",
+    }
 
 
 def test_inactive_authenticated_user_is_rejected(
