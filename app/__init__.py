@@ -75,6 +75,8 @@ def register_blueprints(app):
     from app.modules.settings.routes.settings_routes import settings_bp
     from app.modules.staff.routes.staff_route import staff_bp
     from app.modules.ward.routes.ward_route import ward_bp
+    from app.core.auth.user.routes.user_device_routes import user_device_bp
+    
 
     app.register_blueprint(web_bp)
     app.register_blueprint(auth_bp)
@@ -102,3 +104,4 @@ def register_blueprints(app):
     app.register_blueprint(notification_bp)
 
     app.register_blueprint(settings_bp)
+    app.register_blueprint(user_device_bp)
