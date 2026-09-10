@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -10,9 +12,17 @@ from app.modules.billing.services.gateways.paystack_gateway import (
 
 
 @pytest.fixture
-def paystack_app(app):
-    app.config["PAYSTACK_SECRET_KEY"] = "sk_test_secret"
-    return app
+def paystack_credentials():
+    return {
+        "secret_key": "sk_test_secret",
+    }
+
+
+@pytest.fixture
+def gateway(paystack_credentials):
+    return PaystackGateway(
+        credentials=paystack_credentials,
+    )
 
 
 def _webhook_signature(
@@ -54,22 +64,19 @@ def _webhook_payload(**overrides):
 
 
 def test_handle_webhook_success(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result == {
         "provider": "paystack",
@@ -85,72 +92,63 @@ def test_handle_webhook_success(
 
 
 def test_handle_webhook_reads_signature_from_lowercase_header(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            headers={
-                "x-paystack-signature": signature,
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        headers={
+            "x-paystack-signature": signature,
+        },
+    )
 
     assert result["status"] == "successful"
     assert result["transaction_id"] == "123456"
 
 
 def test_handle_webhook_reads_signature_from_title_case_header(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            headers={
-                "X-Paystack-Signature": signature,
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        headers={
+            "X-Paystack-Signature": signature,
+        },
+    )
 
     assert result["status"] == "successful"
 
 
 def test_handle_webhook_explicit_signature_takes_precedence(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-            headers={
-                "x-paystack-signature": "wrong",
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+        headers={
+            "x-paystack-signature": "wrong",
+        },
+    )
 
     assert result["status"] == "successful"
 
@@ -177,92 +175,103 @@ def test_handle_webhook_explicit_signature_takes_precedence(
     ],
 )
 def test_handle_webhook_rejects_missing_or_invalid_signature(
-    paystack_app,
+    gateway,
     signature,
     expected_message,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        with pytest.raises(
-            ValueError,
-            match=expected_message,
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match=expected_message,
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 def test_handle_webhook_rejects_tampered_payload(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    original_payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        original_payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(
+        original_payload
+    )
 
-        signature = _webhook_signature(
-            original_payload
+    tampered_payload = json.dumps(
+        _webhook_payload(
+            data={
+                "amount": 999999,
+            }
+        ),
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Paystack webhook signature",
+    ):
+        gateway.handle_webhook(
+            payload=tampered_payload,
+            signature=signature,
         )
-
-        tampered_payload = json.dumps(
-            _webhook_payload(
-                data={
-                    "amount": 999999,
-                }
-            ),
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Paystack webhook signature",
-        ):
-            gateway.handle_webhook(
-                payload=tampered_payload,
-                signature=signature,
-            )
 
 
 def test_handle_webhook_requires_payload(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
-
-        with pytest.raises(
-            ValueError,
-            match="Webhook payload is required",
-        ):
-            gateway.handle_webhook(
-                payload=b"",
-                signature="anything",
-            )
+    with pytest.raises(
+        ValueError,
+        match="Webhook payload is required",
+    ):
+        gateway.handle_webhook(
+            payload=b"",
+            signature="anything",
+        )
 
 
-def test_handle_webhook_requires_secret_key(
-    app,
+def test_handle_webhook_requires_secret_key():
+    with pytest.raises(
+        ValueError,
+        match="Paystack secret key is not configured",
+    ):
+        PaystackGateway(
+            credentials={},
+        )
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {
+            "secret_key": "",
+        },
+        {
+            "secret_key": None,
+        },
+        {
+            "secret_key": 123,
+        },
+    ],
+)
+def test_handle_webhook_rejects_invalid_secret_key(
+    credentials,
 ):
-    app.config.pop(
-        "PAYSTACK_SECRET_KEY",
-        None,
-    )
-
-    with app.app_context():
-        with pytest.raises(
-            ValueError,
-            match="Paystack secret key is not configured",
-        ):
-            PaystackGateway()
+    with pytest.raises(
+        ValueError,
+        match="Paystack secret key is not configured",
+    ):
+        PaystackGateway(
+            credentials=credentials,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -271,86 +280,74 @@ def test_handle_webhook_requires_secret_key(
 
 
 def test_handle_webhook_rejects_invalid_json(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = b"{not-valid-json}"
+    signature = _webhook_signature(payload)
 
-        payload = b"{not-valid-json}"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Paystack webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Invalid Paystack webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 def test_handle_webhook_rejects_invalid_utf8(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = b"\xff\xfe\xfd"
+    signature = _webhook_signature(payload)
 
-        payload = b"\xff\xfe\xfd"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Paystack webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Invalid Paystack webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 def test_handle_webhook_rejects_non_object_json(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = b"[]"
+    signature = _webhook_signature(payload)
 
-        payload = b"[]"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Paystack webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Invalid Paystack webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 def test_handle_webhook_requires_event_type(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload()
+    event.pop("event")
 
-        event = _webhook_payload()
-        event.pop("event")
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Paystack webhook event type is missing",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Paystack webhook event type is missing",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 @pytest.mark.parametrize(
@@ -362,30 +359,27 @@ def test_handle_webhook_requires_event_type(
     ],
 )
 def test_handle_webhook_rejects_invalid_event_data(
-    paystack_app,
+    gateway,
     event_data,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload()
+    event["data"] = event_data
 
-        event = _webhook_payload()
-        event["data"] = event_data
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Paystack webhook data",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Invalid Paystack webhook data",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -394,50 +388,44 @@ def test_handle_webhook_rejects_invalid_event_data(
 
 
 def test_handle_webhook_uses_transaction_id_as_event_id(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    payload = json.dumps(
+        _webhook_payload(
+            data={
+                "id": 555555,
+            }
+        ),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(
-                data={
-                    "id": 555555,
-                }
-            ),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["event_id"] == "555555"
 
 
 def test_handle_webhook_falls_back_to_payload_hash(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload()
+    event["data"].pop("id")
 
-        event = _webhook_payload()
-        event["data"].pop("id")
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["event_id"] == hashlib.sha256(
         payload
@@ -445,55 +433,49 @@ def test_handle_webhook_falls_back_to_payload_hash(
 
 
 def test_handle_webhook_sets_live_mode(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        data={
+            "domain": "live",
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "domain": "live",
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["livemode"] is True
 
 
 def test_handle_webhook_sets_test_mode(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        data={
+            "domain": "test",
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "domain": "test",
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["livemode"] is False
 
@@ -507,93 +489,84 @@ def test_handle_webhook_sets_test_mode(
     ],
 )
 def test_handle_webhook_normalizes_failed_transactions(
-    paystack_app,
+    gateway,
     status,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        event="charge.failed",
+        data={
+            "status": status,
+            "gateway_response": "Declined",
+        },
+    )
 
-        event = _webhook_payload(
-            event="charge.failed",
-            data={
-                "status": status,
-                "gateway_response": "Declined",
-            },
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
     assert result["failure_reason"] == "Declined"
 
 
 def test_handle_webhook_uses_message_as_failure_reason(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        event="charge.failed",
+        data={
+            "status": "failed",
+            "gateway_response": None,
+            "message": "Card declined",
+        },
+    )
 
-        event = _webhook_payload(
-            event="charge.failed",
-            data={
-                "status": "failed",
-                "gateway_response": None,
-                "message": "Card declined",
-            },
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
     assert result["failure_reason"] == "Card declined"
 
 
 def test_handle_webhook_uses_default_failure_reason(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        event="charge.failed",
+        data={
+            "status": "failed",
+            "gateway_response": None,
+            "message": None,
+        },
+    )
 
-        event = _webhook_payload(
-            event="charge.failed",
-            data={
-                "status": "failed",
-                "gateway_response": None,
-                "message": None,
-            },
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
     assert result["failure_reason"] == (
@@ -627,87 +600,78 @@ def test_handle_webhook_uses_default_failure_reason(
     ],
 )
 def test_handle_webhook_normalizes_other_statuses(
-    paystack_app,
+    gateway,
     event_type,
     status,
     expected_status,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        event=event_type,
+        data={
+            "status": status,
+        },
+    )
 
-        event = _webhook_payload(
-            event=event_type,
-            data={
-                "status": status,
-            },
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == expected_status
 
 
 def test_handle_webhook_normalizes_currency(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = _webhook_payload(
+        data={
+            "currency": "usd",
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "currency": "usd",
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["currency"] == "USD"
 
 
 def test_handle_webhook_allows_missing_optional_transaction_fields(
-    paystack_app,
+    gateway,
 ):
-    with paystack_app.app_context():
-        gateway = PaystackGateway()
+    event = {
+        "event": "charge.updated",
+        "data": {
+            "status": "pending",
+        },
+    }
 
-        event = {
-            "event": "charge.updated",
-            "data": {
-                "status": "pending",
-            },
-        }
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["provider"] == "paystack"
     assert result["event_type"] == "charge.updated"

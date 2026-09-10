@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -10,18 +12,18 @@ from app.modules.billing.services.gateways.stripe_gateway import (
 
 
 @pytest.fixture
-def stripe_app(app):
-    app.config["STRIPE_SECRET_KEY"] = "sk_test_secret"
-    app.config["STRIPE_WEBHOOK_SECRET"] = (
-        "whsec_test_secret"
-    )
-    return app
+def stripe_credentials():
+    return {
+        "secret_key": "sk_test_secret",
+        "webhook_secret": "whsec_test_secret",
+    }
 
 
 @pytest.fixture
-def gateway(stripe_app):
-    with stripe_app.app_context():
-        return StripeGateway()
+def gateway(stripe_credentials):
+    return StripeGateway(
+        credentials=stripe_credentials,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -29,34 +31,55 @@ def gateway(stripe_app):
 # ---------------------------------------------------------------------------
 
 
-def test_gateway_requires_secret_key(app):
-    app.config.pop(
-        "STRIPE_SECRET_KEY",
-        None,
-    )
+def test_gateway_requires_secret_key():
+    credentials = {}
 
-    with app.app_context():
-        with pytest.raises(
-            ValueError,
-            match="Stripe secret key is not configured",
-        ):
-            StripeGateway()
+    with pytest.raises(
+        ValueError,
+        match="Stripe secret key is not configured",
+    ):
+        StripeGateway(
+            credentials=credentials,
+        )
 
 
-def test_gateway_sets_stripe_api_key(
-    stripe_app,
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {"secret_key": ""},
+        {"secret_key": None},
+        {"secret_key": 123},
+        {"webhook_secret": "whsec_test_secret"},
+    ],
+)
+def test_gateway_rejects_invalid_secret_key(
+    credentials,
+):
+    with pytest.raises(
+        ValueError,
+        match="Stripe secret key is not configured",
+    ):
+        StripeGateway(
+            credentials=credentials,
+        )
+
+
+def test_gateway_does_not_mutate_global_stripe_api_key(
+    stripe_credentials,
     monkeypatch,
 ):
     monkeypatch.setattr(
         stripe,
         "api_key",
-        None,
+        "existing_global_key",
     )
 
-    with stripe_app.app_context():
-        StripeGateway()
+    gateway = StripeGateway(
+        credentials=stripe_credentials,
+    )
 
-    assert stripe.api_key == "sk_test_secret"
+    assert gateway.secret_key == "sk_test_secret"
+    assert stripe.api_key == "existing_global_key"
 
 
 # ---------------------------------------------------------------------------
@@ -370,41 +393,38 @@ def test_from_smallest_unit_rejects_invalid_provider_amount(
 
 
 def test_initialize_payment_success(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_123"
+    intent.status = "requires_payment_method"
+    intent.client_secret = "pi_secret_123"
 
-        intent = Mock()
-        intent.id = "pi_123"
-        intent.status = "requires_payment_method"
-        intent.client_secret = "pi_secret_123"
+    mock_create = Mock(
+        return_value=intent
+    )
 
-        mock_create = Mock(
-            return_value=intent
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
-            mock_create,
-        )
-
-        result = gateway.initialize_payment(
-            reference="INV-001",
-            amount=Decimal("125.50"),
-            currency="NGN",
-            customer_email=(
-                " patient@example.com "
-            ),
-            callback_url=(
-                "https://example.com/callback"
-            ),
-            metadata={
-                "clinic_id": 10,
-                "invoice_id": 25,
-            },
-        )
+    result = gateway.initialize_payment(
+        reference="INV-001",
+        amount=Decimal("125.50"),
+        currency="NGN",
+        customer_email=(
+            " patient@example.com "
+        ),
+        callback_url=(
+            "https://example.com/callback"
+        ),
+        metadata={
+            "clinic_id": 10,
+            "invoice_id": 25,
+        },
+    )
 
     assert result == {
         "provider": "stripe",
@@ -421,6 +441,7 @@ def test_initialize_payment_success(
     _, kwargs = mock_create.call_args
 
     assert kwargs == {
+        "api_key": "sk_test_secret",
         "amount": 12550,
         "currency": "ngn",
         "automatic_payment_methods": {
@@ -439,32 +460,29 @@ def test_initialize_payment_success(
 
 
 def test_initialize_payment_without_optional_fields(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_456"
+    intent.status = "requires_confirmation"
+    intent.client_secret = "secret_456"
 
-        intent = Mock()
-        intent.id = "pi_456"
-        intent.status = "requires_confirmation"
-        intent.client_secret = "secret_456"
+    mock_create = Mock(
+        return_value=intent
+    )
 
-        mock_create = Mock(
-            return_value=intent
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
-            mock_create,
-        )
-
-        result = gateway.initialize_payment(
-            reference="REF-123",
-            amount=Decimal("50"),
-            currency="USD",
-            customer_email="user@example.com",
-        )
+    result = gateway.initialize_payment(
+        reference="REF-123",
+        amount=Decimal("50"),
+        currency="USD",
+        customer_email="user@example.com",
+    )
 
     assert result["provider"] == "stripe"
     assert result["reference"] == "REF-123"
@@ -474,45 +492,46 @@ def test_initialize_payment_without_optional_fields(
 
     _, kwargs = mock_create.call_args
 
+    assert kwargs["api_key"] == "sk_test_secret"
+
     assert kwargs["metadata"] == {
         "reference": "REF-123",
     }
 
 
 def test_initialize_payment_converts_metadata_values_to_strings(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_789"
+    intent.status = "requires_payment_method"
+    intent.client_secret = "secret_789"
 
-        intent = Mock()
-        intent.id = "pi_789"
-        intent.status = "requires_payment_method"
-        intent.client_secret = "secret_789"
+    mock_create = Mock(
+        return_value=intent
+    )
 
-        mock_create = Mock(
-            return_value=intent
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
-            mock_create,
-        )
-
-        gateway.initialize_payment(
-            reference="REF-1",
-            amount=Decimal("100"),
-            currency="USD",
-            customer_email="user@example.com",
-            metadata={
-                1: 25,
-                "boolean": True,
-                "none": None,
-            },
-        )
+    gateway.initialize_payment(
+        reference="REF-1",
+        amount=Decimal("100"),
+        currency="USD",
+        customer_email="user@example.com",
+        metadata={
+            1: 25,
+            "boolean": True,
+            "none": None,
+        },
+    )
 
     _, kwargs = mock_create.call_args
+
+    assert kwargs["api_key"] == "sk_test_secret"
 
     assert kwargs["metadata"] == {
         "reference": "REF-1",
@@ -523,64 +542,58 @@ def test_initialize_payment_converts_metadata_values_to_strings(
 
 
 def test_initialize_payment_handles_stripe_error(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
-        mock_create = Mock(
-            side_effect=stripe.StripeError(
-                "card setup failed"
-            )
+    mock_create = Mock(
+        side_effect=stripe.StripeError(
+            "card setup failed"
         )
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
-            mock_create,
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Stripe payment initialization failed"
+        ),
+    ):
+        gateway.initialize_payment(
+            reference="REF-1",
+            amount=Decimal("100"),
+            currency="USD",
+            customer_email="user@example.com",
         )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                "Stripe payment initialization failed"
-            ),
-        ):
-            gateway.initialize_payment(
-                reference="REF-1",
-                amount=Decimal("100"),
-                currency="USD",
-                customer_email="user@example.com",
-            )
 
 
 def test_initialize_payment_rejects_invalid_payment_intent(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = None
 
-        intent = Mock()
-        intent.id = None
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        Mock(return_value=intent),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
-            Mock(return_value=intent),
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Stripe returned an invalid PaymentIntent"
+        ),
+    ):
+        gateway.initialize_payment(
+            reference="REF-1",
+            amount=Decimal("100"),
+            currency="USD",
+            customer_email="user@example.com",
         )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                "Stripe returned an invalid PaymentIntent"
-            ),
-        ):
-            gateway.initialize_payment(
-                reference="REF-1",
-                amount=Decimal("100"),
-                currency="USD",
-                customer_email="user@example.com",
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -589,33 +602,30 @@ def test_initialize_payment_rejects_invalid_payment_intent(
 
 
 def test_verify_payment_success(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_123"
+    intent.status = "succeeded"
+    intent.currency = "ngn"
+    intent.amount = 12550
+    intent.metadata = {
+        "reference": "INV-001",
+    }
 
-        intent = Mock()
-        intent.id = "pi_123"
-        intent.status = "succeeded"
-        intent.currency = "ngn"
-        intent.amount = 12550
-        intent.metadata = {
-            "reference": "INV-001",
-        }
+    mock_retrieve = Mock(
+        return_value=intent
+    )
 
-        mock_retrieve = Mock(
-            return_value=intent
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
+        mock_retrieve,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
-            mock_retrieve,
-        )
-
-        result = gateway.verify_payment(
-            reference="pi_123"
-        )
+    result = gateway.verify_payment(
+        reference="pi_123"
+    )
 
     assert result == {
         "provider": "stripe",
@@ -628,32 +638,30 @@ def test_verify_payment_success(
     }
 
     mock_retrieve.assert_called_once_with(
-        "pi_123"
+        "pi_123",
+        api_key="sk_test_secret",
     )
 
 
 def test_verify_payment_uses_input_reference_when_metadata_missing(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_123"
+    intent.status = "processing"
+    intent.currency = "usd"
+    intent.amount = 5000
+    intent.metadata = {}
 
-        intent = Mock()
-        intent.id = "pi_123"
-        intent.status = "processing"
-        intent.currency = "usd"
-        intent.amount = 5000
-        intent.metadata = {}
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
+        Mock(return_value=intent),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
-            Mock(return_value=intent),
-        )
-
-        result = gateway.verify_payment(
-            reference="pi_123"
-        )
+    result = gateway.verify_payment(
+        reference="pi_123"
+    )
 
     assert result["reference"] == "pi_123"
     assert result["amount"] == Decimal("50")
@@ -661,56 +669,50 @@ def test_verify_payment_uses_input_reference_when_metadata_missing(
 
 
 def test_verify_payment_handles_stripe_error(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
-            Mock(
-                side_effect=stripe.StripeError(
-                    "payment intent not found"
-                )
-            ),
-        )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                "Stripe payment verification failed"
-            ),
-        ):
-            gateway.verify_payment(
-                reference="pi_missing"
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
+        Mock(
+            side_effect=stripe.StripeError(
+                "payment intent not found"
             )
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Stripe payment verification failed"
+        ),
+    ):
+        gateway.verify_payment(
+            reference="pi_missing"
+        )
 
 
 def test_verify_payment_rejects_invalid_payment_intent(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = None
 
-        intent = Mock()
-        intent.id = None
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
+        Mock(return_value=intent),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
-            Mock(return_value=intent),
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Stripe returned an invalid PaymentIntent"
+        ),
+    ):
+        gateway.verify_payment(
+            reference="pi_invalid"
         )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                "Stripe returned an invalid PaymentIntent"
-            ),
-        ):
-            gateway.verify_payment(
-                reference="pi_invalid"
-            )
 
 
 @pytest.mark.parametrize(
@@ -724,29 +726,26 @@ def test_verify_payment_rejects_invalid_payment_intent(
     ],
 )
 def test_verify_payment_normalizes_paid_status(
-    stripe_app,
+    gateway,
     monkeypatch,
     status,
     paid,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    intent = Mock()
+    intent.id = "pi_test"
+    intent.status = status
+    intent.currency = "usd"
+    intent.amount = 10000
+    intent.metadata = {}
 
-        intent = Mock()
-        intent.id = "pi_test"
-        intent.status = status
-        intent.currency = "usd"
-        intent.amount = 10000
-        intent.metadata = {}
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
+        Mock(return_value=intent),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.retrieve",
-            Mock(return_value=intent),
-        )
-
-        result = gateway.verify_payment(
-            reference="pi_test"
-        )
+    result = gateway.verify_payment(
+        reference="pi_test"
+    )
 
     assert result["status"] == status
     assert result["paid"] is paid

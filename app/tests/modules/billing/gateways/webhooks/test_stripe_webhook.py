@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -10,18 +12,18 @@ from app.modules.billing.services.gateways.stripe_gateway import (
 
 
 @pytest.fixture
-def stripe_app(app):
-    app.config["STRIPE_SECRET_KEY"] = "sk_test_secret"
-    app.config["STRIPE_WEBHOOK_SECRET"] = (
-        "whsec_test_secret"
-    )
-    return app
+def stripe_credentials():
+    return {
+        "secret_key": "sk_test_secret",
+        "webhook_secret": "whsec_test_secret",
+    }
 
 
 @pytest.fixture
-def gateway(stripe_app):
-    with stripe_app.app_context():
-        return StripeGateway()
+def gateway(stripe_credentials):
+    return StripeGateway(
+        credentials=stripe_credentials,
+    )
 
 
 def _event_payload(
@@ -58,23 +60,20 @@ def _event_payload(
 
 
 def test_handle_webhook_success(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    expected_event = _event_payload()
 
-        expected_event = _event_payload()
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(return_value=expected_event),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(return_value=expected_event),
-        )
-
-        result = gateway.handle_webhook(
-            payload=b'{"stripe":"payload"}',
-            signature="t=123,v1=valid",
-        )
+    result = gateway.handle_webhook(
+        payload=b'{"stripe":"payload"}',
+        signature="t=123,v1=valid",
+    )
 
     assert result == {
         "provider": "stripe",
@@ -92,31 +91,28 @@ def test_handle_webhook_success(
 
 
 def test_handle_webhook_reads_signature_from_header(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    expected_event = _event_payload()
 
-        expected_event = _event_payload()
+    mock_construct = Mock(
+        return_value=expected_event
+    )
 
-        mock_construct = Mock(
-            return_value=expected_event
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        mock_construct,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            mock_construct,
-        )
+    payload = b'{"stripe":"payload"}'
 
-        payload = b'{"stripe":"payload"}'
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            headers={
-                "Stripe-Signature": "t=123,v1=valid",
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        headers={
+            "Stripe-Signature": "t=123,v1=valid",
+        },
+    )
 
     assert result["status"] == "successful"
 
@@ -128,30 +124,27 @@ def test_handle_webhook_reads_signature_from_header(
 
 
 def test_handle_webhook_explicit_signature_takes_precedence(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    expected_event = _event_payload()
 
-        expected_event = _event_payload()
+    mock_construct = Mock(
+        return_value=expected_event
+    )
 
-        mock_construct = Mock(
-            return_value=expected_event
-        )
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        mock_construct,
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            mock_construct,
-        )
-
-        gateway.handle_webhook(
-            payload=b'{"stripe":"payload"}',
-            signature="explicit-signature",
-            headers={
-                "Stripe-Signature": "header-signature",
-            },
-        )
+    gateway.handle_webhook(
+        payload=b'{"stripe":"payload"}',
+        signature="explicit-signature",
+        headers={
+            "Stripe-Signature": "header-signature",
+        },
+    )
 
     mock_construct.assert_called_once_with(
         b'{"stripe":"payload"}',
@@ -182,113 +175,101 @@ def test_handle_webhook_explicit_signature_takes_precedence(
     ],
 )
 def test_handle_webhook_rejects_missing_or_invalid_signature(
-    stripe_app,
+    gateway,
     monkeypatch,
     signature,
     expected_message,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
-        if signature not in (None, "", "   "):
-            monkeypatch.setattr(
-                "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-                Mock(
-                    side_effect=stripe.SignatureVerificationError(
-                        "invalid signature",
-                        "sig_header",
-                    )
-                ),
-            )
-
-        elif signature == "   ":
-            monkeypatch.setattr(
-                "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-                Mock(
-                    side_effect=stripe.SignatureVerificationError(
-                        "invalid signature",
-                        "sig_header",
-                    )
-                ),
-            )
-
-        with pytest.raises(
-            ValueError,
-            match=expected_message,
-        ):
-            gateway.handle_webhook(
-                payload=b"{}",
-                signature=signature,
-            )
-
-
-def test_handle_webhook_rejects_tampered_signature(
-    stripe_app,
-    monkeypatch,
-):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
+    if signature not in (None, ""):
         monkeypatch.setattr(
             "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
             Mock(
                 side_effect=stripe.SignatureVerificationError(
-                    "signature mismatch",
+                    "invalid signature",
                     "sig_header",
                 )
             ),
         )
 
-        with pytest.raises(
-            ValueError,
-            match="Invalid Stripe webhook signature",
-        ):
-            gateway.handle_webhook(
-                payload=b'{"amount":999999}',
-                signature="tampered-signature",
+    with pytest.raises(
+        ValueError,
+        match=expected_message,
+    ):
+        gateway.handle_webhook(
+            payload=b"{}",
+            signature=signature,
+        )
+
+
+def test_handle_webhook_rejects_tampered_signature(
+    gateway,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(
+            side_effect=stripe.SignatureVerificationError(
+                "signature mismatch",
+                "sig_header",
             )
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Stripe webhook signature",
+    ):
+        gateway.handle_webhook(
+            payload=b'{"amount":999999}',
+            signature="tampered-signature",
+        )
 
 
 def test_handle_webhook_requires_payload(
-    stripe_app,
+    gateway,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
-        with pytest.raises(
-            ValueError,
-            match="Webhook payload is required",
-        ):
-            gateway.handle_webhook(
-                payload=b"",
-                signature="anything",
-            )
+    with pytest.raises(
+        ValueError,
+        match="Webhook payload is required",
+    ):
+        gateway.handle_webhook(
+            payload=b"",
+            signature="anything",
+        )
 
 
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {
+            "secret_key": "sk_test_secret",
+        },
+        {
+            "secret_key": "sk_test_secret",
+            "webhook_secret": "",
+        },
+        {
+            "secret_key": "sk_test_secret",
+            "webhook_secret": None,
+        },
+        {
+            "secret_key": "sk_test_secret",
+            "webhook_secret": 123,
+        },
+    ],
+)
 def test_handle_webhook_requires_webhook_secret(
-    app,
+    credentials,
 ):
-    app.config["STRIPE_SECRET_KEY"] = (
-        "sk_test_secret"
-    )
-    app.config.pop(
-        "STRIPE_WEBHOOK_SECRET",
-        None,
-    )
-
-    with app.app_context():
-        gateway = StripeGateway()
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "Stripe webhook secret is not configured"
-            ),
-        ):
-            gateway.handle_webhook(
-                payload=b"{}",
-                signature="anything",
-            )
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Stripe webhook secret is not configured"
+        ),
+    ):
+        StripeGateway(
+            credentials=credentials,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -297,78 +278,69 @@ def test_handle_webhook_requires_webhook_secret(
 
 
 def test_handle_webhook_rejects_invalid_payload(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
-
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(
-                side_effect=ValueError(
-                    "invalid payload"
-                )
-            ),
-        )
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Stripe webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=b"invalid",
-                signature="signature",
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(
+            side_effect=ValueError(
+                "invalid payload"
             )
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Stripe webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=b"invalid",
+            signature="signature",
+        )
 
 
 def test_handle_webhook_rejects_non_dict_event(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(return_value=[]),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(return_value=[]),
+    with pytest.raises(
+        ValueError,
+        match="Invalid Stripe webhook event",
+    ):
+        gateway.handle_webhook(
+            payload=b"[]",
+            signature="signature",
         )
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Stripe webhook event",
-        ):
-            gateway.handle_webhook(
-                payload=b"[]",
-                signature="signature",
-            )
 
 
 def test_handle_webhook_requires_event_type(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    event = _event_payload()
+    event.pop("type")
 
-        event = _event_payload()
-        event.pop("type")
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(return_value=event),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(return_value=event),
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Stripe webhook event type is missing"
+        ),
+    ):
+        gateway.handle_webhook(
+            payload=b"{}",
+            signature="signature",
         )
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "Stripe webhook event type is missing"
-            ),
-        ):
-            gateway.handle_webhook(
-                payload=b"{}",
-                signature="signature",
-            )
 
 
 @pytest.mark.parametrize(
@@ -381,74 +353,58 @@ def test_handle_webhook_requires_event_type(
     ],
 )
 def test_handle_webhook_rejects_invalid_event_data(
-    stripe_app,
+    gateway,
     monkeypatch,
     event_data,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    event = {
+        "id": "evt_123",
+        "type": "payment_intent.succeeded",
+        "livemode": False,
+        "data": event_data,
+    }
 
-        event = {
-            "id": "evt_123",
-            "type": "payment_intent.succeeded",
-            "livemode": False,
-            "data": event_data,
-        }
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(return_value=event),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(return_value=event),
+    with pytest.raises(
+        ValueError,
+        match="Invalid Stripe webhook event data",
+    ):
+        gateway.handle_webhook(
+            payload=b"{}",
+            signature="signature",
         )
-
-        if event_data is None:
-            # The gateway normalizes falsey data to {}.
-            expected_message = (
-                "Invalid Stripe webhook event data"
-            )
-        else:
-            expected_message = (
-                "Invalid Stripe webhook event data"
-            )
-
-        with pytest.raises(
-            ValueError,
-            match=expected_message,
-        ):
-            gateway.handle_webhook(
-                payload=b"{}",
-                signature="signature",
-            )
 
 
 def test_handle_webhook_rejects_missing_event_object(
-    stripe_app,
+    gateway,
     monkeypatch,
 ):
-    with stripe_app.app_context():
-        gateway = StripeGateway()
+    event = {
+        "id": "evt_123",
+        "type": "payment_intent.succeeded",
+        "livemode": False,
+        "data": {},
+    }
 
-        event = {
-            "id": "evt_123",
-            "type": "payment_intent.succeeded",
-            "livemode": False,
-            "data": {},
-        }
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
+        Mock(return_value=event),
+    )
 
-        monkeypatch.setattr(
-            "app.modules.billing.services.gateways.stripe_gateway.stripe.Webhook.construct_event",
-            Mock(return_value=event),
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Invalid Stripe webhook event data"
+        ),
+    ):
+        gateway.handle_webhook(
+            payload=b"{}",
+            signature="signature",
         )
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "Invalid Stripe webhook event data"
-            ),
-        ):
-            gateway.handle_webhook(
-                payload=b"{}",
-                signature="signature",
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -696,9 +652,21 @@ def test_handle_webhook_handles_non_dict_metadata(
 @pytest.mark.parametrize(
     "amount,currency,expected",
     [
-        (10000, "usd", Decimal("100")),
-        (12550, "ngn", Decimal("125.5")),
-        (5000, "jpy", Decimal("5000")),
+        (
+            10000,
+            "usd",
+            Decimal("100"),
+        ),
+        (
+            12550,
+            "ngn",
+            Decimal("125.5"),
+        ),
+        (
+            5000,
+            "jpy",
+            Decimal("5000"),
+        ),
     ],
 )
 def test_handle_webhook_normalizes_amount(

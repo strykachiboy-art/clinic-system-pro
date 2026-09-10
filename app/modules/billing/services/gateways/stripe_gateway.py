@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import stripe
-from flask import current_app
 
 from app.modules.billing.services.gateways.base_gateway import (
     PaymentGatewayBase,
@@ -29,21 +30,47 @@ class StripeGateway(PaymentGatewayBase):
         "xpf",
     }
 
-    def __init__(self):
-        self.secret_key = current_app.config.get(
-            "STRIPE_SECRET_KEY"
+    def __init__(
+        self,
+        *,
+        credentials: dict[str, Any],
+    ):
+        if not isinstance(credentials, dict):
+            raise ValueError(
+                "Stripe credentials are invalid"
+            )
+
+        self.secret_key = credentials.get(
+            "secret_key"
         )
 
-        self.webhook_secret = current_app.config.get(
-            "STRIPE_WEBHOOK_SECRET"
+        self.webhook_secret = credentials.get(
+            "webhook_secret"
         )
 
-        if not self.secret_key:
+        if (
+            not isinstance(self.secret_key, str)
+            or not self.secret_key.strip()
+        ):
             raise ValueError(
                 "Stripe secret key is not configured"
             )
 
-        stripe.api_key = self.secret_key
+        if (
+            not isinstance(
+                self.webhook_secret,
+                str,
+            )
+            or not self.webhook_secret.strip()
+        ):
+            raise ValueError(
+                "Stripe webhook secret is not configured"
+            )
+
+        self.secret_key = self.secret_key.strip()
+        self.webhook_secret = (
+            self.webhook_secret.strip()
+        )
 
     @classmethod
     def _to_smallest_unit(
@@ -232,8 +259,11 @@ class StripeGateway(PaymentGatewayBase):
         }
 
         try:
-            intent = stripe.PaymentIntent.create(
-                **params
+            intent = (
+                stripe.PaymentIntent.create(
+                    **params,
+                    api_key=self.secret_key,
+                )
             )
         except stripe.StripeError as exc:
             raise RuntimeError(
@@ -275,8 +305,11 @@ class StripeGateway(PaymentGatewayBase):
         )
 
         try:
-            intent = stripe.PaymentIntent.retrieve(
-                reference
+            intent = (
+                stripe.PaymentIntent.retrieve(
+                    reference,
+                    api_key=self.secret_key,
+                )
             )
         except stripe.StripeError as exc:
             raise RuntimeError(
@@ -305,14 +338,22 @@ class StripeGateway(PaymentGatewayBase):
             or ""
         ).lower()
 
+        metadata = getattr(
+            intent,
+            "metadata",
+            {},
+        ) or {}
+
+        if not isinstance(
+            metadata,
+            dict,
+        ):
+            metadata = dict(metadata)
+
         return {
             "provider": "stripe",
             "reference": (
-                getattr(
-                    intent,
-                    "metadata",
-                    {}
-                ).get("reference")
+                metadata.get("reference")
                 or reference
             ),
             "transaction_id": transaction_id,
@@ -350,11 +391,6 @@ class StripeGateway(PaymentGatewayBase):
         if not payload:
             raise ValueError(
                 "Webhook payload is required"
-            )
-
-        if not self.webhook_secret:
-            raise ValueError(
-                "Stripe webhook secret is not configured"
             )
 
         webhook_signature = signature
@@ -400,12 +436,15 @@ class StripeGateway(PaymentGatewayBase):
             )
 
         event_data = event.get("data") or {}
-        event_object = event_data.get(
-            "object"
-        ) if isinstance(
-            event_data,
-            dict,
-        ) else None
+
+        event_object = (
+            event_data.get("object")
+            if isinstance(
+                event_data,
+                dict,
+            )
+            else None
+        )
 
         if not isinstance(
             event_object,

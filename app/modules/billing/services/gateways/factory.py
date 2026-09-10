@@ -1,5 +1,6 @@
-from app.core.enums.billing_enums import PaymentGateway
+from __future__ import annotations
 
+from app.core.enums.billing_enums import PaymentGateway
 from app.modules.billing.services.gateways.base_gateway import (
     PaymentGatewayBase,
 )
@@ -11,6 +12,9 @@ from app.modules.billing.services.gateways.paystack_gateway import (
 )
 from app.modules.billing.services.gateways.stripe_gateway import (
     StripeGateway,
+)
+from app.modules.settings.services.integration_config_service import (
+    get_integration_credentials,
 )
 
 
@@ -26,6 +30,8 @@ _GATEWAY_IMPLEMENTATIONS: dict[
 
 def get_payment_gateway(
     gateway: PaymentGateway | str,
+    *,
+    clinic_id: int,
 ) -> PaymentGatewayBase:
     if isinstance(gateway, str):
         gateway_value = gateway.strip().lower()
@@ -48,4 +54,11 @@ def get_payment_gateway(
             f"Unsupported payment gateway: {gateway}"
         )
 
-    return gateway_class()
+    credentials = get_integration_credentials(
+        clinic_id,
+        gateway.value,
+    )
+
+    return gateway_class(
+        credentials=credentials,
+    )

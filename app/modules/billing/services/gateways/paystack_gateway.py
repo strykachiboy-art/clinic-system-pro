@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -5,7 +7,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import requests
-from flask import current_app
 
 from app.modules.billing.services.gateways.base_gateway import (
     PaymentGatewayBase,
@@ -15,15 +16,29 @@ from app.modules.billing.services.gateways.base_gateway import (
 class PaystackGateway(PaymentGatewayBase):
     BASE_URL = "https://api.paystack.co"
 
-    def __init__(self):
-        self.secret_key = current_app.config.get(
-            "PAYSTACK_SECRET_KEY"
+    def __init__(
+        self,
+        *,
+        credentials: dict[str, Any],
+    ):
+        if not isinstance(credentials, dict):
+            raise ValueError(
+                "Paystack credentials are invalid"
+            )
+
+        self.secret_key = credentials.get(
+            "secret_key"
         )
 
-        if not self.secret_key:
+        if (
+            not isinstance(self.secret_key, str)
+            or not self.secret_key.strip()
+        ):
             raise ValueError(
                 "Paystack secret key is not configured"
             )
+
+        self.secret_key = self.secret_key.strip()
 
     @staticmethod
     def _to_smallest_unit(
@@ -145,12 +160,13 @@ class PaystackGateway(PaymentGatewayBase):
         reference = self._normalize_reference(
             reference
         )
-        amount = Decimal(
-            str(amount)
-        )
+
+        amount = Decimal(str(amount))
+
         currency = self._normalize_currency(
             currency
         )
+
         customer_email = self._normalize_email(
             customer_email
         )

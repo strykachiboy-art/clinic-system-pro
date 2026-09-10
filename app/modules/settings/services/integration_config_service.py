@@ -489,6 +489,11 @@ def get_integration_credentials(
         provider,
     )
 
+    if not integration.is_enabled:
+        raise ValidationError(
+            "Integration configuration is disabled"
+        )
+
     if not integration.encrypted_credentials:
         raise ValidationError(
             "Integration credentials are not configured"

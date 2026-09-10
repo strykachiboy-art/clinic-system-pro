@@ -108,37 +108,6 @@ class Config:
     )
 
     # ------------------------------------------------------------------
-    # Payment gateways
-    # ------------------------------------------------------------------
-    STRIPE_SECRET_KEY = os.environ.get(
-        "STRIPE_SECRET_KEY"
-    )
-
-    STRIPE_WEBHOOK_SECRET = os.environ.get(
-        "STRIPE_WEBHOOK_SECRET"
-    )
-
-    PAYSTACK_SECRET_KEY = os.environ.get(
-        "PAYSTACK_SECRET_KEY"
-    )
-
-    PAYSTACK_PUBLIC_KEY = os.environ.get(
-        "PAYSTACK_PUBLIC_KEY"
-    )
-
-    FLUTTERWAVE_SECRET_KEY = os.environ.get(
-        "FLUTTERWAVE_SECRET_KEY"
-    )
-
-    FLUTTERWAVE_PUBLIC_KEY = os.environ.get(
-        "FLUTTERWAVE_PUBLIC_KEY"
-    )
-
-    FLUTTERWAVE_WEBHOOK_SECRET = os.environ.get(
-        "FLUTTERWAVE_WEBHOOK_SECRET"
-    )
-
-    # ------------------------------------------------------------------
     # Integration credential encryption
     #
     # The actual encryption key MUST come from the environment.

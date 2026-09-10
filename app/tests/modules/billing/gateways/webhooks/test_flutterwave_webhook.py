@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -11,10 +13,19 @@ from app.modules.billing.services.gateways.flutterwave_gateway import (
 
 
 @pytest.fixture
-def flutterwave_app(app):
-    app.config["FLUTTERWAVE_SECRET_KEY"] = "flw_test_secret"
-    app.config["FLUTTERWAVE_WEBHOOK_SECRET"] = "flw_webhook_secret"
-    return app
+def flutterwave_credentials():
+    return {
+        "secret_key": "flw_test_secret",
+        "webhook_secret": "flw_webhook_secret",
+        "public_key": "flw_test_public",
+    }
+
+
+@pytest.fixture
+def gateway(flutterwave_credentials):
+    return FlutterwaveGateway(
+        credentials=flutterwave_credentials,
+    )
 
 
 def _webhook_signature(
@@ -58,24 +69,21 @@ def _webhook_payload(**overrides):
 
 
 def test_handle_webhook_success(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload()
 
-        event = _webhook_payload()
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result == {
         "provider": "flutterwave",
@@ -90,72 +98,63 @@ def test_handle_webhook_success(
 
 
 def test_handle_webhook_reads_signature_from_lowercase_header(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            headers={
-                "flutterwave-signature": signature,
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        headers={
+            "flutterwave-signature": signature,
+        },
+    )
 
     assert result["status"] == "successful"
     assert result["transaction_id"] == "123456"
 
 
 def test_handle_webhook_reads_signature_from_title_case_header(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            headers={
-                "Flutterwave-Signature": signature,
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        headers={
+            "Flutterwave-Signature": signature,
+        },
+    )
 
     assert result["status"] == "successful"
 
 
 def test_handle_webhook_explicit_signature_takes_precedence(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-            headers={
-                "flutterwave-signature": "wrong",
-            },
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+        headers={
+            "flutterwave-signature": "wrong",
+        },
+    )
 
     assert result["status"] == "successful"
 
@@ -182,104 +181,101 @@ def test_handle_webhook_explicit_signature_takes_precedence(
     ],
 )
 def test_handle_webhook_rejects_missing_or_invalid_signature(
-    flutterwave_app,
+    gateway,
     signature,
     expected_message,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        with pytest.raises(
-            ValueError,
-            match=expected_message,
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match=expected_message,
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 def test_handle_webhook_rejects_tampered_payload(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    original_payload = json.dumps(
+        _webhook_payload(),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        original_payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(
+        original_payload
+    )
 
-        signature = _webhook_signature(
-            original_payload
+    tampered_payload = json.dumps(
+        _webhook_payload(
+            data={
+                "amount": 999999,
+            }
+        ),
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Flutterwave webhook signature",
+    ):
+        gateway.handle_webhook(
+            payload=tampered_payload,
+            signature=signature,
         )
-
-        tampered_payload = json.dumps(
-            _webhook_payload(
-                data={
-                    "amount": 999999,
-                }
-            ),
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Flutterwave webhook signature",
-        ):
-            gateway.handle_webhook(
-                payload=tampered_payload,
-                signature=signature,
-            )
 
 
 def test_handle_webhook_requires_payload(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        with pytest.raises(
-            ValueError,
-            match="Webhook payload is required",
-        ):
-            gateway.handle_webhook(
-                payload=b"",
-                signature="anything",
-            )
+    with pytest.raises(
+        ValueError,
+        match="Webhook payload is required",
+    ):
+        gateway.handle_webhook(
+            payload=b"",
+            signature="anything",
+        )
 
 
-def test_handle_webhook_requires_webhook_secret(
-    flutterwave_app,
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {
+            "secret_key": "flw_test_secret",
+        },
+        {
+            "secret_key": "flw_test_secret",
+            "webhook_secret": "",
+        },
+        {
+            "secret_key": "flw_test_secret",
+            "webhook_secret": None,
+        },
+        {
+            "secret_key": "flw_test_secret",
+            "webhook_secret": 123,
+        },
+    ],
+)
+def test_gateway_requires_webhook_secret(
+    credentials,
 ):
-    flutterwave_app.config.pop(
-        "FLUTTERWAVE_WEBHOOK_SECRET",
-        None,
-    )
-
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        payload = json.dumps(
-            _webhook_payload(),
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "Flutterwave webhook secret is not configured"
-            ),
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature="anything",
-            )
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Flutterwave webhook secret is not configured"
+        ),
+    ):
+        FlutterwaveGateway(
+            credentials=credentials,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -288,109 +284,96 @@ def test_handle_webhook_requires_webhook_secret(
 
 
 def test_handle_webhook_rejects_invalid_json(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = b"{not-valid-json}"
+    signature = _webhook_signature(payload)
 
-        payload = b"{not-valid-json}"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Flutterwave webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
-
-
-def test_handle_webhook_rejects_invalid_utf8(
-    flutterwave_app,
-):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        payload = b"\xff\xfe\xfd"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Flutterwave webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
-
-
-def test_handle_webhook_rejects_non_object_json(
-    flutterwave_app,
-):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        payload = b"[]"
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Flutterwave webhook payload",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
-
-
-def test_handle_webhook_requires_event_type(
-    flutterwave_app,
-):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        event = _webhook_payload()
-        event.pop("event")
-
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Flutterwave webhook event type is missing",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
-
-
-def test_handle_webhook_accepts_type_alias(
-    flutterwave_app,
-):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
-
-        event = _webhook_payload()
-        event.pop("event")
-        event["type"] = "charge.completed"
-
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
+    with pytest.raises(
+        ValueError,
+        match="Invalid Flutterwave webhook payload",
+    ):
+        gateway.handle_webhook(
             payload=payload,
             signature=signature,
         )
+
+
+def test_handle_webhook_rejects_invalid_utf8(
+    gateway,
+):
+    payload = b"\xff\xfe\xfd"
+    signature = _webhook_signature(payload)
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Flutterwave webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
+
+
+def test_handle_webhook_rejects_non_object_json(
+    gateway,
+):
+    payload = b"[]"
+    signature = _webhook_signature(payload)
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid Flutterwave webhook payload",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
+
+
+def test_handle_webhook_requires_event_type(
+    gateway,
+):
+    event = _webhook_payload()
+    event.pop("event")
+
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    signature = _webhook_signature(payload)
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Flutterwave webhook event type is missing"
+        ),
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
+
+
+def test_handle_webhook_accepts_type_alias(
+    gateway,
+):
+    event = _webhook_payload()
+    event.pop("event")
+    event["type"] = "charge.completed"
+
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    signature = _webhook_signature(payload)
+
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["event_type"] == "charge.completed"
 
@@ -404,30 +387,27 @@ def test_handle_webhook_accepts_type_alias(
     ],
 )
 def test_handle_webhook_rejects_invalid_event_data(
-    flutterwave_app,
+    gateway,
     event_data,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload()
+    event["data"] = event_data
 
-        event = _webhook_payload()
-        event["data"] = event_data
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid Flutterwave webhook data",
-        ):
-            gateway.handle_webhook(
-                payload=payload,
-                signature=signature,
-            )
+    with pytest.raises(
+        ValueError,
+        match="Invalid Flutterwave webhook data",
+    ):
+        gateway.handle_webhook(
+            payload=payload,
+            signature=signature,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -436,71 +416,64 @@ def test_handle_webhook_rejects_invalid_event_data(
 
 
 def test_handle_webhook_uses_event_id(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    payload = json.dumps(
+        _webhook_payload(
+            id="event-123",
+        ),
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            _webhook_payload(id="event-123"),
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["event_id"] == "event-123"
 
 
 def test_handle_webhook_falls_back_to_transaction_id(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload()
+    event.pop("id")
 
-        event = _webhook_payload()
-        event.pop("id")
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["event_id"] == "123456"
 
 
 def test_handle_webhook_falls_back_to_payload_hash(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload()
+    event.pop("id")
+    event["data"].pop("id")
 
-        event = _webhook_payload()
-        event.pop("id")
-        event["data"].pop("id")
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     expected_event_id = hashlib.sha256(
         payload
@@ -518,32 +491,29 @@ def test_handle_webhook_falls_back_to_payload_hash(
     ],
 )
 def test_handle_webhook_normalizes_failed_transactions(
-    flutterwave_app,
+    gateway,
     status,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload(
+        data={
+            "status": status,
+            "processor_response": (
+                "Insufficient funds"
+            ),
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "status": status,
-                "processor_response": (
-                    "Insufficient funds"
-                ),
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
     assert result["failure_reason"] == (
@@ -552,60 +522,56 @@ def test_handle_webhook_normalizes_failed_transactions(
 
 
 def test_handle_webhook_uses_message_as_failure_reason(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload(
+        data={
+            "status": "failed",
+            "processor_response": None,
+            "message": "Card declined",
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "status": "failed",
-                "processor_response": None,
-                "message": "Card declined",
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
-    assert result["failure_reason"] == "Card declined"
+    assert result["failure_reason"] == (
+        "Card declined"
+    )
 
 
 def test_handle_webhook_uses_default_failure_reason(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload(
+        data={
+            "status": "failed",
+            "processor_response": None,
+            "message": None,
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "status": "failed",
-                "processor_response": None,
-                "message": None,
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == "failed"
     assert result["failure_reason"] == (
@@ -616,94 +582,101 @@ def test_handle_webhook_uses_default_failure_reason(
 @pytest.mark.parametrize(
     "event_type,status,expected_status",
     [
-        ("charge.completed", "successful", "successful"),
-        ("charge.completed", "pending", "pending"),
-        ("charge.updated", "pending", "pending"),
-        ("payment.pending", "pending", "pending"),
+        (
+            "charge.completed",
+            "successful",
+            "successful",
+        ),
+        (
+            "charge.completed",
+            "pending",
+            "pending",
+        ),
+        (
+            "charge.updated",
+            "pending",
+            "pending",
+        ),
+        (
+            "payment.pending",
+            "pending",
+            "pending",
+        ),
     ],
 )
 def test_handle_webhook_normalizes_other_statuses(
-    flutterwave_app,
+    gateway,
     event_type,
     status,
     expected_status,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload(
+        event=event_type,
+        data={
+            "status": status,
+        },
+    )
 
-        event = _webhook_payload(
-            event=event_type,
-            data={
-                "status": status,
-            },
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["status"] == expected_status
 
 
 def test_handle_webhook_normalizes_currency(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = _webhook_payload(
+        data={
+            "currency": "usd",
+        }
+    )
 
-        event = _webhook_payload(
-            data={
-                "currency": "usd",
-            }
-        )
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["currency"] == "USD"
 
 
 def test_handle_webhook_allows_missing_optional_transaction_fields(
-    flutterwave_app,
+    gateway,
 ):
-    with flutterwave_app.app_context():
-        gateway = FlutterwaveGateway()
+    event = {
+        "event": "payment.pending",
+        "data": {
+            "status": "pending",
+        },
+    }
 
-        event = {
-            "event": "payment.pending",
-            "data": {
-                "status": "pending",
-            },
-        }
+    payload = json.dumps(
+        event,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
-        payload = json.dumps(
-            event,
-            separators=(",", ":"),
-        ).encode("utf-8")
+    signature = _webhook_signature(payload)
 
-        signature = _webhook_signature(payload)
-
-        result = gateway.handle_webhook(
-            payload=payload,
-            signature=signature,
-        )
+    result = gateway.handle_webhook(
+        payload=payload,
+        signature=signature,
+    )
 
     assert result["provider"] == "flutterwave"
     assert result["event_type"] == "payment.pending"

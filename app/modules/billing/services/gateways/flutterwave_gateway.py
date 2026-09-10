@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -6,7 +8,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import requests
-from flask import current_app
 
 from app.modules.billing.services.gateways.base_gateway import (
     PaymentGatewayBase,
@@ -16,15 +17,47 @@ from app.modules.billing.services.gateways.base_gateway import (
 class FlutterwaveGateway(PaymentGatewayBase):
     BASE_URL = "https://api.flutterwave.com/v3"
 
-    def __init__(self):
-        self.secret_key = current_app.config.get(
-            "FLUTTERWAVE_SECRET_KEY"
+    def __init__(
+        self,
+        *,
+        credentials: dict[str, Any],
+    ):
+        if not isinstance(credentials, dict):
+            raise ValueError(
+                "Flutterwave credentials are invalid"
+            )
+
+        self.secret_key = credentials.get(
+            "secret_key"
         )
 
-        if not self.secret_key:
+        self.webhook_secret = credentials.get(
+            "webhook_secret"
+        )
+
+        if (
+            not isinstance(self.secret_key, str)
+            or not self.secret_key.strip()
+        ):
             raise ValueError(
                 "Flutterwave secret key is not configured"
             )
+
+        if (
+            not isinstance(
+                self.webhook_secret,
+                str,
+            )
+            or not self.webhook_secret.strip()
+        ):
+            raise ValueError(
+                "Flutterwave webhook secret is not configured"
+            )
+
+        self.secret_key = self.secret_key.strip()
+        self.webhook_secret = (
+            self.webhook_secret.strip()
+        )
 
     @staticmethod
     def _normalize_currency(
@@ -318,19 +351,9 @@ class FlutterwaveGateway(PaymentGatewayBase):
                 "is required"
             )
 
-        webhook_secret = current_app.config.get(
-            "FLUTTERWAVE_WEBHOOK_SECRET"
-        )
-
-        if not webhook_secret:
-            raise ValueError(
-                "Flutterwave webhook secret is "
-                "not configured"
-            )
-
         expected_signature = base64.b64encode(
             hmac.new(
-                webhook_secret.encode("utf-8"),
+                self.webhook_secret.encode("utf-8"),
                 payload,
                 hashlib.sha256,
             ).digest()
