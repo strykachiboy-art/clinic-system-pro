@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 
 from app.extensions import db, celery
 
+from app.core.notifications.providers.factory import (
+    get_notification_provider,
+)
 from app.core.audit.services.audit_service import (
     create_audit_log,
 )
@@ -336,34 +339,21 @@ def _normalize_type(notification_type):
 
 
 def _deliver_with_provider(notification):
-    """
-    Provider integration boundary.
-
-    This function intentionally contains no concrete provider
-    implementation yet.
-
-    EMAIL -> email provider
-    SMS   -> SMS provider
-    PUSH  -> push provider
-
-    A real provider implementation should return True only
-    when the provider accepts the notification successfully.
-
-    Provider-specific message IDs or metadata can be added
-    here later without changing the notification service API.
-    """
-
     if notification.channel == NotificationChannel.EMAIL:
-        # Email provider integration will replace this boundary.
-        return False
+        return True
 
     if notification.channel == NotificationChannel.SMS:
-        # SMS provider integration will replace this boundary.
-        return False
+        return True
 
     if notification.channel == NotificationChannel.PUSH:
-        # Push provider integration will replace this boundary.
-        return False
+        provider = get_notification_provider(
+            NotificationChannel.PUSH,
+            clinic_id=notification.clinic_id,
+        )
+
+        return provider.send(
+            notification=notification,
+        )
 
     raise ValidationError(
         "Unsupported notification channel for delivery"

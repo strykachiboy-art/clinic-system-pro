@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import Mock
 
 import pytest
 
@@ -460,6 +461,232 @@ def test_deliver_in_app_notification_returns_false(
                 notification_id
             )
             is False
+        )
+
+
+def test_deliver_with_provider_push_uses_factory(
+    app,
+    make_notification,
+    clinic,
+    user,
+    monkeypatch,
+):
+    with app.app_context():
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.PUSH,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = (
+            notification_service
+            ._deliver_with_provider(
+                notification
+            )
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.PUSH,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+        )
+
+
+def test_deliver_notification_push_uses_provider(
+    app,
+    make_notification,
+    clinic,
+    user,
+    db_session,
+    monkeypatch,
+):
+    with app.app_context():
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.PUSH,
+        )
+        notification_id = notification.id
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service.deliver_notification(
+            notification_id
+        )
+
+        notification = db_session.get(
+            Notification,
+            notification_id,
+        )
+
+        assert notification is not None
+        assert result is True
+        assert notification.status == NotificationStatus.DELIVERED
+        assert notification.sent_at is not None
+        assert notification.delivered_at is not None
+        assert notification.error_message is None
+
+        factory.assert_called_once_with(
+            NotificationChannel.PUSH,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+        )
+
+
+def test_deliver_notification_push_provider_rejection_marks_failed(
+    app,
+    make_notification,
+    clinic,
+    user,
+    db_session,
+    monkeypatch,
+):
+    with app.app_context():
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.PUSH,
+        )
+        notification_id = notification.id
+
+        db_session.commit()
+
+        provider = Mock()
+        provider.send.return_value = False
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        with pytest.raises(RuntimeError):
+            notification_service.deliver_notification(
+                notification_id
+            )
+
+        notification = db_session.get(
+            Notification,
+            notification_id,
+        )
+
+        assert notification is not None
+        assert notification.status == NotificationStatus.FAILED
+        assert notification.failed_at is not None
+        assert notification.retry_count == 1
+        assert (
+            notification.error_message
+            == "Notification provider rejected delivery"
+        )
+
+        factory.assert_called_once_with(
+            NotificationChannel.PUSH,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+        )
+
+
+def test_deliver_notification_push_provider_exception_marks_failed(
+    app,
+    make_notification,
+    clinic,
+    user,
+    db_session,
+    monkeypatch,
+):
+    with app.app_context():
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.PUSH,
+        )
+        notification_id = notification.id
+
+        db_session.commit()
+
+        provider = Mock()
+        provider.send.side_effect = RuntimeError(
+            "Push provider timeout"
+        )
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="Push provider timeout",
+        ):
+            notification_service.deliver_notification(
+                notification_id
+            )
+
+        notification = db_session.get(
+            Notification,
+            notification_id,
+        )
+
+        assert notification is not None
+        assert notification.status == NotificationStatus.FAILED
+        assert notification.failed_at is not None
+        assert notification.retry_count == 1
+        assert (
+            notification.error_message
+            == "Push provider timeout"
+        )
+
+        factory.assert_called_once_with(
+            NotificationChannel.PUSH,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
         )
 
 

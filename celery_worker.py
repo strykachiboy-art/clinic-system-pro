@@ -1,4 +1,5 @@
 import os
+
 from app.extensions import celery
 
 
@@ -14,9 +15,15 @@ celery.Task = ContextTask
 
 from app import create_app
 
-flask_app = create_app(os.environ.get("FLASK_ENV", "development"))
+
+flask_app = create_app(
+    os.environ.get(
+        "FLASK_ENV",
+        "development",
+    )
+)
 
 from app.modules.appointment.services import appointment_service
 from app.modules.billing.services import billing_service
 from app.modules.clinic.services import clinic_service
-
+from app.core.notifications.services import notification_service

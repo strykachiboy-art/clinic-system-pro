@@ -606,7 +606,9 @@ def test_list_integration_configs_returns_middle_page(app):
         ]
 
 
-def test_list_integration_configs_returns_last_partial_page(app):
+def test_list_integration_configs_returns_last_partial_page(
+    app,
+):
     with app.app_context():
         clinic = _create_clinic(
             name="Last Page Clinic",
@@ -822,7 +824,9 @@ def test_list_integration_configs_rejects_invalid_page(app):
             )
 
 
-def test_list_integration_configs_rejects_invalid_per_page(app):
+def test_list_integration_configs_rejects_invalid_per_page(
+    app,
+):
     with app.app_context():
         clinic = _create_clinic(
             name="Invalid Per Page Clinic",
@@ -1072,6 +1076,7 @@ def test_rotate_credentials_replaces_old_credentials(
 
         _create_integration(
             clinic.id,
+            enabled=True,
             credentials={
                 "secret_key": "old-secret",
             },
@@ -1247,6 +1252,7 @@ def test_get_integration_credentials_success(app):
 
         _create_integration(
             clinic.id,
+            enabled=True,
             credentials=credentials,
         )
 
