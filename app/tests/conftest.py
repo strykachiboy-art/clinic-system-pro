@@ -62,6 +62,7 @@ def app():
 @pytest.fixture(scope="function")
 def db(app):
     """Return the application's SQLAlchemy extension."""
+
     return _db
 
 
@@ -77,6 +78,7 @@ def db_session(app, db):
 @pytest.fixture(scope="function")
 def client(app):
     """Flask test client."""
+
     return app.test_client()
 
 
@@ -92,7 +94,11 @@ def auth_headers_for(app):
     """
 
     def _make(user, role=None):
-        claim_role = role if role is not None else user.role
+        claim_role = (
+            role
+            if role is not None
+            else user.role
+        )
 
         if hasattr(claim_role, "value"):
             claim_role = claim_role.value
@@ -176,6 +182,7 @@ def make_clinic(db):
 @pytest.fixture()
 def clinic(make_clinic):
     """Default active clinic."""
+
     return make_clinic()
 
 
@@ -328,7 +335,10 @@ def make_clinic_settings(db_session):
 
 
 @pytest.fixture()
-def clinic_settings(make_clinic_settings, clinic):
+def clinic_settings(
+    make_clinic_settings,
+    clinic,
+):
     """Default enabled clinic settings."""
 
     return make_clinic_settings(
@@ -388,10 +398,14 @@ def make_message(db):
         counter["n"] += 1
 
         if subject is None:
-            subject = f"Test Message {counter['n']}"
+            subject = (
+                f"Test Message {counter['n']}"
+            )
 
         if sent_at is None:
-            sent_at = datetime.now(timezone.utc)
+            sent_at = datetime.now(
+                timezone.utc
+            )
 
         message = Message(
             clinic_id=clinic.id,
@@ -560,6 +574,7 @@ def make_staff(db, make_user):
 @pytest.fixture()
 def staff(make_staff, clinic):
     """Default active ADMIN staff member."""
+
     return make_staff(clinic)
 
 
@@ -638,6 +653,7 @@ def make_patient(db):
 @pytest.fixture()
 def patient(make_patient, clinic):
     """Default patient."""
+
     return make_patient(clinic)
 
 
@@ -663,9 +679,7 @@ def make_asset(db):
         MaintenanceStatus,
     )
 
-    from app.modules.asset_control.models.asset_model import (
-        Asset,
-    )
+    from app.modules.asset_control.models.asset_model import Asset
 
     counter = {"n": 0}
 
@@ -683,10 +697,14 @@ def make_asset(db):
         counter["n"] += 1
 
         if asset_tag is None:
-            asset_tag = f"AST-{counter['n']:04d}"
+            asset_tag = (
+                f"AST-{counter['n']:04d}"
+            )
 
         if name is None:
-            name = f"Test Asset {counter['n']}"
+            name = (
+                f"Test Asset {counter['n']}"
+            )
 
         overrides.setdefault(
             "maintenance_status",
@@ -988,6 +1006,10 @@ def make_drug_batch(db):
 
         return batch
 
+    # IMPORTANT:
+    # Return the factory itself so pytest injects a callable fixture.
+    return _make
+
 
 # ============================================================================
 # PRESCRIPTION
@@ -1122,6 +1144,10 @@ def make_bed(db):
         db.session.flush()
 
         return bed
+
+    # IMPORTANT:
+    # Return the factory itself so pytest injects a callable fixture.
+    return _make
 
 
 # ============================================================================
@@ -1410,6 +1436,9 @@ def commit_db(db_session):
 
 @pytest.fixture()
 def rollback_db(db_session):
+    """
+    Explicit rollback helper.
+    """
 
     def _rollback():
         db_session.rollback()
