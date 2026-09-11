@@ -275,6 +275,12 @@ class Clinic(db.Model):
         back_populates="clinic",
         cascade="all, delete-orphan",
    )
+    
+    assets = db.relationship(
+        "Asset",
+        back_populates="clinic",
+        cascade="all, delete-orphan",
+   )
 
     def __repr__(self):
         return (

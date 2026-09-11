@@ -6,8 +6,14 @@ from app.core.enums.notification_enums import (
 from app.core.notifications.providers.base_provider import (
     NotificationProviderBase,
 )
+from app.core.notifications.providers.email_provider import (
+    EmailNotificationProvider,
+)
 from app.core.notifications.providers.push_provider import (
     PushNotificationProvider,
+)
+from app.core.notifications.providers.SMS_provider import (
+    SMSNotificationProvider,
 )
 from app.modules.settings.services.integration_config_service import (
     get_integration_credentials,
@@ -18,6 +24,8 @@ _NOTIFICATION_PROVIDER_IMPLEMENTATIONS: dict[
     NotificationChannel,
     type[NotificationProviderBase],
 ] = {
+    NotificationChannel.EMAIL: EmailNotificationProvider,
+    NotificationChannel.SMS: SMSNotificationProvider,
     NotificationChannel.PUSH: PushNotificationProvider,
 }
 
@@ -27,6 +35,14 @@ def get_notification_provider(
     *,
     clinic_id: int,
 ) -> NotificationProviderBase:
+    if not isinstance(clinic_id, int) or isinstance(
+        clinic_id,
+        bool,
+    ) or clinic_id <= 0:
+        raise ValueError(
+            "clinic_id must be a positive integer"
+        )
+
     if isinstance(channel, str):
         channel_value = channel.strip().lower()
 
@@ -40,6 +56,14 @@ def get_notification_provider(
                 f"{channel}"
             ) from exc
 
+    if not isinstance(
+        channel,
+        NotificationChannel,
+    ):
+        raise ValueError(
+            "Invalid notification channel"
+        )
+
     provider_class = (
         _NOTIFICATION_PROVIDER_IMPLEMENTATIONS.get(
             channel
@@ -49,7 +73,7 @@ def get_notification_provider(
     if provider_class is None:
         raise ValueError(
             f"No provider configured for notification "
-            f"channel: {channel}"
+            f"channel: {channel.value}"
         )
 
     credentials = get_integration_credentials(

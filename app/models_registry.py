@@ -72,3 +72,6 @@ from app.core.auth.user.models.user_auth_identity_model import UserAuthIdentity
 # User Device
 from app.core.auth.user.models.user_device_model import UserDevice
 
+# Asset Control
+from app.modules.asset_control.models.asset_model import Asset
+

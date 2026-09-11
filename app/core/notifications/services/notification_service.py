@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.extensions import db, celery
+from app.core.enums.role_enums import Role
+from app.modules.staff.models.staff_model import Staff
+from app.modules.patient.models.patient_model import Patient
 
 from app.core.notifications.providers.factory import (
     get_notification_provider,
@@ -339,18 +342,140 @@ def _normalize_type(notification_type):
 
 
 def _deliver_with_provider(notification):
-    if notification.channel == NotificationChannel.EMAIL:
-        return True
+    channel = notification.channel
 
-    if notification.channel == NotificationChannel.SMS:
-        return True
+    if channel == NotificationChannel.IN_APP:
+        return False
 
-    if notification.channel == NotificationChannel.PUSH:
+    try:
         provider = get_notification_provider(
-            NotificationChannel.PUSH,
+            channel,
             clinic_id=notification.clinic_id,
         )
+    except ValueError as exc:
+        raise ValidationError(
+            str(exc)
+        ) from exc
 
+    user = db.session.get(
+        User,
+        notification.user_id,
+    )
+
+    if user is None:
+        raise NotFoundError(
+            f"Notification recipient "
+            f"{notification.user_id} not found"
+        )
+
+    if (
+        user.clinic_id is not None
+        and user.clinic_id != notification.clinic_id
+    ):
+        raise NotFoundError(
+            f"Notification recipient "
+            f"{notification.user_id} not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            f"Notification recipient "
+            f"{user.id} is inactive"
+        )
+
+    if channel == NotificationChannel.EMAIL:
+        if user.role == Role.PATIENT:
+            patient = user.patient
+
+            if patient is None:
+                raise NotFoundError(
+                    f"Patient profile for user "
+                    f"{user.id} not found"
+                )
+
+            if patient.clinic_id != notification.clinic_id:
+                raise NotFoundError(
+                    f"Patient profile for user "
+                    f"{user.id} not found"
+                )
+
+            email = patient.email or user.email
+
+        else:
+            staff = user.staff
+
+            if staff is None:
+                raise NotFoundError(
+                    f"Staff profile for user "
+                    f"{user.id} not found"
+                )
+
+            if staff.clinic_id != notification.clinic_id:
+                raise NotFoundError(
+                    f"Staff profile for user "
+                    f"{user.id} not found"
+                )
+
+            email = staff.email or user.email
+
+        if not email:
+            raise ValidationError(
+                "Notification recipient email "
+                "is not configured"
+            )
+
+        return provider.send(
+            notification=notification,
+            email=email,
+        )
+
+    if channel == NotificationChannel.SMS:
+        if user.role == Role.PATIENT:
+            patient = user.patient
+
+            if patient is None:
+                raise NotFoundError(
+                    f"Patient profile for user "
+                    f"{user.id} not found"
+                )
+
+            if patient.clinic_id != notification.clinic_id:
+                raise NotFoundError(
+                    f"Patient profile for user "
+                    f"{user.id} not found"
+                )
+
+            phone = patient.phone
+
+        else:
+            staff = user.staff
+
+            if staff is None:
+                raise NotFoundError(
+                    f"Staff profile for user "
+                    f"{user.id} not found"
+                )
+
+            if staff.clinic_id != notification.clinic_id:
+                raise NotFoundError(
+                    f"Staff profile for user "
+                    f"{user.id} not found"
+                )
+
+            phone = staff.phone
+
+        if not phone:
+            raise ValidationError(
+                "Notification recipient phone number "
+                "is not configured"
+            )
+
+        return provider.send(
+            notification=notification,
+            phone=phone,
+        )
+
+    if channel == NotificationChannel.PUSH:
         return provider.send(
             notification=notification,
         )

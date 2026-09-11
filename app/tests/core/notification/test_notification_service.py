@@ -11,6 +11,7 @@ from app.core.enums.notification_enums import (
     NotificationStatus,
     NotificationType,
 )
+from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -464,6 +465,11 @@ def test_deliver_in_app_notification_returns_false(
         )
 
 
+# ============================================================================
+# PROVIDER BOUNDARY
+# ============================================================================
+
+
 def test_deliver_with_provider_push_uses_factory(
     app,
     make_notification,
@@ -508,6 +514,666 @@ def test_deliver_with_provider_push_uses_factory(
         provider.send.assert_called_once_with(
             notification=notification,
         )
+
+
+def test_deliver_with_provider_patient_email_uses_patient_email(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+            email="patient-user@test.com",
+        )
+
+        patient = make_patient(
+            clinic,
+            user_id=user.id,
+            email="patient@test.com",
+            phone="+2348011111111",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.EMAIL,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            email="patient@test.com",
+        )
+
+        assert patient.email == "patient@test.com"
+
+
+def test_deliver_with_provider_patient_email_falls_back_to_user_email(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+            email="patient-user@test.com",
+        )
+
+        make_patient(
+            clinic,
+            user_id=user.id,
+            email=None,
+            phone="+2348011111111",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.EMAIL,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            email="patient-user@test.com",
+        )
+
+
+def test_deliver_with_provider_patient_sms_uses_patient_phone(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+            email="patient-user@test.com",
+        )
+
+        patient = make_patient(
+            clinic,
+            user_id=user.id,
+            email="patient@test.com",
+            phone="+2348022222222",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.SMS,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.SMS,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            phone="+2348022222222",
+        )
+
+        assert patient.phone == "+2348022222222"
+
+
+def test_deliver_with_provider_staff_email_uses_staff_email(
+    app,
+    clinic,
+    make_staff,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            email="doctor@test.com",
+            phone="+2348033333333",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=staff.user_id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.EMAIL,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            email="doctor@test.com",
+        )
+
+
+def test_deliver_with_provider_staff_email_falls_back_to_user_email(
+    app,
+    clinic,
+    make_staff,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            email=None,
+            phone="+2348044444444",
+            user_overrides={
+                "email": "doctor-user@test.com",
+            },
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=staff.user_id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.EMAIL,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            email="doctor-user@test.com",
+        )
+
+
+def test_deliver_with_provider_staff_sms_uses_staff_phone(
+    app,
+    clinic,
+    make_staff,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            email="doctor@test.com",
+            phone="+2348055555555",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=staff.user_id,
+            channel=NotificationChannel.SMS,
+        )
+
+        provider = Mock()
+        provider.send.return_value = True
+
+        factory = Mock(
+            return_value=provider,
+        )
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            factory,
+        )
+
+        result = notification_service._deliver_with_provider(
+            notification
+        )
+
+        assert result is True
+
+        factory.assert_called_once_with(
+            NotificationChannel.SMS,
+            clinic_id=clinic.id,
+        )
+
+        provider.send.assert_called_once_with(
+            notification=notification,
+            phone="+2348055555555",
+        )
+
+
+def test_deliver_with_provider_rejects_missing_patient_profile(
+    app,
+    clinic,
+    make_user,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match="Patient profile",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_missing_staff_profile(
+    app,
+    clinic,
+    make_user,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.DOCTOR,
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match="Staff profile",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_missing_patient_email(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+            email="",
+        )
+
+        make_patient(
+            clinic,
+            user_id=user.id,
+            email=None,
+            phone="+2348066666666",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="recipient email",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_missing_patient_phone(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+        )
+
+        make_patient(
+            clinic,
+            user_id=user.id,
+            email="patient@test.com",
+            phone=None,
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.SMS,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="recipient phone number",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_cross_clinic_patient(
+    app,
+    make_clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    clinic,
+    monkeypatch,
+):
+    with app.app_context():
+        other_clinic = make_clinic()
+
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+        )
+
+        make_patient(
+            other_clinic,
+            user_id=user.id,
+            email="other@test.com",
+            phone="+2348077777777",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match="Patient profile",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_cross_clinic_staff(
+    app,
+    make_clinic,
+    make_staff,
+    make_notification,
+    clinic,
+    monkeypatch,
+):
+    with app.app_context():
+        other_clinic = make_clinic()
+
+        staff = make_staff(
+            other_clinic,
+            role=Role.DOCTOR,
+            email="other-doctor@test.com",
+            phone="+2348088888888",
+        )
+
+        user_id = staff.user_id
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user_id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match="Notification recipient",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_inactive_user(
+    app,
+    clinic,
+    make_user,
+    make_patient,
+    make_notification,
+    monkeypatch,
+):
+    with app.app_context():
+        user = make_user(
+            clinic=clinic,
+            role=Role.PATIENT,
+            is_active=False,
+        )
+
+        make_patient(
+            clinic,
+            user_id=user.id,
+            email="inactive@test.com",
+            phone="+2348099999999",
+        )
+
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            channel=NotificationChannel.EMAIL,
+        )
+
+        provider = Mock()
+
+        monkeypatch.setattr(
+            notification_service,
+            "get_notification_provider",
+            Mock(return_value=provider),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="inactive",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
+
+        provider.send.assert_not_called()
+
+
+def test_deliver_with_provider_rejects_unsupported_channel(
+    app,
+    notification,
+):
+    with app.app_context():
+        notification.channel = "unsupported"
+
+        with pytest.raises(
+            ValidationError,
+            match="Unsupported notification channel",
+        ):
+            notification_service._deliver_with_provider(
+                notification
+            )
 
 
 def test_deliver_notification_push_uses_provider(

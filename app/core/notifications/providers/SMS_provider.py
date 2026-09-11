@@ -12,13 +12,6 @@ from app.core.notifications.providers.base_provider import (
 class SMSNotificationProvider(NotificationProviderBase):
     """
     SMS notification provider.
-
-    The provider receives an already-resolved phone number and
-    is responsible only for validating the SMS payload and
-    delegating delivery to the configured SMS transport.
-
-    Recipient resolution and domain ownership remain outside
-    the provider.
     """
 
     def __init__(
@@ -56,14 +49,6 @@ class SMSNotificationProvider(NotificationProviderBase):
     def _normalize_phone(
         phone: str,
     ) -> str:
-        """
-        Validate and normalize the already-resolved
-        recipient phone number.
-
-        The provider does not resolve users, patients,
-        staff, or devices.
-        """
-
         if not isinstance(phone, str):
             raise ValidationError(
                 "Notification recipient phone number is invalid"
@@ -107,6 +92,25 @@ class SMSNotificationProvider(NotificationProviderBase):
 
         return message
 
+    def _get_required_credential(
+        self,
+        name: str,
+    ) -> str:
+        value = self.credentials.get(
+            name
+        )
+
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+        ):
+            raise ValidationError(
+                f"SMS provider credential "
+                f"'{name}' is required"
+            )
+
+        return value.strip()
+
     def _deliver_sms(
         self,
         *,
@@ -114,11 +118,15 @@ class SMSNotificationProvider(NotificationProviderBase):
         message: str,
     ) -> bool:
         """
-        SMS gateway transport boundary.
+        SMS transport boundary.
 
-        Provider-specific implementations such as Twilio,
-        Africa's Talking, Vonage, or another SMS gateway
-        can implement the actual delivery here.
+        A concrete gateway implementation should use the
+        provider credentials supplied by the integration
+        configuration service.
+
+        This method deliberately does not report success
+        until an actual transport implementation returns
+        successfully.
         """
 
         raise NotImplementedError(
