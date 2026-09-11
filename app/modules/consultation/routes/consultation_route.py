@@ -20,6 +20,7 @@ from app.modules.consultation.schemas.consultation_schema import (
     ConsultationStartSchema,
     ConsultationTemplateCreateSchema,
     ConsultationUpdateSchema,
+    PatientsSeenByStaffQuerySchema,
 )
 
 from app.modules.consultation.services.consultation_service import (
@@ -30,6 +31,7 @@ from app.modules.consultation.services.consultation_service import (
     get_consultation,
     get_consultations_for_patient,
     get_consultations_for_staff,
+    get_patients_seen_by_staff,
     start_consultation,
     update_consultation_note,
 )
@@ -200,7 +202,27 @@ def _pagination_params():
     if not isinstance(per_page, int):
         return None, None, per_page
 
-    return page, per_page, None
+    try:
+        payload = PatientsSeenByStaffQuerySchema(
+            page=page,
+            per_page=per_page,
+        )
+    except PydanticValidationError as exc:
+        return None, None, (
+            jsonify({
+                "success": False,
+                "error": exc.errors(
+                    include_context=False
+                ),
+            }),
+            422,
+        )
+
+    return (
+        payload.page,
+        payload.per_page,
+        None,
+    )
 
 
 def _query_status():
@@ -305,6 +327,28 @@ def _serialize_consultation(consultation):
             if consultation.updated_at
             else None
         ),
+    }
+
+
+def _serialize_patient_summary(patient):
+    return {
+        "id": patient.id,
+        "patient_number": patient.patient_number,
+        "first_name": patient.first_name,
+        "last_name": patient.last_name,
+        "gender": (
+            patient.gender.value
+            if patient.gender
+            else None
+        ),
+        "date_of_birth": (
+            patient.date_of_birth.isoformat()
+            if patient.date_of_birth
+            else None
+        ),
+        "phone": patient.phone,
+        "email": patient.email,
+        "is_active": patient.is_active,
     }
 
 
@@ -510,6 +554,55 @@ def patient_consultations(patient_id: int):
         pagination,
         _serialize_consultation,
     )
+
+
+@consultation_bp.get("/my-patients")
+@role_required(*CONSULTATION_READ_ROLES)
+def my_patients():
+    user = _get_current_user()
+
+    staff = getattr(user, "staff", None)
+
+    if staff is None:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Authenticated user is not linked "
+                "to a staff record"
+            ),
+        }), 403
+
+    page, per_page, error = _pagination_params()
+
+    if error is not None:
+        return error
+
+    clinic_id, error = _get_authenticated_clinic_id()
+
+    if error is not None:
+        return error
+
+    if staff.clinic_id != clinic_id:
+        return jsonify({
+            "success": False,
+            "error": "Access denied",
+        }), 403
+
+    patients, pagination = get_patients_seen_by_staff(
+        staff_id=staff.id,
+        clinic_id=clinic_id,
+        page=page,
+        per_page=per_page,
+    )
+
+    return jsonify({
+        "success": True,
+        "data": [
+            _serialize_patient_summary(patient)
+            for patient in patients
+        ],
+        "pagination": pagination,
+    }), 200
 
 
 @consultation_bp.get("/staff/<int:staff_id>")

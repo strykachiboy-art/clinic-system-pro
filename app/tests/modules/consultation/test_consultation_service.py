@@ -84,18 +84,26 @@ class TestGetConsultation:
         self,
         clinic,
         make_clinic,
-        patient,
-        staff,
+        make_patient,
+        make_staff,
         make_consultation,
     ):
         other_clinic = make_clinic(
             name="Other Consultation Clinic",
         )
 
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
         consultation = make_consultation(
             other_clinic,
-            patient=patient,
-            staff=staff,
+            patient=other_patient,
+            staff=other_staff,
         )
 
         with pytest.raises(
@@ -203,6 +211,66 @@ class TestValidateConsultationParticipants:
         assert result[0].id == clinic.id
         assert result[1].id == patient.id
         assert result[2].id == staff.id
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        patient,
+        staff,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service._validate_consultation_participants(
+                clinic_id=clinic_id,
+                patient_id=patient.id,
+                staff_id=staff.id,
+            )
+
+    @pytest.mark.parametrize(
+        "patient_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_patient_id(
+        self,
+        clinic,
+        staff,
+        patient_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Patient ID must be greater than 0",
+        ):
+            consultation_service._validate_consultation_participants(
+                clinic_id=clinic.id,
+                patient_id=patient_id,
+                staff_id=staff.id,
+            )
+
+    @pytest.mark.parametrize(
+        "staff_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_staff_id(
+        self,
+        clinic,
+        patient,
+        staff_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Staff ID must be greater than 0",
+        ):
+            consultation_service._validate_consultation_participants(
+                clinic_id=clinic.id,
+                patient_id=patient.id,
+                staff_id=staff_id,
+            )
 
     def test_patient_from_other_clinic_is_rejected(
         self,
@@ -614,11 +682,8 @@ class TestStartConsultation:
         clinic,
         patient,
         staff,
-        make_consultation,
         no_audit,
     ):
-        assert make_consultation is not None
-
         result = consultation_service.start_consultation(
             clinic_id=clinic.id,
             patient_id=patient.id,
@@ -1111,7 +1176,9 @@ class TestCompleteConsultation:
             status=ConsultationStatus.IN_PROGRESS,
         )
 
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        before = datetime.now(timezone.utc).replace(
+            tzinfo=None
+        )
 
         result = consultation_service.complete_consultation(
             consultation.id,
@@ -1467,19 +1534,27 @@ class TestGetConsultationsForPatient:
             clinic,
             patient,
             staff,
-            started_at=datetime.now(timezone.utc) - timedelta(days=2),
+            started_at=(
+                datetime.now(timezone.utc)
+                - timedelta(days=2)
+            ),
         )
 
         newer = make_consultation(
             clinic,
             patient,
             staff,
-            started_at=datetime.now(timezone.utc) - timedelta(days=1),
+            started_at=(
+                datetime.now(timezone.utc)
+                - timedelta(days=1)
+            ),
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+            )
         )
 
         ids = [item.id for item in results]
@@ -1519,9 +1594,11 @@ class TestGetConsultationsForPatient:
             staff,
         )
 
-        results, _ = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
+        results, _ = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+            )
         )
 
         ids = [item.id for item in results]
@@ -1550,10 +1627,12 @@ class TestGetConsultationsForPatient:
             consultation_type=ConsultationType.SPECIALIST,
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            consultation_type=ConsultationType.SPECIALIST,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                consultation_type=ConsultationType.SPECIALIST,
+            )
         )
 
         ids = [item.id for item in results]
@@ -1590,12 +1669,14 @@ class TestGetConsultationsForPatient:
             consultation_type=ConsultationType.GENERAL,
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            consultation_type=ConsultationType.SPECIALIST,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                consultation_type=ConsultationType.SPECIALIST,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -1626,10 +1707,12 @@ class TestGetConsultationsForPatient:
             consultation_type=ConsultationType.GENERAL,
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            consultation_type=ConsultationType.EMERGENCY,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                consultation_type=ConsultationType.EMERGENCY,
+            )
         )
 
         assert results == []
@@ -1738,17 +1821,21 @@ class TestGetConsultationsForPatient:
                 clinic,
                 patient,
                 staff,
-                started_at=datetime.now(timezone.utc)
-                - timedelta(days=index),
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
             )
             for index in range(3)
         ]
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert len(results) == 2
@@ -1776,17 +1863,21 @@ class TestGetConsultationsForPatient:
                 clinic,
                 patient,
                 staff,
-                started_at=datetime.now(timezone.utc)
-                - timedelta(days=index),
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
             )
             for index in range(3)
         ]
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            page=2,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                page=2,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -1815,11 +1906,13 @@ class TestGetConsultationsForPatient:
             staff,
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            clinic.id,
-            page=2,
-            per_page=1,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                clinic.id,
+                page=2,
+                per_page=1,
+            )
         )
 
         assert results == []
@@ -1848,13 +1941,526 @@ class TestGetConsultationsForPatient:
             staff,
         )
 
-        results, pagination = consultation_service.get_consultations_for_patient(
-            patient.id,
-            suspended_clinic.id,
+        results, pagination = (
+            consultation_service.get_consultations_for_patient(
+                patient.id,
+                suspended_clinic.id,
+            )
         )
 
-        assert consultation.id in [item.id for item in results]
+        assert consultation.id in [
+            item.id
+            for item in results
+        ]
         assert pagination["total"] == 1
+
+
+class TestGetPatientsSeenByStaff:
+    def test_returns_distinct_patients(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patient_one = make_patient(
+            clinic=clinic,
+        )
+
+        patient_two = make_patient(
+            clinic=clinic,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient_one,
+            staff=staff,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient_one,
+            staff=staff,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient_two,
+            staff=staff,
+        )
+
+        patients, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+            )
+        )
+
+        assert {
+            patient.id
+            for patient in patients
+        } == {
+            patient_one.id,
+            patient_two.id,
+        }
+
+        assert len(patients) == 2
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 50
+        assert pagination["total"] == 2
+        assert pagination["pages"] == 1
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] is None
+
+    def test_excludes_patients_seen_only_by_other_staff(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff_one = make_staff(
+            clinic=clinic,
+        )
+
+        staff_two = make_staff(
+            clinic=clinic,
+        )
+
+        patient_one = make_patient(
+            clinic=clinic,
+        )
+
+        patient_two = make_patient(
+            clinic=clinic,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient_one,
+            staff=staff_one,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient_two,
+            staff=staff_two,
+        )
+
+        patients, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff_one.id,
+                clinic_id=clinic.id,
+            )
+        )
+
+        assert [
+            patient.id
+            for patient in patients
+        ] == [
+            patient_one.id,
+        ]
+
+        assert pagination["total"] == 1
+
+    def test_rejects_staff_from_other_clinic(
+        self,
+        clinic,
+        make_clinic,
+        make_staff,
+    ):
+        other_clinic = make_clinic(
+            name="Other Staff Seen Clinic",
+        )
+
+        staff = make_staff(
+            clinic=other_clinic,
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=f"Staff member {staff.id} not found",
+        ):
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "staff_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_staff_id(
+        self,
+        clinic,
+        staff_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Staff ID must be greater than 0",
+        ):
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff_id,
+                clinic_id=clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [0, -1, -100],
+    )
+    def test_rejects_non_positive_clinic_id(
+        self,
+        staff,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Clinic ID must be greater than 0",
+        ):
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic_id,
+            )
+
+    @pytest.mark.parametrize(
+        ("page", "per_page"),
+        [
+            (0, 50),
+            (-1, 50),
+            (1, 0),
+            (1, -1),
+            (1, 501),
+        ],
+    )
+    def test_rejects_invalid_pagination(
+        self,
+        clinic,
+        staff,
+        page,
+        per_page,
+    ):
+        with pytest.raises(
+            ValidationError,
+        ):
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+                page=page,
+                per_page=per_page,
+            )
+
+    def test_excludes_cross_clinic_consultations(
+        self,
+        clinic,
+        make_clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        other_clinic = make_clinic(
+            name="Cross Clinic Seen Clinic",
+        )
+
+        clinic_staff = make_staff(
+            clinic=clinic,
+        )
+
+        clinic_patient = make_patient(
+            clinic,
+        )
+
+        other_staff = make_staff(
+            other_clinic,
+        )
+
+        other_patient = make_patient(
+            other_clinic,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=clinic_patient,
+            staff=clinic_staff,
+        )
+
+        make_consultation(
+            clinic=other_clinic,
+            patient=other_patient,
+            staff=other_staff,
+        )
+
+        patients, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=clinic_staff.id,
+                clinic_id=clinic.id,
+            )
+        )
+
+        assert [
+            patient.id
+            for patient in patients
+        ] == [
+            clinic_patient.id,
+        ]
+
+        assert other_patient.id not in {
+            patient.id
+            for patient in patients
+        }
+
+        assert pagination["total"] == 1
+
+    def test_orders_patients_deterministically(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patient_zulu = make_patient(
+            clinic=clinic,
+            first_name="Zara",
+            last_name="Zulu",
+        )
+
+        patient_alpha = make_patient(
+            clinic=clinic,
+            first_name="Alice",
+            last_name="Alpha",
+        )
+
+        patient_same_last = make_patient(
+            clinic=clinic,
+            first_name="Brian",
+            last_name="Alpha",
+        )
+
+        for patient in (
+            patient_zulu,
+            patient_alpha,
+            patient_same_last,
+        ):
+            make_consultation(
+                clinic=clinic,
+                patient=patient,
+                staff=staff,
+            )
+
+        patients, _ = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+            )
+        )
+
+        assert [
+            patient.id
+            for patient in patients
+        ] == [
+            patient_alpha.id,
+            patient_same_last.id,
+            patient_zulu.id,
+        ]
+
+    def test_paginates_results(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patients = [
+            make_patient(
+                clinic=clinic,
+                first_name=f"Patient{index}",
+                last_name="Seen",
+            )
+            for index in range(5)
+        ]
+
+        for patient in patients:
+            make_consultation(
+                clinic=clinic,
+                patient=patient,
+                staff=staff,
+            )
+
+        first_page, first_meta = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+                page=1,
+                per_page=2,
+            )
+        )
+
+        second_page, second_meta = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+                page=2,
+                per_page=2,
+            )
+        )
+
+        assert len(first_page) == 2
+        assert len(second_page) == 2
+
+        assert first_meta["page"] == 1
+        assert first_meta["per_page"] == 2
+        assert first_meta["total"] == 5
+        assert first_meta["pages"] == 3
+        assert first_meta["has_next"] is True
+        assert first_meta["has_prev"] is False
+        assert first_meta["next_page"] == 2
+        assert first_meta["prev_page"] is None
+
+        assert second_meta["page"] == 2
+        assert second_meta["per_page"] == 2
+        assert second_meta["total"] == 5
+        assert second_meta["pages"] == 3
+        assert second_meta["has_next"] is True
+        assert second_meta["has_prev"] is True
+        assert second_meta["next_page"] == 3
+        assert second_meta["prev_page"] == 1
+
+        assert {
+            patient.id
+            for patient in first_page
+        }.isdisjoint(
+            {
+                patient.id
+                for patient in second_page
+            }
+        )
+
+    def test_returns_second_page_correctly(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patients = [
+            make_patient(
+                clinic=clinic,
+                first_name=f"Patient{index}",
+                last_name="Seen",
+            )
+            for index in range(3)
+        ]
+
+        for patient in patients:
+            make_consultation(
+                clinic=clinic,
+                patient=patient,
+                staff=staff,
+            )
+
+        results, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+                page=2,
+                per_page=2,
+            )
+        )
+
+        assert len(results) == 1
+        assert results[0].id == patients[2].id
+
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 2
+        assert pagination["total"] == 3
+        assert pagination["pages"] == 2
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
+
+    def test_empty_result_returns_empty_list_and_metadata(
+        self,
+        clinic,
+        make_staff,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patients, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+            )
+        )
+
+        assert patients == []
+        assert pagination["page"] == 1
+        assert pagination["per_page"] == 50
+        assert pagination["total"] == 0
+        assert pagination["pages"] == 0
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is False
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] is None
+
+    def test_empty_last_page_is_returned_without_error(
+        self,
+        clinic,
+        make_patient,
+        make_staff,
+        make_consultation,
+    ):
+        staff = make_staff(
+            clinic=clinic,
+        )
+
+        patient = make_patient(
+            clinic=clinic,
+        )
+
+        make_consultation(
+            clinic=clinic,
+            patient=patient,
+            staff=staff,
+        )
+
+        results, pagination = (
+            consultation_service.get_patients_seen_by_staff(
+                staff_id=staff.id,
+                clinic_id=clinic.id,
+                page=2,
+                per_page=1,
+            )
+        )
+
+        assert results == []
+        assert pagination["page"] == 2
+        assert pagination["per_page"] == 1
+        assert pagination["total"] == 1
+        assert pagination["pages"] == 1
+        assert pagination["has_next"] is False
+        assert pagination["has_prev"] is True
+        assert pagination["next_page"] is None
+        assert pagination["prev_page"] == 1
 
 
 class TestGetConsultationsForStaff:
@@ -1871,12 +2477,17 @@ class TestGetConsultationsForStaff:
             staff,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+            )
         )
 
-        assert consultation.id in [item.id for item in results]
+        assert consultation.id in [
+            item.id
+            for item in results
+        ]
         assert pagination["total"] == 1
 
     def test_filters_by_status(
@@ -1900,10 +2511,12 @@ class TestGetConsultationsForStaff:
             status=ConsultationStatus.COMPLETED,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            status=ConsultationStatus.IN_PROGRESS,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                status=ConsultationStatus.IN_PROGRESS,
+            )
         )
 
         ids = [item.id for item in results]
@@ -1933,10 +2546,12 @@ class TestGetConsultationsForStaff:
             consultation_type=ConsultationType.SPECIALIST,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            consultation_type=ConsultationType.SPECIALIST,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                consultation_type=ConsultationType.SPECIALIST,
+            )
         )
 
         ids = [item.id for item in results]
@@ -1976,11 +2591,13 @@ class TestGetConsultationsForStaff:
             consultation_type=ConsultationType.SPECIALIST,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            status=ConsultationStatus.IN_PROGRESS,
-            consultation_type=ConsultationType.SPECIALIST,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                status=ConsultationStatus.IN_PROGRESS,
+                consultation_type=ConsultationType.SPECIALIST,
+            )
         )
 
         ids = [item.id for item in results]
@@ -2018,12 +2635,14 @@ class TestGetConsultationsForStaff:
             consultation_type=ConsultationType.GENERAL,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            consultation_type=ConsultationType.SPECIALIST,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                consultation_type=ConsultationType.SPECIALIST,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -2054,10 +2673,12 @@ class TestGetConsultationsForStaff:
             consultation_type=ConsultationType.GENERAL,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            consultation_type=ConsultationType.EMERGENCY,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                consultation_type=ConsultationType.EMERGENCY,
+            )
         )
 
         assert results == []
@@ -2166,17 +2787,21 @@ class TestGetConsultationsForStaff:
                 clinic,
                 patient,
                 staff,
-                started_at=datetime.now(timezone.utc)
-                - timedelta(days=index),
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
             )
             for index in range(3)
         ]
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -2206,8 +2831,10 @@ class TestGetConsultationsForStaff:
                 patient,
                 staff,
                 status=ConsultationStatus.IN_PROGRESS,
-                started_at=datetime.now(timezone.utc)
-                - timedelta(days=index),
+                started_at=(
+                    datetime.now(timezone.utc)
+                    - timedelta(days=index)
+                ),
             )
             for index in range(3)
         ]
@@ -2219,12 +2846,14 @@ class TestGetConsultationsForStaff:
             status=ConsultationStatus.COMPLETED,
         )
 
-        results, pagination = consultation_service.get_consultations_for_staff(
-            staff.id,
-            clinic.id,
-            status=ConsultationStatus.IN_PROGRESS,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_consultations_for_staff(
+                staff.id,
+                clinic.id,
+                status=ConsultationStatus.IN_PROGRESS,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -2418,8 +3047,10 @@ class TestGetActiveTemplates:
             name="D Inactive",
         )
 
-        results, pagination = consultation_service.get_active_templates(
-            clinic.id,
+        results, pagination = (
+            consultation_service.get_active_templates(
+                clinic.id,
+            )
         )
 
         ids = [item.id for item in results]
@@ -2440,18 +3071,20 @@ class TestGetActiveTemplates:
             name="Global",
         )
 
-        clinic_template = make_template(
+        another_global = make_template(
             clinic=None,
             is_active=True,
             name="Another Global",
         )
 
-        results, pagination = consultation_service.get_active_templates()
+        results, pagination = (
+            consultation_service.get_active_templates()
+        )
 
         ids = [item.id for item in results]
 
         assert global_template.id in ids
-        assert clinic_template.id in ids
+        assert another_global.id in ids
         assert pagination["total"] == 2
 
     def test_returns_templates_in_name_order(
@@ -2471,17 +3104,25 @@ class TestGetActiveTemplates:
             name="Zulu",
         )
 
-        results, _ = consultation_service.get_active_templates(
-            clinic.id,
+        results, _ = (
+            consultation_service.get_active_templates(
+                clinic.id,
+            )
         )
 
         relevant = [
             item.id
             for item in results
-            if item.id in {first.id, second.id}
+            if item.id in {
+                first.id,
+                second.id,
+            }
         ]
 
-        assert relevant == [first.id, second.id]
+        assert relevant == [
+            first.id,
+            second.id,
+        ]
 
     @pytest.mark.parametrize(
         "clinic_id",
@@ -2538,10 +3179,12 @@ class TestGetActiveTemplates:
             for index in range(3)
         ]
 
-        results, pagination = consultation_service.get_active_templates(
-            clinic.id,
-            page=1,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_active_templates(
+                clinic.id,
+                page=1,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -2572,10 +3215,12 @@ class TestGetActiveTemplates:
             for index in range(3)
         ]
 
-        results, pagination = consultation_service.get_active_templates(
-            clinic.id,
-            page=2,
-            per_page=2,
+        results, pagination = (
+            consultation_service.get_active_templates(
+                clinic.id,
+                page=2,
+                per_page=2,
+            )
         )
 
         assert [item.id for item in results] == [
@@ -2602,10 +3247,12 @@ class TestGetActiveTemplates:
             name="Only Template",
         )
 
-        results, pagination = consultation_service.get_active_templates(
-            clinic.id,
-            page=2,
-            per_page=1,
+        results, pagination = (
+            consultation_service.get_active_templates(
+                clinic.id,
+                page=2,
+                per_page=1,
+            )
         )
 
         assert results == []
@@ -2678,7 +3325,7 @@ class TestConsultationLifecycleValidators:
             clinic,
             patient,
             staff,
-            status=ConsultationStatus.CANCELLED,
+            status=ConsultationStatus.COMPLETED,
         )
 
         with pytest.raises(

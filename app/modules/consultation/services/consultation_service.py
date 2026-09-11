@@ -693,6 +693,72 @@ def get_consultations_for_patient(
 
 
 # ---------------------------------------------------------------------------
+# Patients seen by staff
+# ---------------------------------------------------------------------------
+
+def get_patients_seen_by_staff(
+    staff_id: int,
+    clinic_id: int,
+    *,
+    page: int = DEFAULT_PAGE,
+    per_page: int = DEFAULT_PER_PAGE,
+) -> tuple[list, dict]:
+    if staff_id <= 0:
+        raise ValidationError(
+            "Staff ID must be greater than 0"
+        )
+
+    if clinic_id <= 0:
+        raise ValidationError(
+            "Clinic ID must be greater than 0"
+        )
+
+    page, per_page = _validate_pagination(
+        page,
+        per_page,
+    )
+
+    staff = get_staff(staff_id)
+
+    if staff.clinic_id != clinic_id:
+        raise NotFoundError(
+            f"Staff member {staff_id} not found"
+        )
+
+    from app.modules.patient.models.patient_model import Patient
+
+    statement = (
+        db.select(Patient)
+        .join(
+            Consultation,
+            Consultation.patient_id == Patient.id,
+        )
+        .where(
+            Consultation.staff_id == staff_id,
+            Consultation.clinic_id == clinic_id,
+            Patient.clinic_id == clinic_id,
+        )
+        .distinct()
+        .order_by(
+            Patient.last_name.asc(),
+            Patient.first_name.asc(),
+            Patient.id.asc(),
+        )
+    )
+
+    pagination = db.paginate(
+        statement,
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    patients = list(pagination.items)
+
+    return patients, _pagination_metadata(pagination)
+
+
+# ---------------------------------------------------------------------------
 # Staff history
 # ---------------------------------------------------------------------------
 

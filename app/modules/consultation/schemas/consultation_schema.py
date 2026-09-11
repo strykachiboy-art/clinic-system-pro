@@ -2,9 +2,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.enums.consultation_enums import (
-    ConsultationType,
-)
+from app.core.enums.consultation_enums import ConsultationType
 
 
 def _reject_blank(value: Optional[str]) -> Optional[str]:
@@ -14,14 +12,6 @@ def _reject_blank(value: Optional[str]) -> Optional[str]:
 
 
 class ConsultationStartSchema(BaseModel):
-    """
-    Start a consultation for the authenticated user's clinic.
-
-    clinic_id is intentionally excluded. Tenant ownership must be
-    derived from the authenticated user rather than trusted from
-    client input.
-    """
-
     patient_id: int = Field(..., gt=0)
     staff_id: int = Field(..., gt=0)
     appointment_id: Optional[int] = Field(None, gt=0)
@@ -32,8 +22,15 @@ class ConsultationStartSchema(BaseModel):
 
     template_id: Optional[int] = Field(None, gt=0)
 
-    chief_complaint: Optional[str] = Field(None)
-    symptoms: Optional[str] = Field(None)
+    chief_complaint: Optional[str] = Field(
+        None,
+        max_length=2000,
+    )
+
+    symptoms: Optional[str] = Field(
+        None,
+        max_length=5000,
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -52,23 +49,45 @@ class ConsultationStartSchema(BaseModel):
 
 
 class ConsultationUpdateSchema(BaseModel):
-    """
-    Update clinical documentation.
+    icd10_code: Optional[str] = Field(
+        None,
+        max_length=10,
+    )
 
-    Completed consultations may be updated only through the
-    controlled amendment/update workflow in the service layer.
-    Cancelled consultations cannot be edited.
-    """
+    chief_complaint: Optional[str] = Field(
+        None,
+        max_length=2000,
+    )
 
-    icd10_code: Optional[str] = Field(None, max_length=10)
-    chief_complaint: Optional[str] = Field(None)
-    symptoms: Optional[str] = Field(None)
-    diagnosis: Optional[str] = Field(None)
-    treatment_plan: Optional[str] = Field(None)
-    notes: Optional[str] = Field(None)
+    symptoms: Optional[str] = Field(
+        None,
+        max_length=5000,
+    )
 
-    voice_note_url: Optional[str] = Field(None, max_length=255)
-    transcribed_text: Optional[str] = Field(None)
+    diagnosis: Optional[str] = Field(
+        None,
+        max_length=5000,
+    )
+
+    treatment_plan: Optional[str] = Field(
+        None,
+        max_length=5000,
+    )
+
+    notes: Optional[str] = Field(
+        None,
+        max_length=10000,
+    )
+
+    voice_note_url: Optional[str] = Field(
+        None,
+        max_length=255,
+    )
+
+    transcribed_text: Optional[str] = Field(
+        None,
+        max_length=20000,
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -117,21 +136,24 @@ class ConsultationUpdateSchema(BaseModel):
 
 
 class ConsultationCompleteSchema(BaseModel):
-    """
-    Final sign-off.
-
-    Diagnosis is mandatory before a consultation can be completed.
-    """
-
     diagnosis: str = Field(
         ...,
         min_length=1,
+        max_length=5000,
     )
 
-    treatment_plan: Optional[str] = Field(None)
-    notes: Optional[str] = Field(None)
+    treatment_plan: Optional[str] = Field(
+        None,
+        max_length=5000,
+    )
+
+    notes: Optional[str] = Field(
+        None,
+        max_length=10000,
+    )
 
     model_config = ConfigDict(
+        from_attributes=True,
         extra="forbid",
     )
 
@@ -142,36 +164,53 @@ class ConsultationCompleteSchema(BaseModel):
             raise ValueError("Diagnosis cannot be blank")
         return value
 
+    _validate_treatment_plan = field_validator(
+        "treatment_plan",
+        mode="after",
+    )(_reject_blank)
+
+    _validate_notes = field_validator(
+        "notes",
+        mode="after",
+    )(_reject_blank)
+
 
 class ConsultationCancelSchema(BaseModel):
-    """Cancel an in-progress consultation."""
-
-    reason: Optional[str] = Field(None, max_length=500)
+    reason: Optional[str] = Field(
+        None,
+        max_length=500,
+    )
 
     model_config = ConfigDict(
+        from_attributes=True,
         extra="forbid",
     )
 
     @field_validator("reason", mode="after")
     @classmethod
-    def validate_reason(cls, value: Optional[str]) -> Optional[str]:
+    def validate_reason(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
         if value is not None and not value.strip():
-            raise ValueError("Cancellation reason cannot be blank")
+            raise ValueError(
+                "Cancellation reason cannot be blank"
+            )
         return value
 
 
 class ConsultationTemplateCreateSchema(BaseModel):
-    """
-    Create a consultation template.
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=150,
+    )
 
-    Clinic ownership is derived by the service layer. Global
-    templates must be created through an explicitly authorized
-    administrative operation rather than by accepting clinic_id
-    from the client.
-    """
+    specialty: Optional[str] = Field(
+        None,
+        max_length=100,
+    )
 
-    name: str = Field(..., min_length=1, max_length=150)
-    specialty: Optional[str] = Field(None, max_length=100)
     structure: dict[str, Any] = Field(...)
 
     model_config = ConfigDict(
@@ -188,14 +227,39 @@ class ConsultationTemplateCreateSchema(BaseModel):
 
     @field_validator("specialty", mode="after")
     @classmethod
-    def validate_specialty(cls, value: Optional[str]) -> Optional[str]:
+    def validate_specialty(
+        cls,
+        value: Optional[str],
+    ) -> Optional[str]:
         if value is not None and not value.strip():
             raise ValueError("Specialty cannot be blank")
         return value
 
     @field_validator("structure", mode="after")
     @classmethod
-    def validate_structure(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def validate_structure(
+        cls,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
         if not value:
-            raise ValueError("Template structure cannot be empty")
+            raise ValueError(
+                "Template structure cannot be empty"
+            )
         return value
+
+
+class PatientsSeenByStaffQuerySchema(BaseModel):
+    page: int = Field(
+        default=1,
+        ge=1,
+    )
+
+    per_page: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )

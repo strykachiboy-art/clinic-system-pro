@@ -58,6 +58,33 @@ def make_consultation(
     )
 
 
+def make_patient(
+    *,
+    patient_id=1,
+    clinic_id=1,
+    patient_number="PAT-001",
+    first_name="Jane",
+    last_name="Doe",
+    gender=None,
+    date_of_birth=None,
+    phone="08000000000",
+    email="jane@example.com",
+    is_active=True,
+):
+    return SimpleNamespace(
+        id=patient_id,
+        clinic_id=clinic_id,
+        patient_number=patient_number,
+        first_name=first_name,
+        last_name=last_name,
+        gender=gender,
+        date_of_birth=date_of_birth,
+        phone=phone,
+        email=email,
+        is_active=is_active,
+    )
+
+
 def make_template(
     *,
     template_id=1,
@@ -900,6 +927,448 @@ def test_patient_consultations_rejects_invalid_type(
     assert "Invalid consultation type" in body["error"]
 
 
+def test_my_patients_success(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    patients = [
+        make_patient(
+            patient_id=10,
+            clinic_id=clinic.id,
+            patient_number="PAT-010",
+            first_name="Alice",
+            last_name="Adams",
+        ),
+        make_patient(
+            patient_id=11,
+            clinic_id=clinic.id,
+            patient_number="PAT-011",
+            first_name="Brian",
+            last_name="Brown",
+        ),
+    ]
+
+    pagination = make_pagination(
+        page=1,
+        per_page=50,
+        total=2,
+        pages=1,
+    )
+
+    called = {}
+
+    def fake_get_patients_seen_by_staff(**kwargs):
+        called.update(kwargs)
+        return patients, pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_patients_seen_by_staff",
+        fake_get_patients_seen_by_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert len(body["data"]) == 2
+
+    assert body["data"][0]["id"] == 10
+    assert body["data"][0]["patient_number"] == "PAT-010"
+    assert body["data"][0]["first_name"] == "Alice"
+    assert body["data"][0]["last_name"] == "Adams"
+
+    assert body["data"][1]["id"] == 11
+    assert body["data"][1]["patient_number"] == "PAT-011"
+
+    assert body["pagination"] == pagination
+
+    assert called["staff_id"] == staff.id
+    assert called["clinic_id"] == clinic.id
+    assert called["page"] == 1
+    assert called["per_page"] == 50
+
+
+def test_my_patients_forwards_pagination(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    pagination = make_pagination(
+        page=2,
+        per_page=10,
+        total=15,
+        pages=2,
+        has_next=False,
+        has_prev=True,
+        prev_page=1,
+    )
+
+    called = {}
+
+    def fake_get_patients_seen_by_staff(**kwargs):
+        called.update(kwargs)
+        return [], pagination
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_patients_seen_by_staff",
+        fake_get_patients_seen_by_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients"
+        "?page=2&per_page=10",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"] == []
+    assert body["pagination"] == pagination
+
+    assert called["staff_id"] == staff.id
+    assert called["clinic_id"] == clinic.id
+    assert called["page"] == 2
+    assert called["per_page"] == 10
+
+
+def test_my_patients_returns_serialized_patient_fields(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    patient = make_patient(
+        patient_id=55,
+        clinic_id=clinic.id,
+        patient_number="PAT-055",
+        first_name="John",
+        last_name="Doe",
+        phone="08111111111",
+        email="john@example.com",
+        is_active=True,
+    )
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_patients_seen_by_staff",
+        lambda **kwargs: (
+            [patient],
+            make_pagination(
+                total=1,
+                pages=1,
+            ),
+        ),
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.get_json()["data"][0]
+
+    assert data["id"] == 55
+    assert data["patient_number"] == "PAT-055"
+    assert data["first_name"] == "John"
+    assert data["last_name"] == "Doe"
+    assert data["phone"] == "08111111111"
+    assert data["email"] == "john@example.com"
+    assert data["is_active"] is True
+
+
+def test_my_patients_uses_authenticated_staff(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    called = {}
+
+    def fake_get_patients_seen_by_staff(**kwargs):
+        called.update(kwargs)
+        return [], make_pagination()
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_patients_seen_by_staff",
+        fake_get_patients_seen_by_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert called["staff_id"] == staff.id
+    assert called["staff_id"] != 999999
+    assert called["clinic_id"] == clinic.id
+
+
+def test_my_patients_does_not_accept_staff_id_from_query(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    called = {}
+
+    def fake_get_patients_seen_by_staff(**kwargs):
+        called.update(kwargs)
+        return [], make_pagination()
+
+    monkeypatch.setattr(
+        consultation_route,
+        "get_patients_seen_by_staff",
+        fake_get_patients_seen_by_staff,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?staff_id=999999",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert called["staff_id"] == staff.id
+    assert called["staff_id"] != 999999
+
+
+def test_my_patients_rejects_invalid_page(
+    app,
+    auth_headers_for,
+    staff,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?page=0",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be greater than 0"
+
+
+def test_my_patients_rejects_invalid_per_page(
+    app,
+    auth_headers_for,
+    staff,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?per_page=0",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "per_page must be greater than 0"
+
+
+def test_my_patients_rejects_per_page_above_maximum(
+    app,
+    auth_headers_for,
+    staff,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?per_page=501",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "per_page must be less than or equal to 500"
+    )
+
+
+def test_my_patients_rejects_non_integer_page(
+    app,
+    auth_headers_for,
+    staff,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?page=abc",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be an integer"
+
+
+def test_my_patients_rejects_non_integer_per_page(
+    app,
+    auth_headers_for,
+    staff,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients?per_page=abc",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "per_page must be an integer"
+
+
+def test_my_patients_rejects_unlinked_user(
+    app,
+    clinic,
+    auth_headers_for,
+    user,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.DOCTOR,
+    )
+
+    monkeypatch.setattr(
+        consultation_route,
+        "_get_current_user",
+        lambda: SimpleNamespace(
+            clinic_id=clinic.id,
+            is_active=True,
+            staff=None,
+        ),
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Authenticated user is not linked "
+        "to a staff record"
+    )
+
+
+def test_my_patients_rejects_staff_from_other_clinic(
+    app,
+    clinic,
+    auth_headers_for,
+    staff,
+    monkeypatch,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    monkeypatch.setattr(
+        consultation_route,
+        "_get_authenticated_clinic_id",
+        lambda: (
+            clinic.id + 999,
+            None,
+        ),
+    )
+
+    response = app.test_client().get(
+        "/api/consultations/my-patients",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Access denied"
+
+
 def test_staff_consultations_success(
     app,
     clinic,
@@ -1143,7 +1612,10 @@ def test_pagination_rejects_invalid_page(
     user,
     path,
 ):
-    headers = auth_headers_for(user, role=Role.ADMIN)
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
 
     response = app.test_client().get(
         path,
@@ -1172,7 +1644,10 @@ def test_pagination_rejects_non_integer_page(
     user,
     path,
 ):
-    headers = auth_headers_for(user, role=Role.ADMIN)
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
 
     response = app.test_client().get(
         path,
@@ -1204,7 +1679,10 @@ def test_pagination_rejects_invalid_per_page(
     user,
     path,
 ):
-    headers = auth_headers_for(user, role=Role.ADMIN)
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
 
     response = app.test_client().get(
         path,
@@ -1233,7 +1711,10 @@ def test_pagination_rejects_per_page_above_maximum(
     user,
     path,
 ):
-    headers = auth_headers_for(user, role=Role.ADMIN)
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
 
     response = app.test_client().get(
         path,
@@ -1605,6 +2086,130 @@ def test_active_templates_forwards_pagination(
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/my-patients?page=0",
+        "/api/consultations/my-patients?page=-1",
+    ],
+)
+def test_my_patients_pagination_rejects_invalid_page(
+    app,
+    auth_headers_for,
+    staff,
+    path,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be greater than 0"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/my-patients?page=abc",
+    ],
+)
+def test_my_patients_pagination_rejects_non_integer_page(
+    app,
+    auth_headers_for,
+    staff,
+    path,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "page must be an integer"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/my-patients?per_page=0",
+        "/api/consultations/my-patients?per_page=-1",
+    ],
+)
+def test_my_patients_pagination_rejects_invalid_per_page(
+    app,
+    auth_headers_for,
+    staff,
+    path,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "per_page must be greater than 0"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/consultations/my-patients?per_page=501",
+    ],
+)
+def test_my_patients_pagination_rejects_per_page_above_maximum(
+    app,
+    auth_headers_for,
+    staff,
+    path,
+):
+    headers = auth_headers_for(
+        staff.user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().get(
+        path,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "per_page must be less than or equal to 500"
+    )
+
+
+@pytest.mark.parametrize(
     "method,path",
     [
         ("get", "/api/consultations/1"),
@@ -1612,6 +2217,7 @@ def test_active_templates_forwards_pagination(
         ("post", "/api/consultations/1/complete"),
         ("post", "/api/consultations/1/cancel"),
         ("get", "/api/consultations/patient/1"),
+        ("get", "/api/consultations/my-patients"),
         ("get", "/api/consultations/staff/1"),
         ("get", "/api/consultations/templates"),
     ],
