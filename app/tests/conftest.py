@@ -30,10 +30,6 @@ from app.core.notifications.models.notification_models import (
 def app():
     """
     Create an isolated Flask application and database for every test.
-
-    A fresh Fernet encryption key is generated for each test application.
-    This keeps integration credentials encrypted during tests without using
-    a real production secret or weakening the application's encryption layer.
     """
 
     flask_app = create_app("testing")
