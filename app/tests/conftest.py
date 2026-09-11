@@ -642,6 +642,92 @@ def patient(make_patient, clinic):
 
 
 # ============================================================================
+# ASSET CONTROL
+# ============================================================================
+
+
+@pytest.fixture()
+def make_asset(db):
+    """
+    Factory for Asset.
+
+    Creates a valid active clinic asset by default.
+    Individual tests can override any supported Asset field.
+    """
+
+    from app.core.enums.asset_enums import (
+        AssetCategory,
+        AssetCondition,
+        AssetOwnership,
+        AssetStatus,
+        MaintenanceStatus,
+    )
+
+    from app.modules.asset_control.models.asset_model import (
+        Asset,
+    )
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        asset_tag=None,
+        name=None,
+        category=AssetCategory.MEDICAL_EQUIPMENT,
+        status=AssetStatus.ACTIVE,
+        condition=AssetCondition.GOOD,
+        ownership=AssetOwnership.CLINIC,
+        is_active=True,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if asset_tag is None:
+            asset_tag = f"AST-{counter['n']:04d}"
+
+        if name is None:
+            name = f"Test Asset {counter['n']}"
+
+        overrides.setdefault(
+            "maintenance_status",
+            MaintenanceStatus.NOT_REQUIRED,
+        )
+
+        asset = Asset(
+            clinic_id=clinic.id,
+            asset_tag=asset_tag,
+            name=name,
+            category=category,
+            status=status,
+            condition=condition,
+            ownership=ownership,
+            is_active=is_active,
+            **overrides,
+        )
+
+        db.session.add(asset)
+        db.session.flush()
+
+        return asset
+
+    return _make
+
+
+@pytest.fixture()
+def asset(
+    make_asset,
+    clinic,
+):
+    """
+    Default active clinic asset.
+    """
+
+    return make_asset(
+        clinic,
+    )
+
+
+# ============================================================================
 # APPOINTMENT
 # ============================================================================
 
@@ -1036,8 +1122,6 @@ def make_bed(db):
         db.session.flush()
 
         return bed
-
-    return _make
 
 
 # ============================================================================
