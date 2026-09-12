@@ -191,7 +191,7 @@ def list_access_control_users(
     actor_id: int,
     query: AccessControlUserListQuerySchema,
 ) -> tuple[list[AccessControlUserResponseSchema], int]:
-    actor = _validate_actor(actor)
+    actor = _validate_actor(actor_id)
 
     if actor.role is Role.SUPER_ADMIN:
         base_query = User.query

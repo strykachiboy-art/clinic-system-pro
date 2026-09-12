@@ -78,6 +78,7 @@ def register_blueprints(app):
     from app.core.auth.user.routes.user_device_routes import user_device_bp
     from app.modules.asset_control.routes.asset_route import asset_bp
     from app.modules.profile.routes.profile_route import profile_bp
+    from app.modules.access_control.routes.access_control_routes import access_control_bp
     
 
     app.register_blueprint(web_bp)
@@ -109,3 +110,4 @@ def register_blueprints(app):
     app.register_blueprint(user_device_bp)
     app.register_blueprint(asset_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(access_control_bp)
