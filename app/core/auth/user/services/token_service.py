@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from flask_jwt_extended import get_jwt
@@ -10,81 +12,196 @@ from app.core.exceptions import ValidationError
 REVOKED_TOKEN_PREFIX = "auth:revoked:"
 
 
-def _revoked_token_key(jti: str) -> str:
+def _revoked_token_key(
+    jti: str,
+) -> str:
     return f"{REVOKED_TOKEN_PREFIX}{jti}"
 
 
-def _token_remaining_seconds(jwt_payload: dict | None = None) -> int:
+def _token_remaining_seconds(
+    jwt_payload: dict | None = None,
+) -> int:
     if jwt_payload is None:
         jwt_payload = get_jwt()
 
-    exp = jwt_payload.get("exp")
+    exp = jwt_payload.get(
+        "exp"
+    )
 
     if exp is None:
-        raise ValidationError("JWT expiration is missing")
+        raise ValidationError(
+            "JWT expiration is missing"
+        )
 
-    now = datetime.now(timezone.utc).timestamp()
-    remaining = int(exp - now)
+    now = datetime.now(
+        timezone.utc
+    ).timestamp()
 
-    return max(remaining, 1)
+    remaining = int(
+        exp - now
+    )
+
+    return max(
+        remaining,
+        1,
+    )
 
 
-def revoke_token(jwt_payload: dict) -> None:
-    """
-    Revoke a JWT using its JTI.
+def _validate_user_id(
+    user_id: int,
+) -> None:
+    if (
+        isinstance(user_id, bool)
+        or not isinstance(user_id, int)
+        or user_id <= 0
+    ):
+        raise ValidationError(
+            "User ID must be a positive integer"
+        )
 
-    The Redis entry expires automatically when the JWT itself
-    expires, so revoked-token storage does not grow forever.
-    """
+
+def revoke_token(
+    jwt_payload: dict,
+) -> None:
     if extensions.redis_client is None:
         raise ValidationError(
             "Redis is not available for token revocation"
         )
 
-    jti = jwt_payload.get("jti")
+    jti = jwt_payload.get(
+        "jti"
+    )
 
     if not jti:
-        raise ValidationError("JWT ID is missing")
+        raise ValidationError(
+            "JWT ID is missing"
+        )
 
     try:
         extensions.redis_client.setex(
             _revoked_token_key(jti),
-            _token_remaining_seconds(jwt_payload),
+            _token_remaining_seconds(
+                jwt_payload
+            ),
             "1",
         )
-    except (ConnectionError, TimeoutError) as exc:
+    except (
+        ConnectionError,
+        TimeoutError,
+    ) as exc:
         raise ValidationError(
             "Unable to access token revocation storage"
         ) from exc
 
 
 def revoke_current_token() -> None:
-    """
-    Revoke the JWT currently authenticated on the request.
-    """
-    revoke_token(get_jwt())
+    revoke_token(
+        get_jwt()
+    )
 
 
-def is_token_revoked(jwt_payload: dict) -> bool:
+def revoke_user_tokens(
+    user_id: int,
+) -> None:
     """
-    Return True when the JWT has been revoked.
+    Invalidate all currently issued tokens for a user.
 
-    Redis failure fails closed so authentication does not
-    silently bypass token revocation.
+    The token_version increment participates in the caller's
+    existing database transaction.
     """
+
+    _validate_user_id(
+        user_id
+    )
+
+    # Import locally to avoid the circular dependency that occurs
+    # during app.extensions initialization.
+    from app.core.auth.user.models.user_model import User
+    from app.extensions import db
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if user is None:
+        raise ValidationError(
+            f"User {user_id} not found"
+        )
+
+    user.token_version += 1
+
+
+def is_token_revoked(
+    jwt_payload: dict,
+) -> bool:
+    # Fail closed when Redis is unavailable.
     if extensions.redis_client is None:
         return True
 
-    jti = jwt_payload.get("jti")
+    jti = jwt_payload.get(
+        "jti"
+    )
 
     if not jti:
         return True
 
     try:
-        return bool(
-            extensions.redis_client.exists(
-                _revoked_token_key(jti)
-            )
-        )
-    except (ConnectionError, TimeoutError):
+        if extensions.redis_client.exists(
+            _revoked_token_key(jti)
+        ):
+            return True
+
+    except (
+        ConnectionError,
+        TimeoutError,
+    ):
+        # Authentication must fail closed if
+        # revocation storage cannot be checked.
         return True
+
+    token_user_id = jwt_payload.get(
+        "sub"
+    )
+
+    token_version = jwt_payload.get(
+        "token_version"
+    )
+
+    if token_user_id is None:
+        return True
+
+    if token_version is None:
+        return True
+
+    try:
+        token_user_id = int(
+            token_user_id
+        )
+        token_version = int(
+            token_version
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return True
+
+    from app.core.auth.user.models.user_model import User
+    from app.extensions import db
+
+    user = db.session.get(
+        User,
+        token_user_id,
+    )
+
+    if user is None:
+        return True
+
+    if not user.is_active:
+        return True
+
+    if user.token_version != token_version:
+        return True
+
+    return False

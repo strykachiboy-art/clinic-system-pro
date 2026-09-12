@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -7,13 +5,20 @@ from flask_jwt_extended import (
 
 from app.extensions import db
 from app.core.utils.decorators import transactional
-from app.core.exceptions import ValidationError, ConflictError
+from app.core.exceptions import (
+    ConflictError,
+    ValidationError,
+)
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
 from app.core.auth.user.models.user_model import User
 
-def _validate_positive_id(value, field_name: str) -> None:
+
+def _validate_positive_id(
+    value,
+    field_name: str,
+) -> None:
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
@@ -23,18 +28,29 @@ def _validate_positive_id(value, field_name: str) -> None:
             f"{field_name} must be a positive integer"
         )
 
-def get_user(user_id: int) -> User:
-    _validate_positive_id(user_id, "User ID")
 
-    user = db.session.get(User, user_id)
+def get_user(user_id: int) -> User:
+    _validate_positive_id(
+        user_id,
+        "User ID",
+    )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
-        raise ValidationError(f"User {user_id} not found")
+        raise ValidationError(
+            f"User {user_id} not found"
+        )
 
     return user
 
 
-def get_user_by_email(email: str) -> User | None:
+def get_user_by_email(
+    email: str,
+) -> User | None:
     if not email:
         return None
 
@@ -50,9 +66,10 @@ def register_user(
     role: Role,
     clinic_id: int | None = None,
 ) -> User:
-
     if not email or "@" not in email:
-        raise ValidationError("A valid email is required")
+        raise ValidationError(
+            "A valid email is required"
+        )
 
     if not password or len(password) < 8:
         raise ValidationError(
@@ -60,7 +77,9 @@ def register_user(
         )
 
     if not isinstance(role, Role):
-        raise ValidationError("Invalid user role")
+        raise ValidationError(
+            "Invalid user role"
+        )
 
     email = email.lower().strip()
 
@@ -85,14 +104,18 @@ def register_user(
         entity_type="User",
         entity_id=user.id,
         description=(
-            f"User registered: {email} ({role.value})"
+            f"User registered: "
+            f"{email} ({role.value})"
         ),
     )
 
     return user
 
 
-def authenticate_user(email: str, password: str) -> dict:
+def authenticate_user(
+    email: str,
+    password: str,
+) -> dict:
     email = (email or "").lower().strip()
 
     if not email or not password:
@@ -114,19 +137,20 @@ def authenticate_user(email: str, password: str) -> dict:
 
     additional_claims = {
         "role": user.role.value,
+        "token_version": user.token_version,
     }
 
-    # Expiration comes from:
-    # JWT_ACCESS_TOKEN_EXPIRES
     access_token = create_access_token(
-       identity=str(user.id),
-       additional_claims=additional_claims,
+        identity=str(user.id),
+        additional_claims=additional_claims,
     )
 
     refresh_token = create_refresh_token(
-    identity=str(user.id),
+        identity=str(user.id),
+        additional_claims={
+            "token_version": user.token_version,
+        },
     )
-    
 
     user.last_login_at = db.func.now()
 

@@ -87,6 +87,9 @@ def client(app):
 def auth_headers_for(app):
     """
     Factory for authenticated JWT headers.
+
+    Test tokens intentionally mirror the claims required by the
+    application's token validation logic.
     """
 
     def _make(user, role=None):
@@ -104,6 +107,7 @@ def auth_headers_for(app):
                 identity=str(user.id),
                 additional_claims={
                     "role": claim_role,
+                    "token_version": user.token_version,
                 },
             )
 
@@ -1002,8 +1006,6 @@ def make_drug_batch(db):
 
         return batch
 
-    # IMPORTANT:
-    # Return the factory itself so pytest injects a callable fixture.
     return _make
 
 
@@ -1123,7 +1125,10 @@ def make_bed(db):
 
     counter = {"n": 0}
 
-    def _make(ward, **overrides):
+    def _make(
+        ward,
+        **overrides,
+    ):
         counter["n"] += 1
 
         overrides.setdefault(
@@ -1141,8 +1146,6 @@ def make_bed(db):
 
         return bed
 
-    # IMPORTANT:
-    # Return the factory itself so pytest injects a callable fixture.
     return _make
 
 
@@ -1312,7 +1315,10 @@ def mock_ai_provider(monkeypatch):
         "last_call": None,
     }
 
-    def _fake_call_openai(feature, payload):
+    def _fake_call_openai(
+        feature,
+        payload,
+    ):
         state["last_call"] = {
             "feature": feature,
             "payload": payload,
@@ -1348,7 +1354,10 @@ def assert_domain_error():
     Assert an application/domain error handled by error_handlers.py.
     """
 
-    def _assert(response, status_code):
+    def _assert(
+        response,
+        status_code,
+    ):
         body = response.get_json()
 
         assert response.status_code == status_code, body
@@ -1409,7 +1418,10 @@ def get_by_id(db_session):
     SQLAlchemy 2.x-style primary-key lookup helper.
     """
 
-    def _get(model, object_id):
+    def _get(
+        model,
+        object_id,
+    ):
         return db_session.get(
             model,
             object_id,

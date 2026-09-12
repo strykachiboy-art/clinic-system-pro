@@ -1,6 +1,18 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+)
+
+
+# ============================================================================
+# USER
+# ============================================================================
 
 
 class UserRegisterSchema(BaseModel):
@@ -52,6 +64,11 @@ class AuthResponseSchema(BaseModel):
 class RegisterResponseSchema(BaseModel):
     success: bool = True
     data: UserResponseSchema
+
+
+# ============================================================================
+# GOOGLE OAUTH
+# ============================================================================
 
 
 class GoogleAuthCallbackSchema(BaseModel):

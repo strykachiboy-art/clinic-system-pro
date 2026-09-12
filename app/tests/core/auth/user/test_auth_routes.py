@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -18,7 +20,6 @@ def domain_error(
     message="Test domain error",
     status_code=400,
 ):
-
     error = DomainError(message)
     error.status_code = status_code
     return error
@@ -42,7 +43,27 @@ def token_from_headers(headers):
     """
     Extract the JWT value from an Authorization header dictionary.
     """
-    return headers["Authorization"].split(" ", 1)[1]
+    return headers["Authorization"].split(
+        " ",
+        1,
+    )[1]
+
+
+def make_refresh_token(
+    app,
+    user,
+):
+    """
+    Create a refresh token compatible with the current
+    fail-closed token validation flow.
+    """
+    with app.app_context():
+        return create_refresh_token(
+            identity=str(user.id),
+            additional_claims={
+                "token_version": user.token_version,
+            },
+        )
 
 
 # ============================================================================
@@ -65,7 +86,9 @@ class TestRegisterRoute:
             created_at=None,
         )
 
-        service = Mock(return_value=user)
+        service = Mock(
+            return_value=user,
+        )
 
         monkeypatch.setattr(
             auth_routes,
@@ -83,13 +106,16 @@ class TestRegisterRoute:
         body = response.get_json()
 
         assert body["success"] is True
-        assert body["data"]["id"] == 101
-        assert body["data"]["email"] == "newuser@test.com"
-        assert body["data"]["role"] == Role.PATIENT.value
-        assert body["data"]["clinic_id"] is None
-        assert body["data"]["is_active"] is True
-        assert body["data"]["created_at"] is None
-        assert body["data"]["last_login_at"] is None
+
+        assert body["data"] == {
+            "id": 101,
+            "email": "newuser@test.com",
+            "role": Role.PATIENT.value,
+            "clinic_id": None,
+            "is_active": True,
+            "created_at": None,
+            "last_login_at": None,
+        }
 
         service.assert_called_once_with(
             email="newuser@test.com",
@@ -98,21 +124,23 @@ class TestRegisterRoute:
             clinic_id=None,
         )
 
-    def test_register_client_cannot_set_role(
+    def test_register_success_with_clinic(
         self,
         client,
         monkeypatch,
     ):
         user = SimpleNamespace(
             id=102,
-            email="attacker@test.com",
+            email="clinicuser@test.com",
             role=Role.PATIENT,
-            clinic_id=None,
+            clinic_id=55,
             is_active=True,
             created_at=None,
         )
 
-        service = Mock(return_value=user)
+        service = Mock(
+            return_value=user,
+        )
 
         monkeypatch.setattr(
             auth_routes,
@@ -120,15 +148,59 @@ class TestRegisterRoute:
             service,
         )
 
-        payload = {
-            "email": "attacker@test.com",
-            "password": "StrongPassword123!",
-            "role": Role.ADMIN.value,
-        }
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "clinicuser@test.com",
+                "password": "StrongPassword123!",
+                "clinic_id": 55,
+            },
+        )
+
+        assert response.status_code == 201
+
+        body = response.get_json()
+
+        assert body["data"]["clinic_id"] == 55
+
+        service.assert_called_once_with(
+            email="clinicuser@test.com",
+            password="StrongPassword123!",
+            role=Role.PATIENT,
+            clinic_id=55,
+        )
+
+    def test_register_client_cannot_set_role(
+        self,
+        client,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=103,
+            email="attacker@test.com",
+            role=Role.PATIENT,
+            clinic_id=None,
+            is_active=True,
+            created_at=None,
+        )
+
+        service = Mock(
+            return_value=user,
+        )
+
+        monkeypatch.setattr(
+            auth_routes,
+            "register_user",
+            service,
+        )
 
         response = client.post(
             "/api/auth/register",
-            json=payload,
+            json={
+                "email": "attacker@test.com",
+                "password": "StrongPassword123!",
+                "role": Role.ADMIN.value,
+            },
         )
 
         assert response.status_code == 201
@@ -137,8 +209,8 @@ class TestRegisterRoute:
 
         kwargs = service.call_args.kwargs
 
-        assert kwargs["role"] == Role.PATIENT
-        assert kwargs["role"] != Role.ADMIN
+        assert kwargs["role"] is Role.PATIENT
+        assert kwargs["role"] is not Role.ADMIN
 
     def test_register_validation_failure(
         self,
@@ -198,6 +270,67 @@ class TestRegisterRoute:
 
         service.assert_not_called()
 
+    def test_register_invalid_password(
+        self,
+        client,
+        monkeypatch,
+    ):
+        service = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "register_user",
+            service,
+        )
+
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "valid@test.com",
+                "password": "short",
+            },
+        )
+
+        assert response.status_code == 400
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+        service.assert_not_called()
+
+    def test_register_invalid_clinic_id(
+        self,
+        client,
+        monkeypatch,
+    ):
+        service = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "register_user",
+            service,
+        )
+
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "email": "valid@test.com",
+                "password": "StrongPassword123!",
+                "clinic_id": 0,
+            },
+        )
+
+        assert response.status_code == 400
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+        service.assert_not_called()
+
     def test_register_domain_error(
         self,
         client,
@@ -207,7 +340,7 @@ class TestRegisterRoute:
             side_effect=domain_error(
                 "Email already exists",
                 409,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -243,14 +376,13 @@ class TestLoginRoute:
         result = {
             "access_token": "access-token",
             "refresh_token": "refresh-token",
-            "user": {
-                "id": 1,
-                "email": "admin@test.com",
-                "role": Role.ADMIN.value,
-            },
+            "user_id": 1,
+            "role": Role.ADMIN.value,
         }
 
-        service = Mock(return_value=result)
+        service = Mock(
+            return_value=result,
+        )
 
         monkeypatch.setattr(
             auth_routes,
@@ -325,6 +457,41 @@ class TestLoginRoute:
 
         assert response.status_code == 400
 
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+        service.assert_not_called()
+
+    def test_login_invalid_password(
+        self,
+        client,
+        monkeypatch,
+    ):
+        service = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "authenticate_user",
+            service,
+        )
+
+        response = client.post(
+            "/api/auth/login",
+            json={
+                "email": "admin@test.com",
+                "password": "",
+            },
+        )
+
+        assert response.status_code == 400
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
         service.assert_not_called()
 
     def test_login_domain_error(
@@ -336,7 +503,7 @@ class TestLoginRoute:
             side_effect=domain_error(
                 "Invalid email or password",
                 401,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -355,7 +522,14 @@ class TestLoginRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert body["error"] == "Invalid email or password"
+        assert body["error"] == (
+            "Invalid email or password"
+        )
+
+        service.assert_called_once_with(
+            email="admin@test.com",
+            password="supersecret",
+        )
 
 
 # ============================================================================
@@ -371,9 +545,10 @@ class TestGoogleLoginRoute:
     ):
         service = Mock(
             return_value=(
-                "https://accounts.google.com/o/oauth2/auth",
+                "https://accounts.google.com/o/oauth2/v2/auth"
+                "?client_id=test",
                 "test-state",
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -393,7 +568,10 @@ class TestGoogleLoginRoute:
         assert body["success"] is True
         assert (
             body["data"]["authorization_url"]
-            == "https://accounts.google.com/o/oauth2/auth"
+            == (
+                "https://accounts.google.com/"
+                "o/oauth2/v2/auth?client_id=test"
+            )
         )
         assert body["data"]["state"] == "test-state"
 
@@ -408,7 +586,7 @@ class TestGoogleLoginRoute:
             side_effect=domain_error(
                 "Google OAuth is not configured",
                 503,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -426,7 +604,9 @@ class TestGoogleLoginRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert body["error"] == "Google OAuth is not configured"
+        assert body["error"] == (
+            "Google OAuth is not configured"
+        )
 
 
 # ============================================================================
@@ -446,12 +626,9 @@ class TestGoogleCallbackRoute:
             return_value={
                 "access_token": "access-token",
                 "refresh_token": "refresh-token",
-                "user": {
-                    "id": 1,
-                    "email": "google@test.com",
-                    "role": Role.PATIENT.value,
-                },
-            }
+                "user_id": 1,
+                "role": Role.PATIENT.value,
+            },
         )
 
         monkeypatch.setattr(
@@ -469,7 +646,7 @@ class TestGoogleCallbackRoute:
         response = client.get(
             "/api/auth/google/callback"
             "?code=test-code"
-            "&state=test-state"
+            "&state=test-state",
         )
 
         assert response.status_code == 200
@@ -477,10 +654,12 @@ class TestGoogleCallbackRoute:
         body = response.get_json()
 
         assert body["success"] is True
-        assert (
-            body["data"]["access_token"]
-            == "access-token"
-        )
+        assert body["data"] == {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "user_id": 1,
+            "role": Role.PATIENT.value,
+        }
 
         validate_state.assert_called_once_with(
             "test-state",
@@ -513,7 +692,7 @@ class TestGoogleCallbackRoute:
         response = client.get(
             "/api/auth/google/callback"
             "?error=access_denied"
-            "&error_description=User%20denied%20access"
+            "&error_description=User%20denied%20access",
         )
 
         assert response.status_code == 400
@@ -529,6 +708,23 @@ class TestGoogleCallbackRoute:
 
         validate_state.assert_not_called()
         authenticate.assert_not_called()
+
+    def test_google_callback_provider_error_without_description(
+        self,
+        client,
+    ):
+        response = client.get(
+            "/api/auth/google/callback"
+            "?error=access_denied",
+        )
+
+        assert response.status_code == 400
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "access_denied"
+        assert body["error_description"] is None
 
     def test_google_callback_missing_code(
         self,
@@ -552,7 +748,7 @@ class TestGoogleCallbackRoute:
 
         response = client.get(
             "/api/auth/google/callback"
-            "?state=test-state"
+            "?state=test-state",
         )
 
         assert response.status_code == 400
@@ -587,7 +783,43 @@ class TestGoogleCallbackRoute:
 
         response = client.get(
             "/api/auth/google/callback"
-            "?code=test-code"
+            "?code=test-code",
+        )
+
+        assert response.status_code == 400
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+        validate_state.assert_not_called()
+        authenticate.assert_not_called()
+
+    def test_google_callback_rejects_empty_code(
+        self,
+        client,
+        monkeypatch,
+    ):
+        validate_state = Mock()
+        authenticate = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "validate_google_oauth_state",
+            validate_state,
+        )
+
+        monkeypatch.setattr(
+            auth_routes,
+            "authenticate_google_code",
+            authenticate,
+        )
+
+        response = client.get(
+            "/api/auth/google/callback"
+            "?code="
+            "&state=test-state",
         )
 
         assert response.status_code == 400
@@ -607,9 +839,9 @@ class TestGoogleCallbackRoute:
     ):
         validate_state = Mock(
             side_effect=domain_error(
-                "Invalid OAuth state",
+                "Invalid Google OAuth state",
                 401,
-            )
+            ),
         )
 
         authenticate = Mock()
@@ -629,7 +861,7 @@ class TestGoogleCallbackRoute:
         response = client.get(
             "/api/auth/google/callback"
             "?code=test-code"
-            "&state=bad-state"
+            "&state=bad-state",
         )
 
         assert response.status_code == 401
@@ -637,7 +869,9 @@ class TestGoogleCallbackRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert body["error"] == "Invalid OAuth state"
+        assert body["error"] == (
+            "Invalid Google OAuth state"
+        )
 
         validate_state.assert_called_once_with(
             "bad-state",
@@ -656,7 +890,7 @@ class TestGoogleCallbackRoute:
             side_effect=domain_error(
                 "Google authentication failed",
                 401,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -674,7 +908,7 @@ class TestGoogleCallbackRoute:
         response = client.get(
             "/api/auth/google/callback"
             "?code=test-code"
-            "&state=test-state"
+            "&state=test-state",
         )
 
         assert response.status_code == 401
@@ -682,9 +916,8 @@ class TestGoogleCallbackRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Google authentication failed"
+        assert body["error"] == (
+            "Google authentication failed"
         )
 
         validate_state.assert_called_once_with(
@@ -718,11 +951,9 @@ class TestRefreshRoute:
         user,
         auth_headers_for,
     ):
-        headers = auth_headers_for(user)
-
         response = client.post(
             "/api/auth/refresh",
-            headers=headers,
+            headers=auth_headers_for(user),
         )
 
         assert response.status_code == 422
@@ -734,10 +965,12 @@ class TestRefreshRoute:
         user,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
-            )
+        user.token_version = 4
+
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
 
         revoke = Mock()
 
@@ -772,7 +1005,7 @@ class TestRefreshRoute:
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
-                )
+                ),
             },
         )
 
@@ -781,16 +1014,13 @@ class TestRefreshRoute:
         body = response.get_json()
 
         assert body["success"] is True
-        assert (
-            body["data"]["access_token"]
-            == "new-access-token"
-        )
-        assert (
-            body["data"]["refresh_token"]
-            == "new-refresh-token"
-        )
-        assert body["data"]["user_id"] == user.id
-        assert body["data"]["role"] == user.role.value
+
+        assert body["data"] == {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "user_id": user.id,
+            "role": user.role.value,
+        }
 
         revoke.assert_called_once_with()
 
@@ -798,65 +1028,74 @@ class TestRefreshRoute:
             identity=str(user.id),
             additional_claims={
                 "role": user.role.value,
+                "token_version": user.token_version,
             },
         )
 
         create_refresh.assert_called_once_with(
             identity=str(user.id),
+            additional_claims={
+                "token_version": user.token_version,
+            },
         )
 
     def test_refresh_user_not_found(
         self,
         app,
-        client,
         user,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
+        """
+        Test the route's explicit User-not-found branch.
+
+        This intentionally bypasses the outer JWT decorator because
+        token validation itself performs a database user lookup before
+        the route body executes.
+        """
+        with app.test_request_context(
+            "/api/auth/refresh",
+            method="POST",
+        ):
+            monkeypatch.setattr(
+                auth_routes,
+                "get_jwt_identity",
+                Mock(
+                    return_value=str(user.id),
+                ),
             )
 
-        original_get = auth_routes.db.session.get
+            def fake_get(
+                model,
+                object_id,
+            ):
+                return None
 
-        def fake_get(model, object_id):
-            return None
+            monkeypatch.setattr(
+                auth_routes.db.session,
+                "get",
+                fake_get,
+            )
 
-        monkeypatch.setattr(
-            auth_routes.db.session,
-            "get",
-            fake_get,
-        )
+            response = auth_routes.refresh.__wrapped__()
 
-        response = client.post(
-            "/api/auth/refresh",
-            headers={
-                "Authorization": (
-                    f"Bearer {refresh_token}"
-                )
-            },
-        )
+            assert response[1] == 401
 
-        assert response.status_code == 401
+            body = response[0].get_json()
 
-        body = response.get_json()
+            assert body["success"] is False
+            assert body["error"] == "User not found"
 
-        assert body["success"] is False
-        assert body["error"] == "User not found"
-
-        monkeypatch.setattr(
-            auth_routes.db.session,
-            "get",
-            original_get,
-        )
-
-    def test_refresh_inactive_user(
+    def test_refresh_inactive_user_rejected_by_token_validation(
         self,
         app,
         client,
         make_user,
         clinic,
     ):
+        """
+        Integration-level test proving inactive users are rejected
+        by the fail-closed JWT validation layer before the route body.
+        """
         inactive_user = make_user(
             clinic,
             role=Role.ADMIN,
@@ -864,29 +1103,61 @@ class TestRefreshRoute:
             email="inactive-refresh@test.com",
         )
 
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(inactive_user.id),
-            )
+        refresh_token = make_refresh_token(
+            app,
+            inactive_user,
+        )
 
         response = client.post(
             "/api/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
-                )
+                ),
             },
         )
 
         assert response.status_code == 401
 
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert (
-            body["error"]
-            == "This account has been deactivated"
+    def test_refresh_inactive_user_route_branch(
+        self,
+        app,
+        make_user,
+        clinic,
+        monkeypatch,
+    ):
+        """
+        Test the explicit inactive-user branch inside refresh().
+        """
+        inactive_user = make_user(
+            clinic,
+            role=Role.ADMIN,
+            is_active=False,
+            email="inactive-route@test.com",
         )
+
+        with app.test_request_context(
+            "/api/auth/refresh",
+            method="POST",
+        ):
+            monkeypatch.setattr(
+                auth_routes,
+                "get_jwt_identity",
+                Mock(
+                    return_value=str(inactive_user.id),
+                ),
+            )
+
+            response = auth_routes.refresh.__wrapped__()
+
+            assert response[1] == 401
+
+            body = response[0].get_json()
+
+            assert body["success"] is False
+            assert body["error"] == (
+                "This account has been deactivated"
+            )
 
     def test_refresh_invalid_identity(
         self,
@@ -895,15 +1166,17 @@ class TestRefreshRoute:
         user,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
-            )
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
 
         monkeypatch.setattr(
             auth_routes,
             "get_jwt_identity",
-            Mock(return_value="not-an-integer"),
+            Mock(
+                return_value="not-an-integer",
+            ),
         )
 
         response = client.post(
@@ -911,7 +1184,7 @@ class TestRefreshRoute:
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
-                )
+                ),
             },
         )
 
@@ -920,9 +1193,8 @@ class TestRefreshRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Invalid authentication identity"
+        assert body["error"] == (
+            "Invalid authentication identity"
         )
 
     def test_refresh_domain_error(
@@ -932,16 +1204,16 @@ class TestRefreshRoute:
         user,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
-            )
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
 
         revoke = Mock(
             side_effect=domain_error(
                 "Token revocation failed",
                 500,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -955,7 +1227,7 @@ class TestRefreshRoute:
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
-                )
+                ),
             },
         )
 
@@ -964,10 +1236,63 @@ class TestRefreshRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Token revocation failed"
+        assert body["error"] == (
+            "Token revocation failed"
         )
+
+    def test_refresh_does_not_generate_tokens_when_revocation_fails(
+        self,
+        app,
+        client,
+        user,
+        monkeypatch,
+    ):
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
+
+        revoke = Mock(
+            side_effect=domain_error(
+                "Token revocation failed",
+                500,
+            ),
+        )
+
+        create_access = Mock()
+        create_refresh = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "revoke_current_token",
+            revoke,
+        )
+
+        monkeypatch.setattr(
+            auth_routes,
+            "create_access_token",
+            create_access,
+        )
+
+        monkeypatch.setattr(
+            auth_routes,
+            "create_refresh_token",
+            create_refresh,
+        )
+
+        response = client.post(
+            "/api/auth/refresh",
+            headers={
+                "Authorization": (
+                    f"Bearer {refresh_token}"
+                ),
+            },
+        )
+
+        assert response.status_code == 500
+
+        create_access.assert_not_called()
+        create_refresh.assert_not_called()
 
 
 # ============================================================================
@@ -1006,9 +1331,8 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Refresh token is required"
+        assert body["error"] == (
+            "Refresh token is required"
         )
 
     def test_logout_invalid_refresh_token(
@@ -1030,20 +1354,18 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Invalid refresh token"
+        assert body["error"] == (
+            "Invalid refresh token"
         )
 
     def test_logout_rejects_access_token_as_refresh(
         self,
-        app,
         client,
         user,
         auth_headers_for,
     ):
         access_token = token_from_headers(
-            auth_headers_for(user),
+            auth_headers_for(user)
         )
 
         response = client.post(
@@ -1059,9 +1381,8 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Invalid refresh token"
+        assert body["error"] == (
+            "Invalid refresh token"
         )
 
     def test_logout_rejects_other_users_refresh_token(
@@ -1079,12 +1400,10 @@ class TestLogoutRoute:
             email="other-logout@test.com",
         )
 
-        with app.app_context():
-            other_refresh_token = (
-                create_refresh_token(
-                    identity=str(other_user.id),
-                )
-            )
+        other_refresh_token = make_refresh_token(
+            app,
+            other_user,
+        )
 
         response = client.post(
             "/api/auth/logout",
@@ -1099,9 +1418,9 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Refresh token does not belong to the current user"
+        assert body["error"] == (
+            "Refresh token does not belong "
+            "to the current user"
         )
 
     def test_logout_success(
@@ -1112,10 +1431,10 @@ class TestLogoutRoute:
         auth_headers_for,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
-            )
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
 
         revoke_token = Mock()
         revoke_current = Mock()
@@ -1145,9 +1464,8 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is True
-        assert (
-            body["message"]
-            == "Successfully logged out"
+        assert body["message"] == (
+            "Successfully logged out"
         )
 
         revoke_token.assert_called_once()
@@ -1156,19 +1474,21 @@ class TestLogoutRoute:
             revoke_token.call_args.args[0]
         )
 
-        assert (
-            refresh_payload["type"]
-            == "refresh"
-        )
+        assert refresh_payload["type"] == "refresh"
 
         assert (
             str(refresh_payload["sub"])
             == str(user.id)
         )
 
+        assert (
+            refresh_payload["token_version"]
+            == user.token_version
+        )
+
         revoke_current.assert_called_once_with()
 
-    def test_logout_domain_error(
+    def test_logout_domain_error_from_refresh_revocation(
         self,
         app,
         client,
@@ -1176,16 +1496,16 @@ class TestLogoutRoute:
         auth_headers_for,
         monkeypatch,
     ):
-        with app.app_context():
-            refresh_token = create_refresh_token(
-                identity=str(user.id),
-            )
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
 
         revoke = Mock(
             side_effect=domain_error(
                 "Failed to revoke refresh token",
                 500,
-            )
+            ),
         )
 
         monkeypatch.setattr(
@@ -1207,10 +1527,55 @@ class TestLogoutRoute:
         body = response.get_json()
 
         assert body["success"] is False
-        assert (
-            body["error"]
-            == "Failed to revoke refresh token"
+        assert body["error"] == (
+            "Failed to revoke refresh token"
         )
+
+    def test_logout_does_not_revoke_access_token_when_refresh_revocation_fails(
+        self,
+        app,
+        client,
+        user,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        refresh_token = make_refresh_token(
+            app,
+            user,
+        )
+
+        revoke_token = Mock(
+            side_effect=domain_error(
+                "Failed to revoke refresh token",
+                500,
+            ),
+        )
+
+        revoke_current = Mock()
+
+        monkeypatch.setattr(
+            auth_routes,
+            "revoke_token",
+            revoke_token,
+        )
+
+        monkeypatch.setattr(
+            auth_routes,
+            "revoke_current_token",
+            revoke_current,
+        )
+
+        response = client.post(
+            "/api/auth/logout",
+            headers=auth_headers_for(user),
+            json={
+                "refresh_token": refresh_token,
+            },
+        )
+
+        assert response.status_code == 500
+
+        revoke_current.assert_not_called()
 
 
 # ============================================================================
@@ -1235,75 +1600,45 @@ class TestAuthRouteRegistration:
         assert "/api/auth/refresh" in routes
         assert "/api/auth/logout" in routes
 
-    def test_register_methods(
+    @pytest.mark.parametrize(
+        "route,method",
+        [
+            (
+                "/api/auth/register",
+                "POST",
+            ),
+            (
+                "/api/auth/login",
+                "POST",
+            ),
+            (
+                "/api/auth/google",
+                "GET",
+            ),
+            (
+                "/api/auth/google/callback",
+                "GET",
+            ),
+            (
+                "/api/auth/refresh",
+                "POST",
+            ),
+            (
+                "/api/auth/logout",
+                "POST",
+            ),
+        ],
+    )
+    def test_auth_route_methods(
         self,
         app,
+        route,
+        method,
     ):
         rule = next(
             rule
             for rule in app.url_map.iter_rules()
-            if rule.rule == "/api/auth/register"
+            if rule.rule == route
         )
 
-        assert "POST" in rule.methods
-
-    def test_login_methods(
-        self,
-        app,
-    ):
-        rule = next(
-            rule
-            for rule in app.url_map.iter_rules()
-            if rule.rule == "/api/auth/login"
-        )
-
-        assert "POST" in rule.methods
-
-    def test_google_methods(
-        self,
-        app,
-    ):
-        rule = next(
-            rule
-            for rule in app.url_map.iter_rules()
-            if rule.rule == "/api/auth/google"
-        )
-
-        assert "GET" in rule.methods
-
-    def test_google_callback_methods(
-        self,
-        app,
-    ):
-        rule = next(
-            rule
-            for rule in app.url_map.iter_rules()
-            if rule.rule
-            == "/api/auth/google/callback"
-        )
-
-        assert "GET" in rule.methods
-
-    def test_refresh_methods(
-        self,
-        app,
-    ):
-        rule = next(
-            rule
-            for rule in app.url_map.iter_rules()
-            if rule.rule == "/api/auth/refresh"
-        )
-
-        assert "POST" in rule.methods
-
-    def test_logout_methods(
-        self,
-        app,
-    ):
-        rule = next(
-            rule
-            for rule in app.url_map.iter_rules()
-            if rule.rule == "/api/auth/logout"
-        )
-
-        assert "POST" in rule.methods
+        assert method in rule.methods

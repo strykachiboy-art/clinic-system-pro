@@ -44,6 +44,13 @@ class User(db.Model):
         nullable=False,
     )
 
+    token_version = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
     clinic_id = db.Column(
         db.Integer,
         db.ForeignKey("clinics.id"),
@@ -69,10 +76,6 @@ class User(db.Model):
         nullable=True,
     )
 
-    # ================================================================
-    # AI RELATIONSHIPS
-    # ================================================================
-
     ai_logs = db.relationship(
         "AILog",
         back_populates="user",
@@ -84,45 +87,28 @@ class User(db.Model):
         foreign_keys="AIReview.reviewer_id",
     )
 
-    # ================================================================
-    # AUDIT
-    # ================================================================
-
     audit_logs = db.relationship(
         "AuditLog",
         back_populates="user",
     )
-
-    # ================================================================
-    # STAFF
-    # ================================================================
 
     staff = db.relationship(
         "Staff",
         back_populates="user",
         uselist=False,
     )
-    
+
     patient = db.relationship(
         "Patient",
         back_populates="user",
         uselist=False,
-    
-   )
-
-    # ================================================================
-    # AUTH IDENTITIES
-    # ================================================================
+    )
 
     auth_identities = db.relationship(
         "UserAuthIdentity",
         back_populates="user",
         cascade="all, delete-orphan",
     )
-
-    # ================================================================
-    # MESSAGES
-    # ================================================================
 
     sent_messages = db.relationship(
         "Message",
@@ -136,31 +122,17 @@ class User(db.Model):
         back_populates="recipient",
     )
 
-    # ================================================================
-    # NOTIFICATIONS
-    # ================================================================
-
     notifications = db.relationship(
         "Notification",
         back_populates="user",
         cascade="all, delete",
     )
-    
-    
-    # ================================================================
-    # Devices
-    # ================================================================
-    
-    
-    devices = db.relationship(
-       "UserDevice",
-       back_populates="user",
-       cascade="all, delete-orphan",
-    )
 
-    # ================================================================
-    # PASSWORD / AUTH HELPERS
-    # ================================================================
+    devices = db.relationship(
+        "UserDevice",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     def set_password(self, raw_password: str) -> None:
         if not raw_password:

@@ -1,6 +1,4 @@
 from flask import Blueprint, jsonify, request
-from pydantic import ValidationError as PydanticValidationError
-
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -8,8 +6,10 @@ from flask_jwt_extended import (
     get_jwt_identity,
     jwt_required,
 )
+from pydantic import ValidationError as PydanticValidationError
 
 from app import db
+
 from app.core.auth.user.models.user_model import User
 from app.core.auth.user.schema.user_schema import (
     GoogleAuthCallbackSchema,
@@ -42,16 +42,14 @@ auth_bp = Blueprint(
 
 @auth_bp.post("/register")
 def register():
-    """
-    Public patient registration.
-
-    Role is intentionally NOT accepted from the client.
-    Every account created through this endpoint is a PATIENT.
-    """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(
+        silent=True
+    ) or {}
 
     try:
-        data = UserRegisterSchema.model_validate(payload)
+        data = UserRegisterSchema.model_validate(
+            payload
+        )
     except PydanticValidationError as exc:
         return jsonify(
             {
@@ -98,13 +96,14 @@ def register():
 
 @auth_bp.post("/login")
 def login():
-    """
-    Authenticate a user using email and password.
-    """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(
+        silent=True
+    ) or {}
 
     try:
-        data = UserLoginSchema.model_validate(payload)
+        data = UserLoginSchema.model_validate(
+            payload
+        )
     except PydanticValidationError as exc:
         return jsonify(
             {
@@ -137,14 +136,10 @@ def login():
 
 @auth_bp.get("/google")
 def google_login():
-    """
-    Start Google OAuth authentication.
-
-    Generates a short-lived OAuth state, stores it in Redis,
-    and returns the Google authorization URL.
-    """
     try:
-        authorization_url, state = get_google_authorization_url()
+        authorization_url, state = (
+            get_google_authorization_url()
+        )
     except DomainError as exc:
         return jsonify(
             {
@@ -166,18 +161,9 @@ def google_login():
 
 @auth_bp.get("/google/callback")
 def google_callback():
-    """
-    Complete Google OAuth authentication.
-
-    Google redirects here with:
-
-        ?code=...
-        ?state=...
-
-    The state is validated and consumed before the
-    authorization code is exchanged.
-    """
-    google_error = request.args.get("error")
+    google_error = request.args.get(
+        "error"
+    )
 
     if google_error:
         return jsonify(
@@ -191,12 +177,18 @@ def google_callback():
         ), 400
 
     payload = {
-        "code": request.args.get("code"),
-        "state": request.args.get("state"),
+        "code": request.args.get(
+            "code"
+        ),
+        "state": request.args.get(
+            "state"
+        ),
     }
 
     try:
-        data = GoogleAuthCallbackSchema.model_validate(payload)
+        data = GoogleAuthCallbackSchema.model_validate(
+            payload
+        )
     except PydanticValidationError as exc:
         return jsonify(
             {
@@ -207,13 +199,16 @@ def google_callback():
         ), 400
 
     try:
-        validate_google_oauth_state(data.state)
-
-        result = authenticate_google_code(
-            code=data.code,
+        validate_google_oauth_state(
+            data.state
         )
 
+        result = authenticate_google_code(
+            code=data.code
+        )
     except DomainError as exc:
+        db.session.rollback()
+
         return jsonify(
             {
                 "success": False,
@@ -232,9 +227,6 @@ def google_callback():
 @auth_bp.post("/refresh")
 @jwt_required(refresh=True)
 def refresh():
-    """
-    Rotate the refresh token and issue a new access token.
-    """
     identity = get_jwt_identity()
 
     try:
@@ -247,7 +239,10 @@ def refresh():
             }
         ), 401
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(
+        User,
+        user_id,
+    )
 
     if user is None:
         return jsonify(
@@ -261,7 +256,9 @@ def refresh():
         return jsonify(
             {
                 "success": False,
-                "error": "This account has been deactivated",
+                "error": (
+                    "This account has been deactivated"
+                ),
             }
         ), 401
 
@@ -272,11 +269,15 @@ def refresh():
             identity=str(user.id),
             additional_claims={
                 "role": user.role.value,
+                "token_version": user.token_version,
             },
         )
 
         refresh_token = create_refresh_token(
             identity=str(user.id),
+            additional_claims={
+                "token_version": user.token_version,
+            },
         )
 
     except DomainError as exc:
@@ -305,12 +306,13 @@ def refresh():
 @auth_bp.post("/logout")
 @jwt_required()
 def logout():
-    """
-    Revoke both the current access token and the supplied
-    refresh token.
-    """
-    payload = request.get_json(silent=True) or {}
-    refresh_token = payload.get("refresh_token")
+    payload = request.get_json(
+        silent=True
+    ) or {}
+
+    refresh_token = payload.get(
+        "refresh_token"
+    )
 
     if not refresh_token:
         return jsonify(
@@ -333,7 +335,9 @@ def logout():
             }
         ), 401
 
-    if refresh_payload.get("type") != "refresh":
+    if refresh_payload.get(
+        "type"
+    ) != "refresh":
         return jsonify(
             {
                 "success": False,
@@ -342,9 +346,14 @@ def logout():
         ), 401
 
     current_user_id = get_jwt_identity()
-    refresh_user_id = refresh_payload.get("sub")
+    refresh_user_id = refresh_payload.get(
+        "sub"
+    )
 
-    if str(current_user_id) != str(refresh_user_id):
+    if (
+        str(current_user_id)
+        != str(refresh_user_id)
+    ):
         return jsonify(
             {
                 "success": False,
@@ -356,7 +365,10 @@ def logout():
         ), 401
 
     try:
-        revoke_token(refresh_payload)
+        revoke_token(
+            refresh_payload
+        )
+
         revoke_current_token()
 
     except DomainError as exc:

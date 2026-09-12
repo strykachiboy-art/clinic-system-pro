@@ -1,6 +1,8 @@
-﻿import pytest
+﻿from __future__ import annotations
 
-from app.core.audit.services import audit_service
+from flask_jwt_extended import decode_token
+
+from app.core.auth.user.models.user_model import User
 from app.core.auth.user.services import user_service
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
@@ -8,7 +10,8 @@ from app.core.exceptions import (
     ConflictError,
     ValidationError,
 )
-from app.core.auth.user.models.user_model import User
+
+import pytest
 
 
 # ============================================================================
@@ -17,13 +20,14 @@ from app.core.auth.user.models.user_model import User
 
 
 def test_get_user_returns_existing_user(
-    db_session,
     user,
 ):
     result = user_service.get_user(user.id)
 
+    assert result is user
     assert result.id == user.id
     assert result.email == user.email
+    assert result.role == user.role
 
 
 @pytest.mark.parametrize(
@@ -38,22 +42,17 @@ def test_get_user_returns_existing_user(
     ],
 )
 def test_get_user_rejects_invalid_user_id(
-    db_session,
     user_id,
 ):
-    """
-    Current implementation does not explicitly validate the ID.
-
-    This test is intentionally marked as expected-to-fail until
-    get_user() receives the same positive-ID validation used by
-    the hardened services.
-    """
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match="User ID must be a positive integer",
+    ):
         user_service.get_user(user_id)
 
 
 def test_get_user_raises_when_user_does_not_exist(
-    db_session,
+    app,
 ):
     with pytest.raises(
         ValidationError,
@@ -75,14 +74,15 @@ def test_get_user_raises_when_user_does_not_exist(
     ],
 )
 def test_get_user_by_email_returns_none_for_empty_email(
-    db_session,
     email,
 ):
-    assert user_service.get_user_by_email(email) is None
+    assert (
+        user_service.get_user_by_email(email)
+        is None
+    )
 
 
 def test_get_user_by_email_normalizes_email(
-    db_session,
     user,
 ):
     result = user_service.get_user_by_email(
@@ -94,10 +94,20 @@ def test_get_user_by_email_normalizes_email(
 
 
 def test_get_user_by_email_returns_none_when_missing(
-    db_session,
+    app,
 ):
     result = user_service.get_user_by_email(
         "missing-user@example.com"
+    )
+
+    assert result is None
+
+
+def test_get_user_by_email_does_not_match_unrelated_email(
+    user,
+):
+    result = user_service.get_user_by_email(
+        "another-user@example.com"
     )
 
     assert result is None
@@ -118,7 +128,7 @@ def test_get_user_by_email_returns_none_when_missing(
     ],
 )
 def test_register_user_rejects_invalid_email(
-    db_session,
+    app,
     email,
 ):
     with pytest.raises(
@@ -142,7 +152,7 @@ def test_register_user_rejects_invalid_email(
     ],
 )
 def test_register_user_rejects_weak_password(
-    db_session,
+    app,
     password,
 ):
     with pytest.raises(
@@ -166,7 +176,7 @@ def test_register_user_rejects_weak_password(
     ],
 )
 def test_register_user_rejects_invalid_role(
-    db_session,
+    app,
     role,
 ):
     with pytest.raises(
@@ -180,8 +190,39 @@ def test_register_user_rejects_invalid_role(
         )
 
 
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.PATIENT,
+        Role.DOCTOR,
+        Role.NURSE,
+        Role.PHARMACIST,
+        Role.ADMIN,
+    ],
+)
+def test_register_user_accepts_valid_role(
+    app,
+    role,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user = user_service.register_user(
+        "new-user@example.com",
+        "StrongPass123",
+        role,
+    )
+
+    assert user.id is not None
+    assert user.role is role
+
+
 def test_register_user_normalizes_email(
-    db_session,
+    app,
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -197,12 +238,51 @@ def test_register_user_normalizes_email(
     )
 
     assert user.email == "new-user@example.com"
-    assert user.role == Role.PATIENT
+    assert user.role is Role.PATIENT
     assert user.id is not None
 
 
+def test_register_user_assigns_clinic(
+    app,
+    clinic,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user = user_service.register_user(
+        "clinic-user@example.com",
+        "StrongPass123",
+        Role.PATIENT,
+        clinic_id=clinic.id,
+    )
+
+    assert user.clinic_id == clinic.id
+
+
+def test_register_user_allows_no_clinic(
+    app,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user = user_service.register_user(
+        "global-user@example.com",
+        "StrongPass123",
+        Role.PATIENT,
+    )
+
+    assert user.clinic_id is None
+
+
 def test_register_user_rejects_duplicate_email(
-    db_session,
     user,
 ):
     with pytest.raises(
@@ -232,14 +312,49 @@ def test_register_user_sets_password(
         Role.PATIENT,
     )
 
-    db_session.flush()
+    persisted_user = db_session.get(
+        User,
+        user.id,
+    )
 
-    assert user.check_password("StrongPass123")
-    assert not user.check_password("WrongPassword123")
+    assert persisted_user is not None
+    assert persisted_user.check_password(
+        "StrongPass123"
+    )
+    assert not persisted_user.check_password(
+        "WrongPassword123"
+    )
+
+
+def test_register_user_stores_normalized_email_in_database(
+    db_session,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user_service.register_user(
+        "  Persisted@Example.COM  ",
+        "StrongPass123",
+        Role.PATIENT,
+    )
+
+    persisted_user = (
+        db_session.query(User)
+        .filter_by(
+            email="persisted@example.com"
+        )
+        .first()
+    )
+
+    assert persisted_user is not None
 
 
 def test_register_user_creates_audit_log(
-    db_session,
+    app,
     monkeypatch,
 ):
     calls = []
@@ -266,7 +381,67 @@ def test_register_user_creates_audit_log(
     assert audit["action"] == AuditAction.CREATE
     assert audit["entity_type"] == "User"
     assert audit["entity_id"] == user.id
-    assert "audited-user@example.com" in audit["description"]
+    assert (
+        audit["description"]
+        == (
+            "User registered: "
+            "audited-user@example.com (patient)"
+        )
+    )
+
+
+def test_register_user_audit_uses_normalized_email(
+    app,
+    monkeypatch,
+):
+    calls = []
+
+    def fake_audit(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        fake_audit,
+    )
+
+    user_service.register_user(
+        "  AUDIT@Example.COM  ",
+        "StrongPass123",
+        Role.DOCTOR,
+    )
+
+    assert len(calls) == 1
+
+    assert (
+        calls[0]["description"]
+        == (
+            "User registered: "
+            "audit@example.com (doctor)"
+        )
+    )
+
+
+def test_register_user_returns_user_instance(
+    app,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = user_service.register_user(
+        "instance-user@example.com",
+        "StrongPass123",
+        Role.PATIENT,
+    )
+
+    assert isinstance(
+        result,
+        User,
+    )
 
 
 # ============================================================================
@@ -284,7 +459,7 @@ def test_register_user_creates_audit_log(
     ],
 )
 def test_authenticate_user_requires_credentials(
-    db_session,
+    app,
     email,
     password,
 ):
@@ -298,8 +473,33 @@ def test_authenticate_user_requires_credentials(
         )
 
 
-def test_authenticate_user_rejects_unknown_user(
+def test_authenticate_user_normalizes_email(
+    app,
     db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = user_service.authenticate_user(
+        f"  {user.email.upper()}  ",
+        "CorrectPass123",
+    )
+
+    assert result["user_id"] == user.id
+
+
+def test_authenticate_user_rejects_unknown_user(
+    app,
 ):
     with pytest.raises(
         ValidationError,
@@ -315,7 +515,9 @@ def test_authenticate_user_rejects_wrong_password(
     db_session,
     user,
 ):
-    user.set_password("CorrectPass123")
+    user.set_password(
+        "CorrectPass123"
+    )
     db_session.commit()
 
     with pytest.raises(
@@ -328,11 +530,41 @@ def test_authenticate_user_rejects_wrong_password(
         )
 
 
+def test_authenticate_user_does_not_reveal_unknown_user_or_password_difference(
+    db_session,
+    user,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    db_session.commit()
+
+    with pytest.raises(
+        ValidationError,
+        match="Invalid email or password",
+    ):
+        user_service.authenticate_user(
+            user.email,
+            "WrongPass123",
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="Invalid email or password",
+    ):
+        user_service.authenticate_user(
+            "does-not-exist@example.com",
+            "WrongPass123",
+        )
+
+
 def test_authenticate_user_rejects_inactive_user(
     db_session,
     user,
 ):
-    user.set_password("CorrectPass123")
+    user.set_password(
+        "CorrectPass123"
+    )
     user.is_active = False
     db_session.commit()
 
@@ -346,13 +578,15 @@ def test_authenticate_user_rejects_inactive_user(
         )
 
 
-def test_authenticate_user_returns_tokens(
+def test_authenticate_user_returns_expected_response(
     app,
     db_session,
     user,
     monkeypatch,
 ):
-    user.set_password("CorrectPass123")
+    user.set_password(
+        "CorrectPass123"
+    )
     user.is_active = True
     db_session.commit()
 
@@ -362,16 +596,133 @@ def test_authenticate_user_returns_tokens(
         lambda **kwargs: None,
     )
 
-    with app.app_context():
-        result = user_service.authenticate_user(
-            user.email,
-            "CorrectPass123",
-        )
+    result = user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
 
     assert result["access_token"]
     assert result["refresh_token"]
     assert result["user_id"] == user.id
     assert result["role"] == user.role.value
+
+
+def test_authenticate_user_access_token_contains_role_and_token_version(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    user.is_active = True
+    user.token_version = 7
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    access_payload = decode_token(
+        result["access_token"]
+    )
+
+    assert access_payload["sub"] == str(
+        user.id
+    )
+    assert (
+        access_payload["role"]
+        == user.role.value
+    )
+    assert (
+        access_payload["token_version"]
+        == 7
+    )
+
+
+def test_authenticate_user_refresh_token_contains_token_version(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    user.is_active = True
+    user.token_version = 11
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    refresh_payload = decode_token(
+        result["refresh_token"]
+    )
+
+    assert refresh_payload["sub"] == str(
+        user.id
+    )
+    assert (
+        refresh_payload["token_version"]
+        == 11
+    )
+
+
+def test_authenticate_user_uses_current_user_role_in_access_token(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.role = Role.DOCTOR
+
+    user.set_password(
+        "CorrectPass123"
+    )
+
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    result = user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    access_payload = decode_token(
+        result["access_token"]
+    )
+
+    assert (
+        access_payload["role"]
+        == Role.DOCTOR.value
+    )
+
+    assert (
+        result["role"]
+        == Role.DOCTOR.value
+    )
 
 
 def test_authenticate_user_creates_login_audit(
@@ -380,7 +731,9 @@ def test_authenticate_user_creates_login_audit(
     user,
     monkeypatch,
 ):
-    user.set_password("CorrectPass123")
+    user.set_password(
+        "CorrectPass123"
+    )
     user.is_active = True
     db_session.commit()
 
@@ -395,11 +748,10 @@ def test_authenticate_user_creates_login_audit(
         fake_audit,
     )
 
-    with app.app_context():
-        user_service.authenticate_user(
-            user.email,
-            "CorrectPass123",
-        )
+    user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
 
     assert len(calls) == 1
 
@@ -410,6 +762,46 @@ def test_authenticate_user_creates_login_audit(
     assert audit["entity_id"] == user.id
     assert audit["user_id"] == user.id
 
+    assert (
+        audit["description"]
+        == "User 'admin@test.com' logged in"
+    )
+
+
+def test_authenticate_user_login_audit_uses_normalized_email(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    db_session.commit()
+
+    calls = []
+
+    def fake_audit(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        fake_audit,
+    )
+
+    user_service.authenticate_user(
+        f"  {user.email.upper()}  ",
+        "CorrectPass123",
+    )
+
+    assert len(calls) == 1
+
+    assert (
+        calls[0]["description"]
+        == "User 'admin@test.com' logged in"
+    )
+
 
 def test_authenticate_user_updates_last_login(
     app,
@@ -417,8 +809,11 @@ def test_authenticate_user_updates_last_login(
     user,
     monkeypatch,
 ):
-    user.set_password("CorrectPass123")
+    user.set_password(
+        "CorrectPass123"
+    )
     user.is_active = True
+    user.last_login_at = None
     db_session.commit()
 
     monkeypatch.setattr(
@@ -427,12 +822,89 @@ def test_authenticate_user_updates_last_login(
         lambda **kwargs: None,
     )
 
-    with app.app_context():
-        user_service.authenticate_user(
-            user.email,
-            "CorrectPass123",
-        )
+    assert user.last_login_at is None
 
-    db_session.refresh(user)
+    user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    db_session.refresh(
+        user
+    )
 
     assert user.last_login_at is not None
+
+
+def test_authenticate_user_updates_last_login_on_subsequent_login(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    db_session.refresh(
+        user
+    )
+
+    first_login = user.last_login_at
+
+    user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    db_session.refresh(
+        user
+    )
+
+    second_login = user.last_login_at
+
+    assert first_login is not None
+    assert second_login is not None
+    assert second_login >= first_login
+
+
+def test_authenticate_user_does_not_change_token_version(
+    app,
+    db_session,
+    user,
+    monkeypatch,
+):
+    user.set_password(
+        "CorrectPass123"
+    )
+    user.token_version = 3
+    db_session.commit()
+
+    monkeypatch.setattr(
+        user_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    user_service.authenticate_user(
+        user.email,
+        "CorrectPass123",
+    )
+
+    db_session.refresh(
+        user
+    )
+
+    assert user.token_version == 3
