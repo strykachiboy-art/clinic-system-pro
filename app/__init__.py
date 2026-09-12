@@ -65,7 +65,6 @@ def register_blueprints(app):
     from app.modules.hie.routes.hie_route import hie_bp
     from app.modules.inventory.routes.inventory_route import inventory_bp
     from app.modules.lab.routes.lab_route import lab_bp
-    from app.modules.messages.routes.message_routes import message_bp
     from app.modules.patient.routes.patient_route import patient_bp
     from app.modules.pharmacy.routes.pharmacy_routes import pharmacy_bp
     from app.modules.prescription.routes.prescription_routes import (
@@ -102,8 +101,6 @@ def register_blueprints(app):
     app.register_blueprint(reports_bp)
     app.register_blueprint(staff_bp)
     app.register_blueprint(ward_bp)
-
-    app.register_blueprint(message_bp)
     app.register_blueprint(notification_bp)
 
     app.register_blueprint(settings_bp)
