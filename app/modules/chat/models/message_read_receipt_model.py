@@ -67,6 +67,9 @@ class MessageReadReceipt(db.Model):
             name="chat_read_receipt_status_enum",
             native_enum=True,
             validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
         ),
         nullable=False,
         default=ReadReceiptStatus.DELIVERED,

@@ -48,6 +48,9 @@ class Message(db.Model):
             name="chat_message_status_enum",
             native_enum=True,
             validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
         ),
         nullable=False,
         default=MessageStatus.PENDING,
@@ -60,6 +63,9 @@ class Message(db.Model):
             name="chat_message_priority_enum",
             native_enum=True,
             validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
         ),
         nullable=False,
         default=MessagePriority.NORMAL,

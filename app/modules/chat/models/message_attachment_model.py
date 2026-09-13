@@ -53,13 +53,21 @@ class MessageAttachment(db.Model):
 
     message_id = db.Column(
         db.Integer,
-        db.ForeignKey("chat_messages.id"),
+        db.ForeignKey("chat_messages.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
     attachment_type = db.Column(
-        db.Enum(AttachmentType),
+        db.Enum(
+            AttachmentType,
+            name="chat_attachment_type_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         index=True,
     )
@@ -101,6 +109,11 @@ class MessageAttachment(db.Model):
         nullable=False,
         default=_utcnow,
         onupdate=_utcnow,
+    )
+
+    message = db.relationship(
+        "Message",
+        back_populates="attachments",
     )
 
     def __repr__(self):

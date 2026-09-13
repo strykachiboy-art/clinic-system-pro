@@ -71,14 +71,30 @@ class Conversation(db.Model):
     )
 
     conversation_type = db.Column(
-        db.Enum(ConversationType),
+        db.Enum(
+            ConversationType,
+            name="chat_conversation_type_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         default=ConversationType.DIRECT,
         index=True,
     )
 
     status = db.Column(
-        db.Enum(ConversationStatus),
+        db.Enum(
+            ConversationStatus,
+            name="chat_conversation_status_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         default=ConversationStatus.ACTIVE,
         index=True,

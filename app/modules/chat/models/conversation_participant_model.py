@@ -68,13 +68,30 @@ class ConversationParticipant(db.Model):
     )
 
     role = db.Column(
-        db.Enum(ParticipantRole),
+        db.Enum(
+            ParticipantRole,
+            name="chat_participant_role_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         default=ParticipantRole.MEMBER,
+        index=True,
     )
 
     status = db.Column(
-        db.Enum(ParticipantStatus),
+        db.Enum(
+            ParticipantStatus,
+            name="chat_participant_status_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         default=ParticipantStatus.PENDING,
         index=True,

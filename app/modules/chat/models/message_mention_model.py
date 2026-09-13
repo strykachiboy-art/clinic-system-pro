@@ -84,13 +84,21 @@ class MessageMention(db.Model):
 
     message_id = db.Column(
         db.Integer,
-        db.ForeignKey("chat_messages.id"),
+        db.ForeignKey("chat_messages.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
     mention_type = db.Column(
-        db.Enum(MentionType),
+        db.Enum(
+            MentionType,
+            name="chat_mention_type_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
         nullable=False,
         index=True,
     )
@@ -131,6 +139,26 @@ class MessageMention(db.Model):
         nullable=False,
         default=_utcnow,
         index=True,
+    )
+
+    message = db.relationship(
+        "Message",
+        back_populates="mentions",
+    )
+
+    mentioned_user = db.relationship(
+        "User",
+        foreign_keys=[mentioned_user_id],
+    )
+
+    mentioned_patient = db.relationship(
+        "Patient",
+        foreign_keys=[mentioned_patient_id],
+    )
+
+    mentioned_conversation = db.relationship(
+        "Conversation",
+        foreign_keys=[mentioned_conversation_id],
     )
 
     def __repr__(self):
