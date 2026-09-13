@@ -54,9 +54,6 @@ from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle, Ambul
 # HIE (Health Information Exchange)
 from app.modules.hie.models.hie_model import HIEIntegration, HIESubmission
 
-# Messages
-from app.modules.messages.models.message_model import Message
-
 # Notifications
 from app.core.notifications.models.notification_models import Notification
 
@@ -74,4 +71,23 @@ from app.core.auth.user.models.user_device_model import UserDevice
 
 # Asset Control
 from app.modules.asset_control.models.asset_model import Asset
+
+# Chat
+from app.modules.chat.models.conversation_model import Conversation
+from app.modules.chat.models.conversation_participant_model import ConversationParticipant
+from app.modules.chat.models.message_model import Message
+from app.modules.chat.models.message_attachment_model import MessageAttachment
+from app.modules.chat.models.message_mention_model import MessageMention
+from app.modules.chat.models.message_pin_model import MessagePin
+from app.modules.chat.models.message_read_receipt_model import MessageReadReceipt
+
+__all__ = [
+    "Conversation",
+    "ConversationParticipant",
+    "Message",
+    "MessageAttachment",
+    "MessageMention",
+    "MessagePin",
+    "MessageReadReceipt",
+]
 
