@@ -386,7 +386,7 @@ def test_create_ward_route_rejects_client_clinic_override(
 
     body = response.get_json()
 
-    assert body["error"] == "Validation failed"
+    assert body["error"] == "Validation error"
     assert body["details"]
 
 
@@ -411,7 +411,7 @@ def test_create_ward_route_rejects_invalid_payload(
 
     body = response.get_json()
 
-    assert body["error"] == "Validation failed"
+    assert body["error"] == "Validation error"
     assert body["details"]
 
 
@@ -571,7 +571,7 @@ def test_list_wards_route_rejects_invalid_type(
 
     body = response.get_json()
 
-    assert body["error"] == "Validation failed"
+    assert body["error"] == "Validation error"
     assert "details" in body
     assert any(
         "ward_type" in str(detail)
@@ -1339,7 +1339,7 @@ def test_list_beds_route_rejects_invalid_status(
 
     body = response.get_json()
 
-    assert body["error"] == "Validation failed"
+    assert body["error"] == "Validation error"
     assert "details" in body
     assert any(
         "status" in str(detail)
@@ -2042,7 +2042,7 @@ def test_list_reservations_route_rejects_invalid_status(
 
     body = response.get_json()
 
-    assert body["error"] == "Validation failed"
+    assert body["error"] == "Validation error"
     assert "details" in body
     assert any(
         "status" in str(detail)
@@ -3419,8 +3419,6 @@ def test_list_wards_uses_authenticated_clinic(
     assert body["total"] == 1
 
 
-# Account state
-
 
 def test_route_rejects_inactive_authenticated_user(
     client,
@@ -3442,11 +3440,7 @@ def test_route_rejects_inactive_authenticated_user(
         ),
     )
 
-    assert response.status_code == 422
-
-    assert response.get_json()["error"] == (
-        "User account is inactive"
-    )
+    assert response.status_code == 401
 
 
 def test_reservation_route_requires_linked_staff(

@@ -193,6 +193,13 @@ class Conversation(db.Model):
         "Consultation",
         foreign_keys=[consultation_id],
     )
+    
+    messages = db.relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self):
         return (

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from pydantic import ValidationError as PydanticValidationError
 
 from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.exceptions import DomainError, ValidationError
+from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
 
 from app.modules.ward.schemas.admission_schema import (
@@ -207,62 +206,36 @@ def _query_params() -> dict:
     )
 
 
-def _domain_error_response(exc: DomainError):
-    return jsonify(
-        {
-            "error": str(exc),
-        }
-    ), exc.status_code
-
-
-def _validation_error_response(
-    exc: PydanticValidationError,
-):
-    return jsonify(
-        {
-            "error": "Validation failed",
-            "details": exc.errors(),
-        }
-    ), 422
-
-
 # Wards
 
 
 @ward_bp.route("", methods=["POST"])
 @role_required(*MANAGEMENT_ROLES)
 def create_ward_route():
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = WardCreateSchema.model_validate(
-            _request_json()
-        )
+    payload = WardCreateSchema.model_validate(
+        _request_json()
+    )
 
-        ward = create_ward(
-            clinic_id=clinic_id,
-            name=payload.name,
-            ward_type=payload.ward_type,
-            capacity=payload.capacity,
-            actor_user_id=user.id,
-        )
+    ward = create_ward(
+        clinic_id=clinic_id,
+        name=payload.name,
+        ward_type=payload.ward_type,
+        capacity=payload.capacity,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Ward created successfully",
-                "ward": _serialize_model(
-                    WardResponseSchema,
-                    ward,
-                ),
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Ward created successfully",
+            "ward": _serialize_model(
+                WardResponseSchema,
+                ward,
+            ),
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -271,70 +244,56 @@ def create_ward_route():
 )
 @role_required(*MANAGEMENT_ROLES)
 def update_ward_route(ward_id: int):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = WardUpdateSchema.model_validate(
-            _request_json()
-        )
+    payload = WardUpdateSchema.model_validate(
+        _request_json()
+    )
 
-        ward = update_ward(
-            ward_id=ward_id,
-            clinic_id=clinic_id,
-            actor_user_id=user.id,
-            name=payload.name,
-            ward_type=payload.ward_type,
-            capacity=payload.capacity,
-        )
+    ward = update_ward(
+        ward_id=ward_id,
+        clinic_id=clinic_id,
+        actor_user_id=user.id,
+        name=payload.name,
+        ward_type=payload.ward_type,
+        capacity=payload.capacity,
+    )
 
-        return jsonify(
-            {
-                "message": "Ward updated successfully",
-                "ward": _serialize_model(
-                    WardResponseSchema,
-                    ward,
-                ),
-            }
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Ward updated successfully",
+            "ward": _serialize_model(
+                WardResponseSchema,
+                ward,
+            ),
+        }
+    ), 200
 
 
 @ward_bp.route("", methods=["GET"])
 @role_required(*VIEW_ROLES)
 def list_wards_route():
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        payload = WardListQuerySchema.model_validate(
-            _query_params()
+    payload = WardListQuerySchema.model_validate(
+        _query_params()
+    )
+
+    result = list_wards(
+        clinic_id=clinic_id,
+        ward_type=payload.ward_type,
+        page=payload.page,
+        per_page=payload.per_page,
+    )
+
+    return jsonify(
+        _serialize_page(
+            WardListResponseSchema,
+            WardResponseSchema,
+            result,
         )
-
-        result = list_wards(
-            clinic_id=clinic_id,
-            ward_type=payload.ward_type,
-            page=payload.page,
-            per_page=payload.per_page,
-        )
-
-        return jsonify(
-            _serialize_page(
-                WardListResponseSchema,
-                WardResponseSchema,
-                result,
-            )
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -343,23 +302,19 @@ def list_wards_route():
 )
 @role_required(*VIEW_ROLES)
 def get_ward_route(ward_id: int):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        ward = get_ward(
-            ward_id,
-            clinic_id=clinic_id,
+    ward = get_ward(
+        ward_id,
+        clinic_id=clinic_id,
+    )
+
+    return jsonify(
+        _serialize_model(
+            WardResponseSchema,
+            ward,
         )
-
-        return jsonify(
-            _serialize_model(
-                WardResponseSchema,
-                ward,
-            )
-        ), 200
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -368,23 +323,19 @@ def get_ward_route(ward_id: int):
 )
 @role_required(*VIEW_ROLES)
 def get_ward_occupancy_route(ward_id: int):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        occupancy = get_ward_occupancy(
-            ward_id=ward_id,
-            clinic_id=clinic_id,
+    occupancy = get_ward_occupancy(
+        ward_id=ward_id,
+        clinic_id=clinic_id,
+    )
+
+    return jsonify(
+        _serialize_model(
+            WardOccupancyResponseSchema,
+            occupancy,
         )
-
-        return jsonify(
-            _serialize_model(
-                WardOccupancyResponseSchema,
-                occupancy,
-            )
-        ), 200
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 # Beds
@@ -396,36 +347,29 @@ def get_ward_occupancy_route(ward_id: int):
 )
 @role_required(*MANAGEMENT_ROLES)
 def add_bed_route(ward_id: int):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = BedCreateSchema.model_validate(
-            _request_json()
-        )
+    payload = BedCreateSchema.model_validate(
+        _request_json()
+    )
 
-        bed = add_bed(
-            ward_id=ward_id,
-            bed_number=payload.bed_number,
-            clinic_id=clinic_id,
-            actor_user_id=user.id,
-        )
+    bed = add_bed(
+        ward_id=ward_id,
+        bed_number=payload.bed_number,
+        clinic_id=clinic_id,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Bed added successfully",
-                "bed": _serialize_model(
-                    BedResponseSchema,
-                    bed,
-                ),
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Bed added successfully",
+            "bed": _serialize_model(
+                BedResponseSchema,
+                bed,
+            ),
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -434,34 +378,27 @@ def add_bed_route(ward_id: int):
 )
 @role_required(*VIEW_ROLES)
 def list_beds_route(ward_id: int):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        payload = BedListQuerySchema.model_validate(
-            _query_params()
+    payload = BedListQuerySchema.model_validate(
+        _query_params()
+    )
+
+    result = list_beds(
+        ward_id=ward_id,
+        clinic_id=clinic_id,
+        status=payload.status,
+        page=payload.page,
+        per_page=payload.per_page,
+    )
+
+    return jsonify(
+        _serialize_page(
+            BedListResponseSchema,
+            BedResponseSchema,
+            result,
         )
-
-        result = list_beds(
-            ward_id=ward_id,
-            clinic_id=clinic_id,
-            status=payload.status,
-            page=payload.page,
-            per_page=payload.per_page,
-        )
-
-        return jsonify(
-            _serialize_page(
-                BedListResponseSchema,
-                BedResponseSchema,
-                result,
-            )
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -470,23 +407,19 @@ def list_beds_route(ward_id: int):
 )
 @role_required(*VIEW_ROLES)
 def get_bed_route(bed_id: int):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        bed = get_bed(
-            bed_id,
-            clinic_id=clinic_id,
+    bed = get_bed(
+        bed_id,
+        clinic_id=clinic_id,
+    )
+
+    return jsonify(
+        _serialize_model(
+            BedResponseSchema,
+            bed,
         )
-
-        return jsonify(
-            _serialize_model(
-                BedResponseSchema,
-                bed,
-            )
-        ), 200
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -495,36 +428,29 @@ def get_bed_route(bed_id: int):
 )
 @role_required(*MANAGEMENT_ROLES)
 def set_bed_maintenance_route(bed_id: int):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = BedMaintenanceSchema.model_validate(
-            _request_json()
-        )
+    payload = BedMaintenanceSchema.model_validate(
+        _request_json()
+    )
 
-        bed = set_bed_maintenance(
-            bed_id=bed_id,
-            under_maintenance=payload.under_maintenance,
-            clinic_id=clinic_id,
-            actor_user_id=user.id,
-        )
+    bed = set_bed_maintenance(
+        bed_id=bed_id,
+        under_maintenance=payload.under_maintenance,
+        clinic_id=clinic_id,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Bed maintenance status updated",
-                "bed": _serialize_model(
-                    BedResponseSchema,
-                    bed,
-                ),
-            }
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Bed maintenance status updated",
+            "bed": _serialize_model(
+                BedResponseSchema,
+                bed,
+            ),
+        }
+    ), 200
 
 
 # Reservations
@@ -536,40 +462,33 @@ def set_bed_maintenance_route(bed_id: int):
 )
 @role_required(*CLINICAL_ROLES)
 def reserve_bed_route():
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
-        staff_id = _current_staff_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
+    staff_id = _current_staff_id()
 
-        payload = BedReservationCreateSchema.model_validate(
-            _request_json()
-        )
+    payload = BedReservationCreateSchema.model_validate(
+        _request_json()
+    )
 
-        reservation = reserve_bed(
-            patient_id=payload.patient_id,
-            bed_id=payload.bed_id,
-            reserved_by_id=staff_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            expires_at=payload.expires_at,
-            actor_user_id=user.id,
-        )
+    reservation = reserve_bed(
+        patient_id=payload.patient_id,
+        bed_id=payload.bed_id,
+        reserved_by_id=staff_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        expires_at=payload.expires_at,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Bed reserved successfully",
-                "reservation": _serialize_model(
-                    BedReservationResponseSchema,
-                    reservation,
-                ),
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Bed reserved successfully",
+            "reservation": _serialize_model(
+                BedReservationResponseSchema,
+                reservation,
+            ),
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -578,35 +497,28 @@ def reserve_bed_route():
 )
 @role_required(*VIEW_ROLES)
 def list_bed_reservations_route():
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        payload = BedReservationListQuerySchema.model_validate(
-            _query_params()
+    payload = BedReservationListQuerySchema.model_validate(
+        _query_params()
+    )
+
+    result = list_bed_reservations(
+        clinic_id=clinic_id,
+        status=payload.status,
+        patient_id=payload.patient_id,
+        bed_id=payload.bed_id,
+        page=payload.page,
+        per_page=payload.per_page,
+    )
+
+    return jsonify(
+        _serialize_page(
+            BedReservationListResponseSchema,
+            BedReservationResponseSchema,
+            result,
         )
-
-        result = list_bed_reservations(
-            clinic_id=clinic_id,
-            status=payload.status,
-            patient_id=payload.patient_id,
-            bed_id=payload.bed_id,
-            page=payload.page,
-            per_page=payload.per_page,
-        )
-
-        return jsonify(
-            _serialize_page(
-                BedReservationListResponseSchema,
-                BedReservationResponseSchema,
-                result,
-            )
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -618,23 +530,19 @@ def list_bed_reservations_route():
 def get_bed_reservation_route(
     reservation_id: int,
 ):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        reservation = get_bed_reservation(
-            reservation_id,
-            clinic_id=clinic_id,
+    reservation = get_bed_reservation(
+        reservation_id,
+        clinic_id=clinic_id,
+    )
+
+    return jsonify(
+        _serialize_model(
+            BedReservationResponseSchema,
+            reservation,
         )
-
-        return jsonify(
-            _serialize_model(
-                BedReservationResponseSchema,
-                reservation,
-            )
-        ), 200
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -646,35 +554,31 @@ def get_bed_reservation_route(
 def get_patient_active_reservation_route(
     patient_id: int,
 ):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        if patient_id <= 0:
-            raise ValidationError(
-                "patient_id must be greater than zero"
-            )
-
-        reservation = get_active_bed_reservation_for_patient(
-            patient_id=patient_id,
-            clinic_id=clinic_id,
+    if patient_id <= 0:
+        raise ValidationError(
+            "patient_id must be greater than zero"
         )
 
-        if reservation is None:
-            return jsonify(
-                {
-                    "message": "No active reservation found",
-                }
-            ), 404
+    reservation = get_active_bed_reservation_for_patient(
+        patient_id=patient_id,
+        clinic_id=clinic_id,
+    )
 
+    if reservation is None:
         return jsonify(
-            _serialize_model(
-                BedReservationResponseSchema,
-                reservation,
-            )
-        ), 200
+            {
+                "message": "No active reservation found",
+            }
+        ), 404
 
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        _serialize_model(
+            BedReservationResponseSchema,
+            reservation,
+        )
+    ), 200
 
 
 @ward_bp.route(
@@ -685,35 +589,31 @@ def get_patient_active_reservation_route(
 def get_bed_active_reservation_route(
     bed_id: int,
 ):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        if bed_id <= 0:
-            raise ValidationError(
-                "bed_id must be greater than zero"
-            )
-
-        reservation = get_active_bed_reservation_for_bed(
-            bed_id=bed_id,
-            clinic_id=clinic_id,
+    if bed_id <= 0:
+        raise ValidationError(
+            "bed_id must be greater than zero"
         )
 
-        if reservation is None:
-            return jsonify(
-                {
-                    "message": "No active reservation found",
-                }
-            ), 404
+    reservation = get_active_bed_reservation_for_bed(
+        bed_id=bed_id,
+        clinic_id=clinic_id,
+    )
 
+    if reservation is None:
         return jsonify(
-            _serialize_model(
-                BedReservationResponseSchema,
-                reservation,
-            )
-        ), 200
+            {
+                "message": "No active reservation found",
+            }
+        ), 404
 
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        _serialize_model(
+            BedReservationResponseSchema,
+            reservation,
+        )
+    ), 200
 
 
 @ward_bp.route(
@@ -724,36 +624,29 @@ def get_bed_active_reservation_route(
 def cancel_bed_reservation_route(
     reservation_id: int,
 ):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = BedReservationCancelSchema.model_validate(
-            _request_json()
-        )
+    payload = BedReservationCancelSchema.model_validate(
+        _request_json()
+    )
 
-        reservation = cancel_bed_reservation(
-            reservation_id=reservation_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            actor_user_id=user.id,
-        )
+    reservation = cancel_bed_reservation(
+        reservation_id=reservation_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Bed reservation cancelled successfully",
-                "reservation": _serialize_model(
-                    BedReservationResponseSchema,
-                    reservation,
-                ),
-            }
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Bed reservation cancelled successfully",
+            "reservation": _serialize_model(
+                BedReservationResponseSchema,
+                reservation,
+            ),
+        }
+    ), 200
 
 
 # Admissions
@@ -767,38 +660,31 @@ def cancel_bed_reservation_route(
 def admit_patient_from_reservation_route(
     reservation_id: int,
 ):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
-        staff_id = _current_staff_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
+    staff_id = _current_staff_id()
 
-        payload = AdmissionFromReservationSchema.model_validate(
-            _request_json()
-        )
+    payload = AdmissionFromReservationSchema.model_validate(
+        _request_json()
+    )
 
-        admission = admit_patient_from_reservation(
-            reservation_id=reservation_id,
-            admitted_by_id=staff_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            actor_user_id=user.id,
-        )
+    admission = admit_patient_from_reservation(
+        reservation_id=reservation_id,
+        admitted_by_id=staff_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Patient admitted from reservation",
-                "admission": _serialize_model(
-                    AdmissionResponseSchema,
-                    admission,
-                ),
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Patient admitted from reservation",
+            "admission": _serialize_model(
+                AdmissionResponseSchema,
+                admission,
+            ),
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -807,39 +693,32 @@ def admit_patient_from_reservation_route(
 )
 @role_required(*CLINICAL_ROLES)
 def admit_patient_route():
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
-        staff_id = _current_staff_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
+    staff_id = _current_staff_id()
 
-        payload = AdmissionCreateSchema.model_validate(
-            _request_json()
-        )
+    payload = AdmissionCreateSchema.model_validate(
+        _request_json()
+    )
 
-        admission = admit_patient(
-            patient_id=payload.patient_id,
-            bed_id=payload.bed_id,
-            admitted_by_id=staff_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            actor_user_id=user.id,
-        )
+    admission = admit_patient(
+        patient_id=payload.patient_id,
+        bed_id=payload.bed_id,
+        admitted_by_id=staff_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Patient admitted successfully",
-                "admission": _serialize_model(
-                    AdmissionResponseSchema,
-                    admission,
-                ),
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Patient admitted successfully",
+            "admission": _serialize_model(
+                AdmissionResponseSchema,
+                admission,
+            ),
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -848,23 +727,19 @@ def admit_patient_route():
 )
 @role_required(*VIEW_ROLES)
 def get_admission_route(admission_id: int):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        admission = get_admission(
-            admission_id,
-            clinic_id=clinic_id,
+    admission = get_admission(
+        admission_id,
+        clinic_id=clinic_id,
+    )
+
+    return jsonify(
+        _serialize_model(
+            AdmissionResponseSchema,
+            admission,
         )
-
-        return jsonify(
-            _serialize_model(
-                AdmissionResponseSchema,
-                admission,
-            )
-        ), 200
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -875,38 +750,31 @@ def get_admission_route(admission_id: int):
 def list_patient_admissions_route(
     patient_id: int,
 ):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        if patient_id <= 0:
-            raise ValidationError(
-                "patient_id must be greater than zero"
-            )
-
-        payload = AdmissionListQuerySchema.model_validate(
-            _query_params()
+    if patient_id <= 0:
+        raise ValidationError(
+            "patient_id must be greater than zero"
         )
 
-        result = list_admissions_for_patient(
-            patient_id=patient_id,
-            clinic_id=clinic_id,
-            page=payload.page,
-            per_page=payload.per_page,
+    payload = AdmissionListQuerySchema.model_validate(
+        _query_params()
+    )
+
+    result = list_admissions_for_patient(
+        patient_id=patient_id,
+        clinic_id=clinic_id,
+        page=payload.page,
+        per_page=payload.per_page,
+    )
+
+    return jsonify(
+        _serialize_page(
+            AdmissionListResponseSchema,
+            AdmissionResponseSchema,
+            result,
         )
-
-        return jsonify(
-            _serialize_page(
-                AdmissionListResponseSchema,
-                AdmissionResponseSchema,
-                result,
-            )
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    ), 200
 
 
 @ward_bp.route(
@@ -917,35 +785,31 @@ def list_patient_admissions_route(
 def get_current_patient_admission_route(
     patient_id: int,
 ):
-    try:
-        clinic_id = _current_clinic_id()
+    clinic_id = _current_clinic_id()
 
-        if patient_id <= 0:
-            raise ValidationError(
-                "patient_id must be greater than zero"
-            )
-
-        admission = get_active_admission_for_patient(
-            patient_id=patient_id,
-            clinic_id=clinic_id,
+    if patient_id <= 0:
+        raise ValidationError(
+            "patient_id must be greater than zero"
         )
 
-        if admission is None:
-            return jsonify(
-                {
-                    "message": "No active admission found",
-                }
-            ), 404
+    admission = get_active_admission_for_patient(
+        patient_id=patient_id,
+        clinic_id=clinic_id,
+    )
 
+    if admission is None:
         return jsonify(
-            _serialize_model(
-                AdmissionResponseSchema,
-                admission,
-            )
-        ), 200
+            {
+                "message": "No active admission found",
+            }
+        ), 404
 
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        _serialize_model(
+            AdmissionResponseSchema,
+            admission,
+        )
+    ), 200
 
 
 @ward_bp.route(
@@ -954,26 +818,25 @@ def get_current_patient_admission_route(
 )
 @role_required(*CLINICAL_ROLES)
 def transfer_bed_route(admission_id: int):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = AdmissionTransferSchema.model_validate(
-            _request_json()
-        )
+    payload = AdmissionTransferSchema.model_validate(
+        _request_json()
+    )
 
-        transfer = transfer_bed(
-            admission_id=admission_id,
-            to_bed_id=payload.to_bed_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            actor_user_id=user.id,
-        )
+    transfer = transfer_bed(
+        admission_id=admission_id,
+        to_bed_id=payload.to_bed_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Patient transferred successfully",
-                "transfer": {
+    return jsonify(
+        {
+            "message": "Patient transferred successfully",
+            "transfer": {
                 "id": transfer.id,
                 "admission_id": transfer.admission_id,
                 "from_bed_id": transfer.from_bed_id,
@@ -983,16 +846,10 @@ def transfer_bed_route(admission_id: int):
                     transfer.transferred_at.isoformat()
                     if transfer.transferred_at
                     else None
-                    ),
-                },
-            }
-        ), 201
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+                ),
+            },
+        }
+    ), 201
 
 
 @ward_bp.route(
@@ -1001,33 +858,26 @@ def transfer_bed_route(admission_id: int):
 )
 @role_required(*CLINICAL_ROLES)
 def discharge_patient_route(admission_id: int):
-    try:
-        user = _current_user()
-        clinic_id = _current_clinic_id()
+    user = _current_user()
+    clinic_id = _current_clinic_id()
 
-        payload = AdmissionDischargeSchema.model_validate(
-            _request_json()
-        )
+    payload = AdmissionDischargeSchema.model_validate(
+        _request_json()
+    )
 
-        admission = discharge_patient(
-            admission_id=admission_id,
-            clinic_id=clinic_id,
-            reason=payload.reason,
-            actor_user_id=user.id,
-        )
+    admission = discharge_patient(
+        admission_id=admission_id,
+        clinic_id=clinic_id,
+        reason=payload.reason,
+        actor_user_id=user.id,
+    )
 
-        return jsonify(
-            {
-                "message": "Patient discharged successfully",
-                "admission": _serialize_model(
-                    AdmissionResponseSchema,
-                    admission,
-                ),
-            }
-        ), 200
-
-    except PydanticValidationError as exc:
-        return _validation_error_response(exc)
-
-    except DomainError as exc:
-        return _domain_error_response(exc)
+    return jsonify(
+        {
+            "message": "Patient discharged successfully",
+            "admission": _serialize_model(
+                AdmissionResponseSchema,
+                admission,
+            ),
+        }
+    ), 200

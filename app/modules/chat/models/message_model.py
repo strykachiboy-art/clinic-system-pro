@@ -134,6 +134,12 @@ class Message(db.Model):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    
+    clinic = db.relationship(
+        "Clinic",
+        back_populates="messages",
+        foreign_keys=[clinic_id],
+    )
 
     __table_args__ = (
         db.Index(

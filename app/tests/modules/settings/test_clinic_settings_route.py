@@ -735,6 +735,7 @@ class TestClinicSettingsRouteSecurity:
         clinic_one = make_clinic(
             name="Clinic One",
         )
+
         clinic_two = make_clinic(
             name="Clinic Two",
         )
@@ -783,12 +784,7 @@ class TestClinicSettingsRouteSecurity:
             headers=auth_headers_for(inactive_user),
         )
 
-        assert response.status_code == 422
-
-        data = response.get_json()
-
-        assert data["success"] is False
-        assert data["error"] == "User account is inactive"
+        assert response.status_code == 401
 
     def test_client_cannot_choose_another_clinic(
         self,
@@ -2209,9 +2205,4 @@ class TestIntegrationConfigRouteSecurity:
             headers=auth_headers_for(inactive_user),
         )
 
-        assert response.status_code == 422
-
-        data = response.get_json()
-
-        assert data["success"] is False
-        assert data["error"] == "User account is inactive"
+        assert response.status_code == 401

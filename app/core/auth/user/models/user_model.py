@@ -110,18 +110,6 @@ class User(db.Model):
         cascade="all, delete-orphan",
     )
 
-    sent_messages = db.relationship(
-        "Message",
-        foreign_keys="Message.sender_id",
-        back_populates="sender",
-    )
-
-    received_messages = db.relationship(
-        "Message",
-        foreign_keys="Message.recipient_id",
-        back_populates="recipient",
-    )
-
     notifications = db.relationship(
         "Notification",
         back_populates="user",
