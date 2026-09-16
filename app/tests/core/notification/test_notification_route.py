@@ -1698,8 +1698,15 @@ def test_notification_routes_require_authentication(
 def test_authenticated_user_must_exist(
     app,
     client,
-    assert_domain_error,
 ):
+    """
+    The JWT blocklist is fail-closed.
+
+    A token whose subject does not correspond to an existing user
+    is rejected by the authentication layer before the notification
+    route can perform its own authenticated-user lookup.
+    """
+
     with app.test_request_context():
         token = create_access_token(
             identity="999999999",
@@ -1715,17 +1722,23 @@ def test_authenticated_user_must_exist(
         },
     )
 
-    body = assert_domain_error(response, 404)
+    body = response.get_json()
 
-    assert body["error"] == (
-        "Authenticated user not found"
-    )
+    assert response.status_code == 401
+    assert body == {
+        "msg": "Token has been revoked",
+    }
 
 
 def test_authenticated_user_identity_must_be_integer(
     app,
     client,
 ):
+    """
+    Malformed JWT identities are rejected by the fail-closed
+    authentication/blocklist layer before route identity parsing.
+    """
+
     with app.test_request_context():
         token = create_access_token(
             identity="not-an-integer",
@@ -1745,7 +1758,7 @@ def test_authenticated_user_identity_must_be_integer(
 
     assert response.status_code == 401
     assert body == {
-        "error": "Invalid authentication identity",
+        "msg": "Token has been revoked",
     }
 
 
@@ -1754,8 +1767,14 @@ def test_inactive_authenticated_user_is_rejected(
     make_user,
     clinic,
     auth_headers_for,
-    assert_domain_error,
 ):
+    """
+    Inactive users are rejected by the JWT blocklist layer.
+
+    This preserves fail-closed authentication semantics and prevents
+    inactive users from reaching protected notification routes.
+    """
+
     inactive_user = make_user(
         clinic,
         is_active=False,
@@ -1766,11 +1785,12 @@ def test_inactive_authenticated_user_is_rejected(
         headers=auth_headers_for(inactive_user),
     )
 
-    body = assert_domain_error(response, 400)
+    body = response.get_json()
 
-    assert body["error"] == (
-        "Authenticated user is inactive"
-    )
+    assert response.status_code == 401
+    assert body == {
+        "msg": "Token has been revoked",
+    }
 
 
 def test_authenticated_user_without_clinic_is_rejected(

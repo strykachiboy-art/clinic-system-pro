@@ -57,6 +57,11 @@ class User(db.Model):
         nullable=True,
         index=True,
     )
+    
+    profile_image_storage_key = db.Column(
+       db.String(500),
+       nullable=True,
+    )
 
     created_at = db.Column(
         db.DateTime,

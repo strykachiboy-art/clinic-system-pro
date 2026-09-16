@@ -18,21 +18,29 @@ class Message(db.Model):
 
     clinic_id = db.Column(
         db.Integer,
-        db.ForeignKey("clinics.id"),
+        db.ForeignKey(
+            "clinics.id",
+        ),
         nullable=False,
         index=True,
     )
 
     conversation_id = db.Column(
         db.Integer,
-        db.ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        db.ForeignKey(
+            "chat_conversations.id",
+            ondelete="CASCADE",
+        ),
         nullable=False,
         index=True,
     )
 
     sender_id = db.Column(
         db.Integer,
-        db.ForeignKey("users.id", ondelete="RESTRICT"),
+        db.ForeignKey(
+            "users.id",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
         index=True,
     )
@@ -40,6 +48,20 @@ class Message(db.Model):
     content = db.Column(
         db.Text,
         nullable=True,
+    )
+
+    # -----------------------------------------------------------------------
+    # Reply / Thread Context
+    # -----------------------------------------------------------------------
+
+    reply_to_message_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "chat_messages.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
     )
 
     status = db.Column(
@@ -96,6 +118,16 @@ class Message(db.Model):
         nullable=True,
     )
 
+    # -----------------------------------------------------------------------
+    # Relationships
+    # -----------------------------------------------------------------------
+
+    clinic = db.relationship(
+        "Clinic",
+        back_populates="messages",
+        foreign_keys=[clinic_id],
+    )
+
     conversation = db.relationship(
         "Conversation",
         back_populates="messages",
@@ -105,6 +137,22 @@ class Message(db.Model):
         "User",
         foreign_keys=[sender_id],
         lazy="joined",
+    )
+
+    # Parent message being replied to.
+    reply_to = db.relationship(
+        "Message",
+        remote_side=[id],
+        foreign_keys=[reply_to_message_id],
+        back_populates="replies",
+    )
+
+    # Messages that directly reply to this message.
+    replies = db.relationship(
+        "Message",
+        foreign_keys=[reply_to_message_id],
+        back_populates="reply_to",
+        passive_deletes=True,
     )
 
     attachments = db.relationship(
@@ -134,12 +182,10 @@ class Message(db.Model):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    
-    clinic = db.relationship(
-        "Clinic",
-        back_populates="messages",
-        foreign_keys=[clinic_id],
-    )
+
+    # -----------------------------------------------------------------------
+    # Indexes
+    # -----------------------------------------------------------------------
 
     __table_args__ = (
         db.Index(

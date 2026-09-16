@@ -1869,12 +1869,10 @@ def test_inactive_authenticated_user_is_rejected(
         ),
     )
 
-    assert response.status_code == 422
-
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert "inactive" in body["error"].lower()
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "msg": "Token has been revoked",
+    }
 
 
 def test_authenticated_user_without_clinic_is_rejected(

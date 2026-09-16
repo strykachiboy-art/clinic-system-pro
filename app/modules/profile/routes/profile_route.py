@@ -6,6 +6,10 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
+from app.core.storage.storage_service import (
+    delete_file,
+    save_profile_image,
+)
 from app.core.utils.decorators import role_required
 
 from app.modules.profile.schemas.profile_schema import (
@@ -13,13 +17,11 @@ from app.modules.profile.schemas.profile_schema import (
 )
 from app.modules.profile.services.profile_service import (
     get_profile,
+    get_public_profile,
+    remove_profile_image,
     update_profile,
+    upload_profile_image,
 )
-
-
-# ============================================================================
-# BLUEPRINT
-# ============================================================================
 
 
 profile_bp = Blueprint(
@@ -27,11 +29,6 @@ profile_bp = Blueprint(
     __name__,
     url_prefix="/api/profile",
 )
-
-
-# ============================================================================
-# ROLE CONFIGURATION
-# ============================================================================
 
 
 PROFILE_ROLES = (
@@ -52,16 +49,7 @@ PROFILE_ROLES = (
 )
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def _current_user_id() -> int:
-    """
-    Resolve the authenticated user's ID from the JWT identity.
-    """
-
     identity = get_jwt_identity()
 
     if isinstance(identity, bool):
@@ -85,9 +73,6 @@ def _current_user_id() -> int:
 
 
 def _payload() -> dict:
-    """
-    Return and validate the incoming JSON payload.
-    """
     payload = request.get_json(silent=True)
 
     if payload is None:
@@ -103,17 +88,9 @@ def _payload() -> dict:
     return payload
 
 
-# ============================================================================
-# GET MY PROFILE
-# ============================================================================
-
-
 @profile_bp.get("/me")
 @role_required(*PROFILE_ROLES)
 def get_my_profile():
-    """
-    Return the authenticated user's aggregated profile.
-    """
     user_id = _current_user_id()
 
     profile = get_profile(
@@ -130,17 +107,25 @@ def get_my_profile():
     ), 200
 
 
-# ============================================================================
-# UPDATE MY PROFILE
-# ============================================================================
+@profile_bp.get("/<int:user_id>")
+def get_user_profile(user_id: int):
+    profile = get_public_profile(
+        user_id=user_id,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "data": profile.model_dump(
+                mode="json"
+            ),
+        }
+    ), 200
 
 
 @profile_bp.patch("/me")
 @role_required(*PROFILE_ROLES)
 def update_my_profile():
-    """
-    Update the authenticated user's own profile.
-    """
     user_id = _current_user_id()
 
     payload = _payload()
@@ -164,6 +149,93 @@ def update_my_profile():
             "success": True,
             "message": "Profile updated successfully",
             "data": profile.model_dump(
+                mode="json"
+            ),
+        }
+    ), 200
+
+
+@profile_bp.post("/me/image")
+@role_required(*PROFILE_ROLES)
+def upload_my_profile_image():
+    user_id = _current_user_id()
+
+    image = request.files.get("image")
+
+    if image is None:
+        raise ValidationError(
+            "Profile image file is required"
+        )
+
+    old_profile = get_profile(
+        user_id=user_id,
+    )
+
+    old_storage_key = (
+        old_profile.user.profile_image_storage_key
+    )
+
+    new_storage_key = save_profile_image(
+        image
+    )
+
+    try:
+        result = upload_profile_image(
+            actor_user_id=user_id,
+            storage_key=new_storage_key,
+        )
+    except Exception:
+        delete_file(
+            new_storage_key
+        )
+        raise
+
+    if (
+        old_storage_key
+        and old_storage_key != new_storage_key
+    ):
+        delete_file(
+            old_storage_key
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Profile image updated successfully",
+            "data": result.model_dump(
+                mode="json"
+            ),
+        }
+    ), 200
+
+
+@profile_bp.delete("/me/image")
+@role_required(*PROFILE_ROLES)
+def delete_my_profile_image():
+    user_id = _current_user_id()
+
+    profile = get_profile(
+        user_id=user_id,
+    )
+
+    storage_key = (
+        profile.user.profile_image_storage_key
+    )
+
+    result = remove_profile_image(
+        actor_user_id=user_id,
+    )
+
+    if storage_key:
+        delete_file(
+            storage_key
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Profile image removed successfully",
+            "data": result.model_dump(
                 mode="json"
             ),
         }

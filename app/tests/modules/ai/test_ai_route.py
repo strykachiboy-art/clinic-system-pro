@@ -22,30 +22,6 @@ AI_ALLOWED_ROLES = [
 ]
 
 
-def auth_headers_for_user(app, user, role=None):
-    from flask_jwt_extended import create_access_token
-
-    with app.app_context():
-        token = create_access_token(
-            identity=str(user.id),
-            additional_claims={
-                "role": (
-                    role.value
-                    if isinstance(role, Role)
-                    else (
-                        user.role.value
-                        if hasattr(user.role, "value")
-                        else user.role
-                    )
-                ),
-            },
-        )
-
-    return {
-        "Authorization": f"Bearer {token}",
-    }
-
-
 def register_ai_blueprint(app):
     if "ai" not in app.blueprints:
         app.register_blueprint(ai_bp)
@@ -162,6 +138,7 @@ def test_ai_roles_are_allowed(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     role,
     monkeypatch,
 ):
@@ -185,7 +162,7 @@ def test_ai_roles_are_allowed(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -196,6 +173,7 @@ def test_unauthorized_role_is_rejected(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -208,7 +186,7 @@ def test_unauthorized_role_is_rejected(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -236,6 +214,9 @@ def test_missing_role_claim_is_rejected(
 
         token = create_access_token(
             identity=str(user.id),
+            additional_claims={
+                "token_version": user.token_version,
+            },
         )
 
         response = app.test_client().post(
@@ -272,6 +253,8 @@ def test_invalid_jwt_identity_is_rejected(
             json=valid_drug_payload(),
         )
 
+        # The token is rejected by the fail-closed JWT validation layer
+        # before the route-level authentication identity validation runs.
         assert response.status_code == 401
 
 
@@ -298,12 +281,10 @@ def test_non_positive_jwt_identity_is_rejected(
             json=valid_drug_payload(),
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Invalid authentication identity"
+        # There is no real user with ID -1. The fail-closed JWT blocklist
+        # validation therefore rejects the token before _load_auth_context()
+        # can validate the identity.
+        assert response.status_code == 401
 
 
 # ============================================================================
@@ -315,6 +296,7 @@ def test_current_user_returns_authenticated_user(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -324,7 +306,7 @@ def test_current_user_returns_authenticated_user(
             role=Role.DOCTOR,
         )
 
-        headers = auth_headers_for_user(app, user)
+        headers = auth_headers_for(user)
 
         from flask_jwt_extended import verify_jwt_in_request
 
@@ -364,20 +346,16 @@ def test_current_user_rejects_nonexistent_user(
             json=valid_drug_payload(),
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == (
-            "Authenticated user could not be resolved"
-        )
+        # The token blocklist/security layer intentionally fails closed
+        # when the authenticated user cannot be resolved.
+        assert response.status_code == 401
 
 
 def test_current_user_rejects_inactive_user(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -393,21 +371,23 @@ def test_current_user_rejects_inactive_user(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
-        assert response.status_code == 422
+        # Inactive users are rejected by is_token_revoked() before
+        # route-level _current_user() validation.
+        assert response.status_code == 401
 
         body = response.get_json()
 
-        assert body["success"] is False
-        assert body["error"] == "User account is inactive"
+        assert body["msg"] == "Token has been revoked"
 
 
 def test_current_clinic_requires_user_clinic(
     app,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -420,7 +400,7 @@ def test_current_clinic_requires_user_clinic(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -438,6 +418,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -453,7 +434,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -484,6 +465,7 @@ def test_ai_routes_reject_empty_payload(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     endpoint,
 ):
     with app.app_context():
@@ -497,7 +479,7 @@ def test_ai_routes_reject_empty_payload(
         response = post_json(
             app,
             endpoint,
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {},
         )
 
@@ -532,6 +514,7 @@ def test_ai_routes_reject_non_object_json(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     endpoint,
     payload,
 ):
@@ -546,7 +529,7 @@ def test_ai_routes_reject_non_object_json(
         response = post_json(
             app,
             endpoint,
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             payload,
         )
 
@@ -564,6 +547,7 @@ def test_drug_interactions_rejects_unknown_fields(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -579,7 +563,7 @@ def test_drug_interactions_rejects_unknown_fields(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             payload,
         )
 
@@ -596,6 +580,7 @@ def test_triage_rejects_unknown_fields(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -611,7 +596,7 @@ def test_triage_rejects_unknown_fields(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             payload,
         )
 
@@ -622,6 +607,7 @@ def test_lab_results_rejects_unknown_fields(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -637,7 +623,7 @@ def test_lab_results_rejects_unknown_fields(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             payload,
         )
 
@@ -653,6 +639,7 @@ def test_drug_interactions_success(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -666,7 +653,9 @@ def test_drug_interactions_success(
         monkeypatch.setattr(
             "app.modules.ai.routes.ai_route.check_drug_interactions",
             lambda **kwargs: {
-                "summary": "No clinically significant interaction found.",
+                "summary": (
+                    "No clinically significant interaction found."
+                ),
                 "interactions": [],
                 "recommendations": [
                     "Continue routine monitoring."
@@ -677,7 +666,7 @@ def test_drug_interactions_success(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -695,6 +684,7 @@ def test_drug_interactions_passes_authenticated_context(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -727,7 +717,7 @@ def test_drug_interactions_passes_authenticated_context(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             payload,
         )
 
@@ -738,6 +728,7 @@ def test_drug_interactions_uses_authenticated_clinic_and_user(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -767,7 +758,7 @@ def test_drug_interactions_uses_authenticated_clinic_and_user(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -781,6 +772,7 @@ def test_drug_interactions_passes_client_ip(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -809,7 +801,7 @@ def test_drug_interactions_passes_client_ip(
 
         response = app.test_client().post(
             "/api/ai/drug-interactions",
-            headers=auth_headers_for_user(app, user),
+            headers=auth_headers_for(user),
             json=valid_drug_payload(),
             environ_base={
                 "REMOTE_ADDR": "203.0.113.10",
@@ -824,6 +816,7 @@ def test_drug_interactions_validation_error(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -836,7 +829,7 @@ def test_drug_interactions_validation_error(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "drug_names": [
                     "Aspirin",
@@ -857,6 +850,7 @@ def test_drug_interactions_domain_error(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -877,7 +871,7 @@ def test_drug_interactions_domain_error(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -893,6 +887,7 @@ def test_drug_interactions_invalid_service_response(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -916,7 +911,7 @@ def test_drug_interactions_invalid_service_response(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -937,6 +932,7 @@ def test_triage_success(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -959,7 +955,7 @@ def test_triage_success(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
 
@@ -975,6 +971,7 @@ def test_triage_validation_error(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -987,7 +984,7 @@ def test_triage_validation_error(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "symptoms": "Fever",
             },
@@ -1007,6 +1004,7 @@ def test_triage_passes_authenticated_context(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1036,7 +1034,7 @@ def test_triage_passes_authenticated_context(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
 
@@ -1051,6 +1049,7 @@ def test_triage_invalid_service_response(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1073,7 +1072,7 @@ def test_triage_invalid_service_response(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
 
@@ -1093,6 +1092,7 @@ def test_lab_results_success(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1118,7 +1118,7 @@ def test_lab_results_success(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_lab_payload(),
         )
 
@@ -1136,6 +1136,7 @@ def test_lab_results_validation_error(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -1148,7 +1149,7 @@ def test_lab_results_validation_error(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "result_data": {},
             },
@@ -1167,6 +1168,7 @@ def test_lab_results_passes_authenticated_context(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1184,7 +1186,9 @@ def test_lab_results_passes_authenticated_context(
 
             return {
                 "summary": "Results reviewed.",
-                "interpretation": "Clinical correlation required.",
+                "interpretation": (
+                    "Clinical correlation required."
+                ),
                 "abnormal_findings": [],
                 "recommendations": [],
             }
@@ -1197,7 +1201,7 @@ def test_lab_results_passes_authenticated_context(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_lab_payload(),
         )
 
@@ -1211,6 +1215,7 @@ def test_lab_results_domain_error(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1231,7 +1236,7 @@ def test_lab_results_domain_error(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "lab_order_id": 99999,
                 "result_data": {
@@ -1252,6 +1257,7 @@ def test_lab_results_invalid_service_response(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1276,7 +1282,7 @@ def test_lab_results_invalid_service_response(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_lab_payload(),
         )
 
@@ -1296,6 +1302,7 @@ def test_drug_interactions_response_contract(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1318,7 +1325,7 @@ def test_drug_interactions_response_contract(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_drug_payload(),
         )
 
@@ -1338,6 +1345,7 @@ def test_triage_response_contract(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1360,7 +1368,7 @@ def test_triage_response_contract(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
 
@@ -1379,6 +1387,7 @@ def test_lab_results_response_contract(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1393,7 +1402,9 @@ def test_lab_results_response_contract(
             "app.modules.ai.routes.ai_route.interpret_lab_results",
             lambda **kwargs: {
                 "summary": "Results reviewed.",
-                "interpretation": "Clinical correlation required.",
+                "interpretation": (
+                    "Clinical correlation required."
+                ),
                 "abnormal_findings": [],
                 "recommendations": [],
             },
@@ -1402,7 +1413,7 @@ def test_lab_results_response_contract(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             valid_lab_payload(),
         )
 
@@ -1426,6 +1437,7 @@ def test_drug_interactions_rejects_invalid_drug_names(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -1438,7 +1450,7 @@ def test_drug_interactions_rejects_invalid_drug_names(
         response = post_json(
             app,
             "/api/ai/drug-interactions",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "drug_names": [
                     "Aspirin",
@@ -1455,6 +1467,7 @@ def test_triage_rejects_blank_symptoms(
     clinic,
     patient,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -1467,7 +1480,7 @@ def test_triage_rejects_blank_symptoms(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "patient_id": patient.id,
                 "symptoms": "   ",
@@ -1481,6 +1494,7 @@ def test_triage_rejects_invalid_patient_id(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -1493,7 +1507,7 @@ def test_triage_rejects_invalid_patient_id(
         response = post_json(
             app,
             "/api/ai/triage",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "patient_id": 0,
                 "symptoms": "Fever",
@@ -1507,6 +1521,7 @@ def test_lab_results_rejects_empty_result_data(
     app,
     clinic,
     make_user,
+    auth_headers_for,
 ):
     with app.app_context():
         register_ai_blueprint(app)
@@ -1519,7 +1534,7 @@ def test_lab_results_rejects_empty_result_data(
         response = post_json(
             app,
             "/api/ai/lab-results/interpret",
-            auth_headers_for_user(app, user),
+            auth_headers_for(user),
             {
                 "result_data": {},
             },
@@ -1537,6 +1552,7 @@ def test_ai_rate_limit_is_enforced(
     app,
     clinic,
     make_user,
+    auth_headers_for,
     monkeypatch,
 ):
     with app.app_context():
@@ -1557,7 +1573,7 @@ def test_ai_rate_limit_is_enforced(
         )
 
         client = app.test_client()
-        headers = auth_headers_for_user(app, user)
+        headers = auth_headers_for(user)
 
         responses = [
             client.post(

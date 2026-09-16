@@ -110,6 +110,13 @@ class Conversation(db.Model):
         nullable=True,
     )
 
+    # Optional avatar for GROUP / DEPARTMENT / TEAM conversations.
+    # Stores a storage-system key/reference, not the actual image bytes.
+    avatar_storage_key = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
     created_by_id = db.Column(
         db.Integer,
         db.ForeignKey("users.id"),
@@ -193,7 +200,7 @@ class Conversation(db.Model):
         "Consultation",
         foreign_keys=[consultation_id],
     )
-    
+
     messages = db.relationship(
         "Message",
         back_populates="conversation",

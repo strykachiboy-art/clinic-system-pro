@@ -8,23 +8,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-basedir = os.path.abspath(
-    os.path.dirname(__file__)
-)
+
+basedir = os.path.abspath(os.path.dirname(__file__))
 
 
 class Config:
-    # ------------------------------------------------------------------
-    # Application
-    # ------------------------------------------------------------------
     SECRET_KEY = os.environ.get(
         "SECRET_KEY",
         "dev-secret-change-me",
     )
 
-    # ------------------------------------------------------------------
-    # Database
-    # ------------------------------------------------------------------
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         "DATABASE_URL",
         "sqlite:///" + os.path.join(
@@ -36,9 +29,6 @@ class Config:
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # ------------------------------------------------------------------
-    # JWT
-    # ------------------------------------------------------------------
     JWT_SECRET_KEY = os.environ.get(
         "JWT_SECRET_KEY",
         "dev-jwt-secret-change-me",
@@ -52,9 +42,6 @@ class Config:
         days=30
     )
 
-    # ------------------------------------------------------------------
-    # Google OAuth
-    # ------------------------------------------------------------------
     GOOGLE_CLIENT_ID = os.environ.get(
         "GOOGLE_CLIENT_ID"
     )
@@ -69,20 +56,25 @@ class Config:
     )
 
     # ------------------------------------------------------------------
-    # Redis / Celery
+    # Redis
     # ------------------------------------------------------------------
+    #
+    # Development/production Redis remains configurable through the
+    # environment.
+    #
     REDIS_URL = os.environ.get(
         "REDIS_URL",
         "redis://localhost:6379/0",
     )
 
+    # Celery
     CELERY_BROKER_URL = REDIS_URL
-
     CELERY_RESULT_BACKEND = REDIS_URL
 
     # ------------------------------------------------------------------
-    # File uploads
+    # Upload / storage
     # ------------------------------------------------------------------
+
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
     UPLOAD_FOLDER = os.environ.get(
@@ -90,14 +82,25 @@ class Config:
         "uploads",
     )
 
-    # ------------------------------------------------------------------
-    # Rate limiting
-    # ------------------------------------------------------------------
+    STORAGE_ROOT = os.environ.get(
+        "STORAGE_ROOT"
+    )
+
+    STORAGE_PUBLIC_BASE_URL = os.environ.get(
+        "STORAGE_PUBLIC_BASE_URL"
+    )
+
+    MAX_PROFILE_IMAGE_SIZE_BYTES = (
+        5 * 1024 * 1024
+    )
+
+    # Flask-Limiter
     RATELIMIT_STORAGE_URI = REDIS_URL
 
     # ------------------------------------------------------------------
-    # AI features
+    # AI
     # ------------------------------------------------------------------
+
     OPENAI_API_KEY = os.environ.get(
         "OPENAI_API_KEY"
     )
@@ -108,11 +111,9 @@ class Config:
     )
 
     # ------------------------------------------------------------------
-    # Integration credential encryption
-    #
-    # The actual encryption key MUST come from the environment.
-    # Never hardcode the key in this file.
+    # Integration encryption
     # ------------------------------------------------------------------
+
     INTEGRATION_ENCRYPTION_KEY = os.environ.get(
         "INTEGRATION_ENCRYPTION_KEY"
     )
@@ -133,10 +134,45 @@ class ProductionConfig(Config):
 
 class TestingConfig(Config):
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+
+    # ------------------------------------------------------------------
+    # Isolated test database
+    # ------------------------------------------------------------------
+
+    SQLALCHEMY_DATABASE_URI = (
+        "sqlite:///:memory:"
+    )
+
+    # ------------------------------------------------------------------
+    # Isolated test Redis
+    # ------------------------------------------------------------------
+    #
+    # Production/development normally use Redis DB 0.
+    # Tests use Redis DB 15 so test authentication/revocation state
+    # cannot collide with the normal development Redis database.
+    #
+    REDIS_URL = os.environ.get(
+        "TEST_REDIS_URL",
+        "redis://localhost:6379/15",
+    )
+
+    # Keep Celery test infrastructure on the isolated Redis database.
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
+
+    # Keep Flask-Limiter isolated from development/production counters.
+    RATELIMIT_STORAGE_URI = REDIS_URL
+
+    # ------------------------------------------------------------------
+    # Test encryption key
+    # ------------------------------------------------------------------
 
     INTEGRATION_ENCRYPTION_KEY = (
         "YOUR_VALID_FERNET_TEST_KEY_HERE"
+    )
+
+    MAX_PROFILE_IMAGE_SIZE_BYTES = (
+        5 * 1024 * 1024
     )
 
 

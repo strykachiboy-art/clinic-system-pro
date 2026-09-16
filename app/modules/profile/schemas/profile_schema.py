@@ -9,24 +9,80 @@ from app.core.enums.staff_enums import StaffStatus
 
 
 # ============================================================================
-# USER PROFILE
+# MY / AUTHENTICATED USER PROFILE
 # ============================================================================
 
 
 class ProfileUserSchema(BaseModel):
-    id: int = Field(..., gt=0)
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
     email: str | None = Field(
         None,
         max_length=255,
     )
+
     is_active: bool
+
     clinic_id: int | None = Field(
         None,
         gt=0,
     )
 
+    profile_image_storage_key: str | None = Field(
+        None,
+        max_length=500,
+    )
+
     model_config = ConfigDict(
         from_attributes=True,
+        extra="forbid",
+    )
+
+
+# ============================================================================
+# PUBLIC / OTHER USER PROFILE
+# ============================================================================
+
+
+class PublicProfileUserSchema(BaseModel):
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    profile_image_url: str | None = Field(
+        None,
+        max_length=2000,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+# ============================================================================
+# PROFILE IMAGE RESPONSES
+# ============================================================================
+
+
+class ProfileImageUploadResponseSchema(BaseModel):
+    profile_image_storage_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class ProfileImageRemoveResponseSchema(BaseModel):
+    profile_image_storage_key: None = None
+
+    model_config = ConfigDict(
         extra="forbid",
     )
 
@@ -37,8 +93,16 @@ class ProfileUserSchema(BaseModel):
 
 
 class ProfileStaffSchema(BaseModel):
-    id: int = Field(..., gt=0)
-    clinic_id: int = Field(..., gt=0)
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
+
     user_id: int | None = Field(
         None,
         gt=0,
@@ -49,6 +113,7 @@ class ProfileStaffSchema(BaseModel):
         min_length=1,
         max_length=150,
     )
+
     last_name: str = Field(
         ...,
         min_length=1,
@@ -59,17 +124,61 @@ class ProfileStaffSchema(BaseModel):
         None,
         max_length=255,
     )
+
     phone: str | None = Field(
         None,
         max_length=50,
     )
+
     email: str | None = Field(
         None,
         max_length=255,
     )
 
     status: StaffStatus
+
     hired_at: date | datetime | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+# ============================================================================
+# PUBLIC STAFF PROFILE
+# ============================================================================
+
+
+class PublicProfileStaffSchema(BaseModel):
+    id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    user_id: int | None = Field(
+        None,
+        gt=0,
+    )
+
+    first_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=150,
+    )
+
+    last_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=150,
+    )
+
+    specialty: str | None = Field(
+        None,
+        max_length=255,
+    )
+
+    status: StaffStatus
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -83,30 +192,38 @@ class ProfileStaffSchema(BaseModel):
 
 
 class ProfileClinicSchema(BaseModel):
-    id: int = Field(..., gt=0)
+    id: int = Field(
+        ...,
+        gt=0,
+    )
 
     name: str = Field(
         ...,
         min_length=1,
         max_length=255,
     )
+
     clinic_type: ClinicType
+
     status: ClinicStatus
 
     parent_clinic_id: int | None = Field(
         None,
         gt=0,
     )
+
     is_headquarters: bool
 
     address: str | None = Field(
         None,
         max_length=500,
     )
+
     city: str | None = Field(
         None,
         max_length=100,
     )
+
     country: str | None = Field(
         None,
         max_length=100,
@@ -116,6 +233,7 @@ class ProfileClinicSchema(BaseModel):
         None,
         max_length=50,
     )
+
     email: str | None = Field(
         None,
         max_length=255,
@@ -127,6 +245,7 @@ class ProfileClinicSchema(BaseModel):
     )
 
     opening_time: time | None = None
+
     closing_time: time | None = None
 
     model_config = ConfigDict(
@@ -136,15 +255,32 @@ class ProfileClinicSchema(BaseModel):
 
 
 # ============================================================================
-# AGGREGATED PROFILE RESPONSE
+# MY / AUTHENTICATED PROFILE RESPONSE
 # ============================================================================
 
 
 class ProfileResponseSchema(BaseModel):
-
     user: ProfileUserSchema
+
     staff: ProfileStaffSchema | None = None
+
     clinic: ProfileClinicSchema | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+# ============================================================================
+# PUBLIC / OTHER USER PROFILE RESPONSE
+# ============================================================================
+
+
+class PublicProfileResponseSchema(BaseModel):
+    user: PublicProfileUserSchema
+
+    staff: PublicProfileStaffSchema | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -162,9 +298,9 @@ class ProfileUpdateSchema(BaseModel):
     Fields that may be updated through the authenticated
     profile endpoint.
 
-    Privileged fields such as role, clinic ownership,
-    staff linkage, status, and identifiers are intentionally
-    excluded.
+    Profile images are intentionally excluded.
+    Image upload/removal uses dedicated authenticated
+    operations.
     """
 
     first_name: str | None = Field(
@@ -172,6 +308,7 @@ class ProfileUpdateSchema(BaseModel):
         min_length=1,
         max_length=150,
     )
+
     last_name: str | None = Field(
         None,
         min_length=1,
@@ -182,6 +319,7 @@ class ProfileUpdateSchema(BaseModel):
         None,
         max_length=50,
     )
+
     email: str | None = Field(
         None,
         max_length=255,
