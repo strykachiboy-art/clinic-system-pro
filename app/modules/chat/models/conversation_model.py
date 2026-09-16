@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import text
+
 from app.extensions import db
 from app.core.enums.chat_enums import (
     ConversationStatus,
@@ -23,6 +25,31 @@ class Conversation(db.Model):
             "description IS NULL OR length(trim(description)) > 0",
             name="ck_chat_conversations_description_nonempty",
         ),
+
+        # A direct conversation uses a deterministic SHA-256 key generated
+        # by the conversation service from the two participant user IDs.
+        # Group / patient / department / team conversations leave this NULL.
+        db.Index(
+            "ix_chat_conversations_direct_key",
+            "direct_key",
+        ),
+
+        # Only one active direct conversation may exist for a participant pair.
+        #
+        # Archived/closed conversations do not block creation of a new
+        # active direct conversation.
+        db.Index(
+            "uq_chat_conversations_active_direct_key",
+            "clinic_id",
+            "direct_key",
+            unique=True,
+            postgresql_where=text(
+                "conversation_type = 'direct' "
+                "AND status = 'active' "
+                "AND direct_key IS NOT NULL"
+            ),
+        ),
+
         db.Index(
             "ix_chat_conversations_clinic_status_updated",
             "clinic_id",
@@ -100,6 +127,14 @@ class Conversation(db.Model):
         index=True,
     )
 
+    # Deterministic SHA-256 key for active DIRECT conversations.
+    # SHA-256 produces exactly 64 hexadecimal characters.
+    direct_key = db.Column(
+        db.String(64),
+        nullable=True,
+        index=True,
+    )
+
     title = db.Column(
         db.String(200),
         nullable=True,
@@ -110,8 +145,6 @@ class Conversation(db.Model):
         nullable=True,
     )
 
-    # Optional avatar for GROUP / DEPARTMENT / TEAM conversations.
-    # Stores a storage-system key/reference, not the actual image bytes.
     avatar_storage_key = db.Column(
         db.String(500),
         nullable=True,
