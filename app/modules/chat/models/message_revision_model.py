@@ -7,11 +7,11 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ChatOutbox(db.Model):
-    __tablename__ = "chat_outbox"
+class MessageRevision(db.Model):
+    __tablename__ = "chat_message_revisions"
 
     id = db.Column(
-        db.BigInteger,
+        db.Integer,
         primary_key=True,
     )
 
@@ -31,48 +31,33 @@ class ChatOutbox(db.Model):
             "chat_messages.id",
             ondelete="CASCADE",
         ),
-        nullable=True,
+        nullable=False,
         index=True,
     )
 
-    event_type = db.Column(
-        db.String(64),
+    edited_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "users.id",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
-    )
-
-    payload = db.Column(
-        db.JSON,
-        nullable=False,
-    )
-
-    status = db.Column(
-        db.String(32),
-        nullable=False,
-        default="pending",
         index=True,
     )
 
-    attempts = db.Column(
+    revision_number = db.Column(
         db.Integer,
         nullable=False,
-        default=0,
     )
 
-    available_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=False,
-        default=_utcnow,
-        index=True,
-    )
-
-    processed_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=True,
-    )
-
-    last_error = db.Column(
+    previous_content = db.Column(
         db.Text,
         nullable=True,
+    )
+
+    previous_message_type = db.Column(
+        db.String(32),
+        nullable=False,
     )
 
     created_at = db.Column(
@@ -81,45 +66,48 @@ class ChatOutbox(db.Model):
         default=_utcnow,
     )
 
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=False,
-        default=_utcnow,
-        onupdate=_utcnow,
-    )
-
     clinic = db.relationship(
         "Clinic",
         backref=db.backref(
-            "chat_outbox_events",
+            "chat_message_revisions",
             lazy="dynamic",
         ),
     )
 
     message = db.relationship(
         "Message",
+        back_populates="revisions",
+    )
+
+    edited_by = db.relationship(
+        "User",
         backref=db.backref(
-            "outbox_events",
+            "chat_message_revisions",
             lazy="dynamic",
         ),
     )
 
     __table_args__ = (
+        db.UniqueConstraint(
+            "message_id",
+            "revision_number",
+            name="uq_chat_message_revision_number",
+        ),
         db.Index(
-            "ix_chat_outbox_pending_available",
-            "status",
-            "available_at",
+            "ix_chat_message_revisions_message_created",
+            "message_id",
+            "created_at",
             "id",
         ),
         db.Index(
-            "ix_chat_outbox_clinic_created",
+            "ix_chat_message_revisions_clinic_created",
             "clinic_id",
             "created_at",
             "id",
         ),
         db.Index(
-            "ix_chat_outbox_message_created",
-            "message_id",
+            "ix_chat_message_revisions_editor_created",
+            "edited_by_id",
             "created_at",
             "id",
         ),
@@ -127,8 +115,8 @@ class ChatOutbox(db.Model):
 
     def __repr__(self) -> str:
         return (
-            f"<ChatOutbox "
+            f"<MessageRevision "
             f"id={self.id} "
-            f"event_type={self.event_type!r} "
-            f"status={self.status!r}>"
+            f"message_id={self.message_id} "
+            f"revision_number={self.revision_number}>"
         )

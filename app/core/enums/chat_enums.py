@@ -28,6 +28,22 @@ class ParticipantRole(str, Enum):
     ADMIN = "admin"
 
 
+class MessageType(str, Enum):
+    """
+    Defines the logical type of a chat message.
+
+    AttachmentType describes the actual attached file/media,
+    while MessageType describes how the message itself is represented.
+    """
+
+    TEXT = "text"
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    FILE = "file"
+    SYSTEM = "system"
+
+
 class MessageStatus(str, Enum):
     PENDING = "pending"
     SENT = "sent"

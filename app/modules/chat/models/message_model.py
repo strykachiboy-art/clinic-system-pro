@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.core.enums.chat_enums import MessagePriority, MessageStatus
+from app.core.enums.chat_enums import (
+    MessagePriority,
+    MessageStatus,
+    MessageType,
+)
 
 
 def _utcnow():
@@ -45,6 +49,25 @@ class Message(db.Model):
         index=True,
     )
 
+    # -----------------------------------------------------------------------
+    # Message Content
+    # -----------------------------------------------------------------------
+
+    message_type = db.Column(
+        db.Enum(
+            MessageType,
+            name="chat_message_type_enum",
+            native_enum=True,
+            validate_strings=True,
+            values_callable=lambda enum_cls: [
+                member.value for member in enum_cls
+            ],
+        ),
+        nullable=False,
+        default=MessageType.TEXT,
+        index=True,
+    )
+
     content = db.Column(
         db.Text,
         nullable=True,
@@ -63,6 +86,10 @@ class Message(db.Model):
         nullable=True,
         index=True,
     )
+
+    # -----------------------------------------------------------------------
+    # Lifecycle / Priority
+    # -----------------------------------------------------------------------
 
     status = db.Column(
         db.Enum(
@@ -93,6 +120,10 @@ class Message(db.Model):
         default=MessagePriority.NORMAL,
         index=True,
     )
+
+    # -----------------------------------------------------------------------
+    # Timestamps
+    # -----------------------------------------------------------------------
 
     created_at = db.Column(
         db.DateTime(timezone=True),
@@ -139,6 +170,10 @@ class Message(db.Model):
         lazy="joined",
     )
 
+    # -----------------------------------------------------------------------
+    # Reply / Thread Relationships
+    # -----------------------------------------------------------------------
+
     # Parent message being replied to.
     reply_to = db.relationship(
         "Message",
@@ -154,6 +189,10 @@ class Message(db.Model):
         back_populates="reply_to",
         passive_deletes=True,
     )
+
+    # -----------------------------------------------------------------------
+    # Message Metadata Relationships
+    # -----------------------------------------------------------------------
 
     attachments = db.relationship(
         "MessageAttachment",
@@ -183,8 +222,23 @@ class Message(db.Model):
         passive_deletes=True,
     )
 
+    revisions = db.relationship(
+        "MessageRevision",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="MessageRevision.revision_number",
+    )
+
+    reactions = db.relationship(
+        "MessageReaction",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     # -----------------------------------------------------------------------
-    # Indexes
+    # Indexes / Constraints
     # -----------------------------------------------------------------------
 
     __table_args__ = (
@@ -200,6 +254,17 @@ class Message(db.Model):
             "created_at",
             "id",
         ),
+        db.Index(
+            "ix_chat_messages_conversation_status_created",
+            "conversation_id",
+            "status",
+            "created_at",
+        ),
+        db.Index(
+            "ix_chat_messages_sender_created",
+            "sender_id",
+            "created_at",
+        ),
     )
 
     def __repr__(self):
@@ -208,5 +273,6 @@ class Message(db.Model):
             f"id={self.id} "
             f"conversation_id={self.conversation_id} "
             f"sender_id={self.sender_id} "
+            f"message_type={self.message_type.value} "
             f"status={self.status.value}>"
         )

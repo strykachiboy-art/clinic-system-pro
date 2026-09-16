@@ -7,11 +7,11 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ChatOutbox(db.Model):
-    __tablename__ = "chat_outbox"
+class MessageReaction(db.Model):
+    __tablename__ = "chat_message_reactions"
 
     id = db.Column(
-        db.BigInteger,
+        db.Integer,
         primary_key=True,
     )
 
@@ -31,48 +31,23 @@ class ChatOutbox(db.Model):
             "chat_messages.id",
             ondelete="CASCADE",
         ),
-        nullable=True,
+        nullable=False,
         index=True,
     )
 
-    event_type = db.Column(
-        db.String(64),
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "users.id",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
+        index=True,
     )
 
-    payload = db.Column(
-        db.JSON,
-        nullable=False,
-    )
-
-    status = db.Column(
+    reaction = db.Column(
         db.String(32),
         nullable=False,
-        default="pending",
-        index=True,
-    )
-
-    attempts = db.Column(
-        db.Integer,
-        nullable=False,
-        default=0,
-    )
-
-    available_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=False,
-        default=_utcnow,
-        index=True,
-    )
-
-    processed_at = db.Column(
-        db.DateTime(timezone=True),
-        nullable=True,
-    )
-
-    last_error = db.Column(
-        db.Text,
-        nullable=True,
     )
 
     created_at = db.Column(
@@ -91,35 +66,45 @@ class ChatOutbox(db.Model):
     clinic = db.relationship(
         "Clinic",
         backref=db.backref(
-            "chat_outbox_events",
+            "chat_message_reactions",
             lazy="dynamic",
         ),
     )
 
     message = db.relationship(
         "Message",
+        back_populates="reactions",
+    )
+
+    user = db.relationship(
+        "User",
         backref=db.backref(
-            "outbox_events",
+            "chat_message_reactions",
             lazy="dynamic",
         ),
     )
 
     __table_args__ = (
-        db.Index(
-            "ix_chat_outbox_pending_available",
-            "status",
-            "available_at",
-            "id",
+        db.UniqueConstraint(
+            "message_id",
+            "user_id",
+            "reaction",
+            name="uq_chat_message_reaction_user",
         ),
         db.Index(
-            "ix_chat_outbox_clinic_created",
+            "ix_chat_message_reactions_message_reaction",
+            "message_id",
+            "reaction",
+        ),
+        db.Index(
+            "ix_chat_message_reactions_clinic_created",
             "clinic_id",
             "created_at",
             "id",
         ),
         db.Index(
-            "ix_chat_outbox_message_created",
-            "message_id",
+            "ix_chat_message_reactions_user_created",
+            "user_id",
             "created_at",
             "id",
         ),
@@ -127,8 +112,9 @@ class ChatOutbox(db.Model):
 
     def __repr__(self) -> str:
         return (
-            f"<ChatOutbox "
+            f"<MessageReaction "
             f"id={self.id} "
-            f"event_type={self.event_type!r} "
-            f"status={self.status!r}>"
+            f"message_id={self.message_id} "
+            f"user_id={self.user_id} "
+            f"reaction={self.reaction!r}>"
         )
