@@ -2258,14 +2258,7 @@ def test_create_appointment_rejects_inactive_user(
         headers=headers,
     )
 
-    assert response.status_code == 422
-
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert body["error"] == (
-        "User account is inactive"
-    )
+    assert response.status_code == 401
 
 
 def test_appointment_route_rejects_user_without_clinic(

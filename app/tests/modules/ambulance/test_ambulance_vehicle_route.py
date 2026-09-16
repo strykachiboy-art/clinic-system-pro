@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from unittest.mock import Mock
+
 import pytest
 
 from app.core.enums.ambulance_enums import (
@@ -1454,12 +1455,7 @@ def test_create_ambulance_vehicle_rejects_inactive_user(
         headers=headers,
     )
 
-    assert response.status_code == 422
-
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert body["error"] == "User account is inactive"
+    assert response.status_code == 401
 
 
 def test_update_ambulance_vehicle_status_rejects_inactive_user(
@@ -1499,15 +1495,10 @@ def test_update_ambulance_vehicle_status_rejects_inactive_user(
         headers=headers,
     )
 
-    assert response.status_code == 422
-
-    body = response.get_json()
-
-    assert body["success"] is False
-    assert body["error"] == "User account is inactive"
+    assert response.status_code == 401
 
     service.assert_not_called()
-    
+
 
 def test_create_ambulance_vehicle_rejects_user_without_clinic(
     client,

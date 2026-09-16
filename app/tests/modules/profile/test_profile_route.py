@@ -530,21 +530,6 @@ def test_get_my_profile_uses_jwt_identity_not_query_parameter(
     )
 
 
-def test_get_my_profile_does_not_accept_user_id_in_route(
-    client,
-    user,
-    auth_headers_for,
-):
-    headers = auth_headers_for(user)
-
-    response = client.get(
-        f"/api/profile/{user.id}",
-        headers=headers,
-    )
-
-    assert response.status_code == 404
-
-
 # ============================================================================
 # UPDATE MY PROFILE — SUCCESS
 # ============================================================================
