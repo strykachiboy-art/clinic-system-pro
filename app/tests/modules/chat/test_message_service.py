@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from sqlalchemy import func
+
 from app.extensions import db
 from app.core.enums.chat_enums import (
     ConversationType,
@@ -17,6 +19,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from app.modules.chat.models.chat_outbox_model import ChatOutbox
 from app.modules.chat.models.message_model import Message
 from app.modules.chat.models.message_revision_model import MessageRevision
 from app.modules.chat.services.conversation_service import (
@@ -432,6 +435,159 @@ def test_create_message_rejects_missing_reply_message(
             content="Invalid reply",
             reply_to_message_id=999999,
         )
+
+
+def test_create_message_creates_outbox_event(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    created = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Outbox integration test",
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == created.id,
+            ChatOutbox.clinic_id == clinic.id,
+            ChatOutbox.event_type == "message.created",
+        )
+    ).scalar_one_or_none()
+
+    assert event is not None
+    assert event.message_id == created.id
+    assert event.clinic_id == clinic.id
+    assert event.status == "pending"
+    assert event.attempts == 0
+    assert event.processed_at is None
+    assert event.last_error is None
+
+    assert event.payload == {
+        "conversation_id": created.conversation_id,
+        "message_id": created.id,
+        "sender_id": created.sender_id,
+        "message_type": created.message_type.value,
+        "priority": created.priority.value,
+        "reply_to_message_id": created.reply_to_message_id,
+    }
+
+
+def test_create_message_outbox_payload_does_not_contain_content(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    content = "Confidential clinical message"
+
+    created = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content=content,
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == created.id,
+            ChatOutbox.clinic_id == clinic.id,
+        )
+    ).scalar_one()
+
+    assert "content" not in event.payload
+    assert content not in str(event.payload)
+
+
+def test_create_message_rolls_back_message_and_outbox_when_outbox_fails(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+    monkeypatch,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    content = (
+        "atomic outbox rollback integration test"
+    )
+
+    before_messages = db.session.execute(
+        db.select(
+            func.count(Message.id)
+        ).where(
+            Message.clinic_id == clinic.id,
+            Message.conversation_id == conversation.id,
+        )
+    ).scalar_one()
+
+    before_outbox = db.session.execute(
+        db.select(
+            func.count(ChatOutbox.id)
+        ).where(
+            ChatOutbox.clinic_id == clinic.id,
+        )
+    ).scalar_one()
+
+    def fail_outbox(*args, **kwargs):
+        raise RuntimeError(
+            "Simulated outbox failure"
+        )
+
+    monkeypatch.setattr(
+        "app.modules.chat.services.message_service.create_outbox_event",
+        fail_outbox,
+    )
+
+    with pytest.raises(RuntimeError):
+        create_message(
+            clinic_id=clinic.id,
+            conversation_id=conversation.id,
+            sender_id=user.id,
+            content=content,
+        )
+
+    after_messages = db.session.execute(
+        db.select(
+            func.count(Message.id)
+        ).where(
+            Message.clinic_id == clinic.id,
+            Message.conversation_id == conversation.id,
+        )
+    ).scalar_one()
+
+    after_outbox = db.session.execute(
+        db.select(
+            func.count(ChatOutbox.id)
+        ).where(
+            ChatOutbox.clinic_id == clinic.id,
+        )
+    ).scalar_one()
+
+    assert after_messages == before_messages
+    assert after_outbox == before_outbox
 
 
 def test_get_message(

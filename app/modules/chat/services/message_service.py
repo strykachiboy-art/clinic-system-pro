@@ -33,6 +33,9 @@ from app.modules.chat.services.chat_policy_service import (
 from app.modules.chat.services.chat_security_service import (
     ChatSecurityService,
 )
+from app.modules.chat.workers.chat_outbox_worker import (
+    create_outbox_event,
+)
 from app.modules.clinic.services.clinic_service import (
     ensure_clinic_active,
 )
@@ -373,6 +376,20 @@ def create_message(
     )
 
     db.session.flush()
+
+    create_outbox_event(
+        clinic_id=clinic_id,
+        event_type="message.created",
+        payload={
+            "conversation_id": conversation.id,
+            "message_id": message.id,
+            "sender_id": sender_id,
+            "message_type": message.message_type.value,
+            "priority": message.priority.value,
+            "reply_to_message_id": message.reply_to_message_id,
+        },
+        message_id=message.id,
+    )
 
     now = _utcnow()
 
