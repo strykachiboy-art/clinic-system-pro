@@ -1197,6 +1197,7 @@ def update_conversation_status(
 def add_participant(
     conversation_id: int,
     clinic_id: int,
+    actor_id: int,
     user_id: int,
     role: ParticipantRole = ParticipantRole.MEMBER,
 ) -> ConversationParticipant:
@@ -1206,11 +1207,18 @@ def add_participant(
     )
 
     _validate_positive_id(
+        actor_id,
+        "Actor user ID",
+    )
+
+    _validate_positive_id(
         user_id,
         "User ID",
     )
 
-    ensure_clinic_active(clinic_id)
+    ensure_clinic_active(
+        clinic_id,
+    )
 
     conversation = _get_conversation(
         conversation_id,
@@ -1219,9 +1227,34 @@ def add_participant(
     )
 
     ChatSecurityService.ensure_user_can_access_conversation(
-        user_id,
+        actor_id,
         conversation.id,
     )
+
+    actor_participant = db.session.execute(
+        db.select(
+            ConversationParticipant
+        ).where(
+            ConversationParticipant.conversation_id
+            == conversation.id,
+            ConversationParticipant.clinic_id
+            == clinic_id,
+            ConversationParticipant.user_id
+            == actor_id,
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
+        )
+    ).scalar_one_or_none()
+
+    if actor_participant is None:
+        raise NotFoundError(
+            "Accepted actor conversation participant not found"
+        )
+
+    if actor_participant.role != ParticipantRole.ADMIN:
+        raise ValidationError(
+            "Only conversation administrators can add participants"
+        )
 
     if conversation.status == ConversationStatus.CLOSED:
         raise ConflictError(
@@ -1286,6 +1319,7 @@ def add_participant(
                 "status":
                     ParticipantStatus.PENDING.value,
                 "role": role.value,
+                "actor_id": actor_id,
             },
         )
 
@@ -1316,7 +1350,10 @@ def add_participant(
         status=ParticipantStatus.PENDING,
     )
 
-    db.session.add(participant)
+    db.session.add(
+        participant,
+    )
+
     db.session.flush()
 
     create_audit_log(
@@ -1333,6 +1370,7 @@ def add_participant(
             "role": role.value,
             "status":
                 ParticipantStatus.PENDING.value,
+            "actor_id": actor_id,
         },
     )
 

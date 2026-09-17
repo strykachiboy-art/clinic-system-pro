@@ -724,6 +724,7 @@ def test_add_participant_rejects_closed_conversation(
     no_audit,
 ):
     other_user = make_user(clinic=clinic)
+    target_user = make_user(clinic=clinic)
 
     conversation = create_conversation(
         clinic_id=clinic.id,
@@ -742,7 +743,8 @@ def test_add_participant_rejects_closed_conversation(
         add_participant(
             conversation_id=conversation.id,
             clinic_id=clinic.id,
-            user_id=user.id,
+            actor_id=user.id,
+            user_id=target_user.id,
         )
 
 
@@ -765,8 +767,244 @@ def test_add_existing_participant_raises_conflict(
         add_participant(
             conversation_id=conversation.id,
             clinic_id=clinic.id,
+            actor_id=user.id,
             user_id=user.id,
         )
+
+
+def test_add_participant_allows_admin_to_add_new_user(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+    target_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    participant = add_participant(
+        conversation_id=conversation.id,
+        clinic_id=clinic.id,
+        actor_id=user.id,
+        user_id=target_user.id,
+    )
+
+    assert participant.id is not None
+    assert participant.user_id == target_user.id
+    assert participant.conversation_id == conversation.id
+    assert participant.status == ParticipantStatus.PENDING
+    assert participant.role == ParticipantRole.MEMBER
+
+
+def test_add_participant_rejects_non_admin_actor(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+    target_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    pending = list_participants(
+        conversation_id=conversation.id,
+        clinic_id=clinic.id,
+        status=ParticipantStatus.PENDING,
+    )["items"][0]
+
+    update_participant(
+        participant_id=pending.id,
+        clinic_id=clinic.id,
+        status=ParticipantStatus.ACCEPTED,
+    )
+
+    with pytest.raises(ValidationError):
+        add_participant(
+            conversation_id=conversation.id,
+            clinic_id=clinic.id,
+            actor_id=other_user.id,
+            user_id=target_user.id,
+        )
+
+
+def test_add_participant_rejects_non_participant_actor(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+    outsider = make_user(clinic=clinic)
+    target_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    with pytest.raises(NotFoundError):
+        add_participant(
+            conversation_id=conversation.id,
+            clinic_id=clinic.id,
+            actor_id=outsider.id,
+            user_id=target_user.id,
+        )
+
+
+def test_add_participant_rejects_wrong_clinic_actor(
+    clinic,
+    user,
+    make_user,
+    make_clinic,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    other_clinic = make_clinic()
+
+    wrong_clinic_actor = make_user(
+        clinic=other_clinic,
+    )
+
+    target_user = make_user(
+        clinic=clinic,
+    )
+
+    with pytest.raises(NotFoundError):
+        add_participant(
+            conversation_id=conversation.id,
+            clinic_id=clinic.id,
+            actor_id=wrong_clinic_actor.id,
+            user_id=target_user.id,
+        )
+
+
+def test_add_participant_rejects_wrong_clinic_target(
+    clinic,
+    user,
+    make_user,
+    make_clinic,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    other_clinic = make_clinic()
+
+    wrong_clinic_target = make_user(
+        clinic=other_clinic,
+    )
+
+    with pytest.raises(NotFoundError):
+        add_participant(
+            conversation_id=conversation.id,
+            clinic_id=clinic.id,
+            actor_id=user.id,
+            user_id=wrong_clinic_target.id,
+        )
+
+
+def test_add_participant_supports_custom_role(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+    target_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    participant = add_participant(
+        conversation_id=conversation.id,
+        clinic_id=clinic.id,
+        actor_id=user.id,
+        user_id=target_user.id,
+        role=ParticipantRole.ADMIN,
+    )
+
+    assert participant.user_id == target_user.id
+    assert participant.role == ParticipantRole.ADMIN
+    assert participant.status == ParticipantStatus.PENDING
+
+
+def test_add_participant_readds_left_participant(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    other_user = make_user(clinic=clinic)
+
+    conversation = create_conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+        conversation_type=ConversationType.GROUP,
+        participant_user_ids=[other_user.id],
+    )
+
+    pending = list_participants(
+        conversation_id=conversation.id,
+        clinic_id=clinic.id,
+        status=ParticipantStatus.PENDING,
+    )["items"][0]
+
+    update_participant(
+        participant_id=pending.id,
+        clinic_id=clinic.id,
+        status=ParticipantStatus.ACCEPTED,
+    )
+
+    update_participant(
+        participant_id=pending.id,
+        clinic_id=clinic.id,
+        status=ParticipantStatus.LEFT,
+    )
+
+    readded = add_participant(
+        conversation_id=conversation.id,
+        clinic_id=clinic.id,
+        actor_id=user.id,
+        user_id=other_user.id,
+    )
+
+    assert readded.id == pending.id
+    assert readded.user_id == other_user.id
+    assert readded.status == ParticipantStatus.PENDING
+    assert readded.role == ParticipantRole.MEMBER
+    assert readded.left_at is None
+    assert readded.removed_at is None
 
 
 def test_list_participants(

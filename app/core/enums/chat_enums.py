@@ -81,3 +81,11 @@ class ReadReceiptStatus(str, Enum):
 class PinStatus(str, Enum):
     PINNED = "pinned"
     UNPINNED = "unpinned"
+    
+    
+class ContentCategory(str, Enum):
+    EXPLICIT_SEXUAL = "explicit_sexual"
+    SEXUAL_SOLICITATION = "sexual_solicitation"
+    PORNOGRAPHIC = "pornographic"
+    GRAPHIC_NON_CLINICAL = "graphic_non_clinical"
+    ABUSIVE = "abusive"
