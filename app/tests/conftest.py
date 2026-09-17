@@ -1854,3 +1854,10 @@ def chat_outbox(
         clinic=clinic,
         message=message,
     )
+    
+@pytest.fixture()
+def no_audit(monkeypatch):
+    monkeypatch.setattr(
+        "app.modules.chat.services.conversation_service.create_audit_log",
+        lambda *args, **kwargs: None,
+    )

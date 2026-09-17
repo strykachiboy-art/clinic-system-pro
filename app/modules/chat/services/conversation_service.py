@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import func
 
@@ -24,10 +26,8 @@ from app.core.exceptions import (
 from app.core.utils.decorators import transactional
 
 from app.modules.appointment.models.appointment_model import Appointment
-from app.modules.clinic.models.clinic_model import Clinic
 from app.modules.clinic.services.clinic_service import (
     ensure_clinic_active,
-    get_clinic,
 )
 from app.modules.consultation.models.consultation_model import Consultation
 from app.core.auth.user.models.user_model import User
@@ -37,6 +37,13 @@ from app.modules.staff.models.staff_model import Staff
 from app.modules.chat.models.conversation_model import Conversation
 from app.modules.chat.models.conversation_participant_model import (
     ConversationParticipant,
+)
+from app.modules.chat.models.message_model import Message
+from app.modules.chat.services.chat_policy_service import (
+    ChatPolicyService,
+)
+from app.modules.chat.services.chat_security_service import (
+    ChatSecurityService,
 )
 
 
@@ -50,13 +57,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ============================================================================
-# VALIDATION HELPERS
-# ============================================================================
-
-
 def _validate_positive_id(
-    value,
+    value: Any,
     field_name: str,
 ) -> int:
     if (
@@ -72,9 +74,9 @@ def _validate_positive_id(
 
 
 def _validate_pagination(
-    page,
-    per_page,
-):
+    page: int,
+    per_page: int,
+) -> tuple[int, int]:
     if (
         isinstance(page, bool)
         or not isinstance(page, int)
@@ -102,7 +104,7 @@ def _validate_pagination(
 
 
 def _normalize_enum(
-    value,
+    value: Any,
     enum_class,
     field_name: str,
 ):
@@ -118,10 +120,10 @@ def _normalize_enum(
 
 
 def _normalize_optional_text(
-    value,
+    value: str | None,
     field_name: str,
     max_length: int,
-):
+) -> str | None:
     if value is None:
         return None
 
@@ -155,21 +157,23 @@ def _get_user(
         "User ID",
     )
 
-    query = db.select(User).where(
-        User.id == user_id
+    statement = db.select(User).where(
+        User.id == user_id,
     )
 
     if clinic_id is not None:
-        query = query.where(
-            User.clinic_id == clinic_id
+        statement = statement.where(
+            User.clinic_id == clinic_id,
         )
 
     if active_only:
-        query = query.where(
-            User.is_active.is_(True)
+        statement = statement.where(
+            User.is_active.is_(True),
         )
 
-    user = db.session.execute(query).scalar_one_or_none()
+    user = db.session.execute(
+        statement,
+    ).scalar_one_or_none()
 
     if user is None:
         raise NotFoundError(
@@ -190,17 +194,19 @@ def _get_patient(
         "Patient ID",
     )
 
-    query = db.select(Patient).where(
+    statement = db.select(Patient).where(
         Patient.id == patient_id,
         Patient.clinic_id == clinic_id,
     )
 
     if active_only:
-        query = query.where(
-            Patient.is_active.is_(True)
+        statement = statement.where(
+            Patient.is_active.is_(True),
         )
 
-    patient = db.session.execute(query).scalar_one_or_none()
+    patient = db.session.execute(
+        statement,
+    ).scalar_one_or_none()
 
     if patient is None:
         raise NotFoundError(
@@ -223,7 +229,7 @@ def _get_appointment(
         db.select(Appointment).where(
             Appointment.id == appointment_id,
             Appointment.clinic_id == clinic_id,
-        )
+        ),
     ).scalar_one_or_none()
 
     if appointment is None:
@@ -247,7 +253,7 @@ def _get_consultation(
         db.select(Consultation).where(
             Consultation.id == consultation_id,
             Consultation.clinic_id == clinic_id,
-        )
+        ),
     ).scalar_one_or_none()
 
     if consultation is None:
@@ -269,20 +275,22 @@ def _get_conversation(
         "Conversation ID",
     )
 
-    query = db.select(Conversation).where(
-        Conversation.id == conversation_id
+    statement = db.select(
+        Conversation
+    ).where(
+        Conversation.id == conversation_id,
     )
 
     if clinic_id is not None:
-        query = query.where(
-            Conversation.clinic_id == clinic_id
+        statement = statement.where(
+            Conversation.clinic_id == clinic_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
     conversation = db.session.execute(
-        query
+        statement,
     ).scalar_one_or_none()
 
     if conversation is None:
@@ -305,28 +313,28 @@ def _get_participant(
         "Participant ID",
     )
 
-    query = db.select(
+    statement = db.select(
         ConversationParticipant
     ).where(
-        ConversationParticipant.id == participant_id
+        ConversationParticipant.id == participant_id,
     )
 
     if clinic_id is not None:
-        query = query.where(
-            ConversationParticipant.clinic_id == clinic_id
+        statement = statement.where(
+            ConversationParticipant.clinic_id == clinic_id,
         )
 
     if conversation_id is not None:
-        query = query.where(
+        statement = statement.where(
             ConversationParticipant.conversation_id
-            == conversation_id
+            == conversation_id,
         )
 
     if lock:
-        query = query.with_for_update()
+        statement = statement.with_for_update()
 
     participant = db.session.execute(
-        query
+        statement,
     ).scalar_one_or_none()
 
     if participant is None:
@@ -338,39 +346,17 @@ def _get_participant(
     return participant
 
 
-def _validate_conversation_participant(
-    conversation: Conversation,
-    user_id: int,
-) -> User:
-    user = _get_user(
-        user_id,
-        clinic_id=conversation.clinic_id,
-        active_only=True,
-    )
-
-    return user
-
-
 def _get_active_staff_for_user(
     user_id: int,
     clinic_id: int,
 ) -> Staff | None:
-    """
-    Return the active staff record linked to a user, if one exists.
-
-    A user without an active staff record is not treated as staff for the
-    patient-conversation access rule. This preserves patient-user and other
-    non-staff account flows while applying the restriction to staff accounts.
-    """
-    staff = db.session.execute(
+    return db.session.execute(
         db.select(Staff).where(
             Staff.user_id == user_id,
             Staff.clinic_id == clinic_id,
             Staff.status == StaffStatus.ACTIVE,
-        )
+        ),
     ).scalar_one_or_none()
-
-    return staff
 
 
 def _staff_has_patient_relationship(
@@ -379,33 +365,31 @@ def _staff_has_patient_relationship(
     clinic_id: int,
     patient_id: int,
 ) -> bool:
-    """
-    Determine whether a staff member has an established relationship with
-    a patient through the clinic's existing care records.
-
-    An assigned appointment or consultation is sufficient. Cancelled
-    appointments/consultations do not establish access. Historical completed
-    records remain valid evidence of an established relationship.
-    """
     appointment_exists = db.session.scalar(
-        db.select(Appointment.id).where(
+        db.select(Appointment.id)
+        .where(
             Appointment.clinic_id == clinic_id,
             Appointment.patient_id == patient_id,
             Appointment.staff_id == staff_id,
-            Appointment.status != AppointmentStatus.CANCELLED,
-        ).limit(1)
+            Appointment.status
+            != AppointmentStatus.CANCELLED,
+        )
+        .limit(1)
     )
 
     if appointment_exists is not None:
         return True
 
     consultation_exists = db.session.scalar(
-        db.select(Consultation.id).where(
+        db.select(Consultation.id)
+        .where(
             Consultation.clinic_id == clinic_id,
             Consultation.patient_id == patient_id,
             Consultation.staff_id == staff_id,
-            Consultation.status != ConsultationStatus.CANCELLED,
-        ).limit(1)
+            Consultation.status
+            != ConsultationStatus.CANCELLED,
+        )
+        .limit(1)
     )
 
     return consultation_exists is not None
@@ -417,13 +401,6 @@ def _validate_staff_patient_relationship(
     clinic_id: int,
     patient_id: int,
 ) -> None:
-    """
-    Enforce the patient-conversation access boundary for staff users.
-
-    Staff cannot create or be added to a patient-context conversation merely
-    because both accounts belong to the same clinic. A legitimate clinic
-    relationship must already exist through an appointment or consultation.
-    """
     staff = _get_active_staff_for_user(
         user_id,
         clinic_id,
@@ -438,56 +415,58 @@ def _validate_staff_patient_relationship(
         patient_id=patient_id,
     ):
         raise ValidationError(
-            "Staff member is not authorized to open or join a conversation "
-            "for this patient because no valid appointment or consultation "
-            "relationship exists"
+            "Staff member is not authorized to "
+            "access this patient conversation"
         )
 
 
 def _validate_context_links(
-    conversation_clinic_id: int,
+    clinic_id: int,
     patient_id: int | None = None,
     appointment_id: int | None = None,
     consultation_id: int | None = None,
 ):
+    patient = None
+    appointment = None
+    consultation = None
+
     if patient_id is not None:
         patient = _get_patient(
             patient_id,
-            conversation_clinic_id,
+            clinic_id,
             active_only=True,
         )
-    else:
-        patient = None
-
-    appointment = None
-    consultation = None
 
     if appointment_id is not None:
         appointment = _get_appointment(
             appointment_id,
-            conversation_clinic_id,
+            clinic_id,
         )
 
     if consultation_id is not None:
         consultation = _get_consultation(
             consultation_id,
-            conversation_clinic_id,
+            clinic_id,
         )
 
-    if appointment is not None and (
-        patient is not None
+    if (
+        appointment is not None
+        and patient is not None
         and appointment.patient_id != patient.id
     ):
         raise ValidationError(
-            "Appointment does not belong to the selected patient"
+            "Appointment does not belong to "
+            "the selected patient"
         )
 
-    if consultation is not None and (
-        patient is not None
+    if (
+        consultation is not None
+        and patient is not None
         and consultation.patient_id != patient.id
     ):
         raise ValidationError(
-            "Consultation does not belong to the selected patient"
+            "Consultation does not belong to "
+            "the selected patient"
         )
 
     if (
@@ -508,7 +487,9 @@ def _active_participant_count(
 ) -> int:
     return db.session.execute(
         db.select(
-            func.count(ConversationParticipant.id)
+            func.count(
+                ConversationParticipant.id
+            )
         ).where(
             ConversationParticipant.conversation_id
             == conversation_id,
@@ -522,9 +503,138 @@ def _active_participant_count(
     ).scalar_one()
 
 
-# ============================================================================
-# CONVERSATION CREATION
-# ============================================================================
+def _active_admin_count(
+    conversation_id: int,
+) -> int:
+    return db.session.execute(
+        db.select(
+            func.count(
+                ConversationParticipant.id
+            )
+        ).where(
+            ConversationParticipant.conversation_id
+            == conversation_id,
+            ConversationParticipant.role
+            == ParticipantRole.ADMIN,
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
+        )
+    ).scalar_one()
+
+
+def _build_direct_key(
+    clinic_id: int,
+    user_ids: list[int],
+) -> str:
+    normalized_ids = sorted(
+        set(user_ids)
+    )
+
+    if len(normalized_ids) != 2:
+        raise ValidationError(
+            "A direct conversation requires "
+            "exactly two users"
+        )
+
+    raw_key = (
+        f"{clinic_id}:"
+        f"{normalized_ids[0]}:"
+        f"{normalized_ids[1]}"
+    )
+
+    return hashlib.sha256(
+        raw_key.encode("utf-8")
+    ).hexdigest()
+
+
+def _get_active_direct_conversation(
+    clinic_id: int,
+    direct_key: str,
+    *,
+    lock: bool = False,
+) -> Conversation | None:
+    statement = db.select(
+        Conversation
+    ).where(
+        Conversation.clinic_id == clinic_id,
+        Conversation.conversation_type
+        == ConversationType.DIRECT,
+        Conversation.status
+        == ConversationStatus.ACTIVE,
+        Conversation.direct_key == direct_key,
+    )
+
+    if lock:
+        statement = statement.with_for_update()
+
+    return db.session.execute(
+        statement,
+    ).scalar_one_or_none()
+
+
+def _validate_participant_status_transition(
+    current_status: ParticipantStatus,
+    new_status: ParticipantStatus,
+) -> None:
+    if current_status == new_status:
+        return
+
+    allowed = {
+        ParticipantStatus.PENDING: {
+            ParticipantStatus.ACCEPTED,
+            ParticipantStatus.DECLINED,
+        },
+        ParticipantStatus.ACCEPTED: {
+            ParticipantStatus.LEFT,
+            ParticipantStatus.REMOVED,
+        },
+        ParticipantStatus.DECLINED: {
+            ParticipantStatus.PENDING,
+        },
+        ParticipantStatus.LEFT: {
+            ParticipantStatus.PENDING,
+        },
+        ParticipantStatus.REMOVED: {
+            ParticipantStatus.PENDING,
+        },
+    }
+
+    if new_status not in allowed.get(
+        current_status,
+        set(),
+    ):
+        raise ConflictError(
+            f"Participant cannot transition from "
+            f"'{current_status.value}' to "
+            f"'{new_status.value}'"
+        )
+
+
+def _validate_read_message(
+    conversation: Conversation,
+    message_id: int,
+) -> Message:
+    _validate_positive_id(
+        message_id,
+        "Last read message ID",
+    )
+
+    message = db.session.execute(
+        db.select(Message).where(
+            Message.id == message_id,
+            Message.clinic_id
+            == conversation.clinic_id,
+            Message.conversation_id
+            == conversation.id,
+        ),
+    ).scalar_one_or_none()
+
+    if message is None:
+        raise NotFoundError(
+            f"Message {message_id} not found"
+        )
+
+    return message
 
 
 @transactional
@@ -550,6 +660,14 @@ def create_conversation(
     )
 
     ensure_clinic_active(clinic_id)
+
+    ChatPolicyService.ensure_chat_enabled(
+        clinic_id,
+    )
+
+    ChatPolicyService.ensure_conversation_creation_allowed(
+        clinic_id,
+    )
 
     conversation_type = _normalize_enum(
         conversation_type,
@@ -597,6 +715,11 @@ def create_conversation(
             "Participant user ID",
         )
 
+    participant_ids = set(
+        participant_user_ids
+    )
+    participant_ids.add(creator.id)
+
     _validate_context_links(
         clinic_id,
         patient_id=patient_id,
@@ -611,82 +734,50 @@ def create_conversation(
             patient_id=patient_id,
         )
 
-    participant_ids = set(participant_user_ids)
-    participant_ids.add(creator.id)
-
     if conversation_type == ConversationType.DIRECT:
-        if len(participant_ids) != 2:
-            raise ValidationError(
-                "A direct conversation must contain exactly two users"
-            )
-
-        other_user_id = next(
-            user_id
-            for user_id in participant_ids
-            if user_id != creator.id
+        ChatPolicyService.ensure_direct_conversation_allowed(
+            clinic_id,
         )
 
-        existing = (
-            db.session.execute(
-                db.select(Conversation)
-                .join(
-                    ConversationParticipant,
-                    ConversationParticipant.conversation_id
-                    == Conversation.id,
-                )
-                .where(
-                    Conversation.clinic_id == clinic_id,
-                    Conversation.conversation_type
-                    == ConversationType.DIRECT,
-                    Conversation.status
-                    != ConversationStatus.CLOSED,
-                    ConversationParticipant.user_id.in_(
-                        (creator.id, other_user_id)
-                    ),
-                    ConversationParticipant.status.in_(
-                        (
-                            ParticipantStatus.PENDING,
-                            ParticipantStatus.ACCEPTED,
-                        )
-                    ),
-                    db.select(func.count(ConversationParticipant.id))
-                    .where(
-                        ConversationParticipant.conversation_id
-                        == Conversation.id,
-                        ConversationParticipant.status.in_(
-                            (
-                                ParticipantStatus.PENDING,
-                                ParticipantStatus.ACCEPTED,
-                            )
-                        ),
-                    )
-                    .correlate(Conversation)
-                    .scalar_subquery() == 2,
-                )
-                .group_by(Conversation.id)
-                .having(
-                    func.count(
-                        func.distinct(
-                            ConversationParticipant.user_id
-                        )
-                    )
-                    == 2
-                )
-                .order_by(
-                    Conversation.id.asc()
-                )
+        if len(participant_ids) != 2:
+            raise ValidationError(
+                "A direct conversation requires "
+                "exactly two participants"
             )
-            .scalars()
-            .first()
+
+        direct_key = _build_direct_key(
+            clinic_id,
+            list(participant_ids),
+        )
+
+        existing = _get_active_direct_conversation(
+            clinic_id,
+            direct_key,
         )
 
         if existing is not None:
             return existing
 
+    else:
+        direct_key = None
+
+        ChatPolicyService.ensure_group_conversation_allowed(
+            clinic_id,
+            len(participant_ids),
+        )
+
+    for user_id in participant_ids:
+        _get_user(
+            user_id,
+            clinic_id=clinic_id,
+            active_only=True,
+        )
+
     conversation = Conversation(
         clinic_id=clinic_id,
         conversation_type=conversation_type,
         status=ConversationStatus.ACTIVE,
+        direct_key=direct_key,
         title=title,
         description=description,
         created_by_id=creator.id,
@@ -699,11 +790,6 @@ def create_conversation(
     db.session.flush()
 
     for user_id in sorted(participant_ids):
-        _validate_conversation_participant(
-            conversation,
-            user_id,
-        )
-
         participant = ConversationParticipant(
             clinic_id=clinic_id,
             conversation_id=conversation.id,
@@ -737,31 +823,41 @@ def create_conversation(
             f"Conversation {conversation.id} created"
         ),
         new_value={
-            "conversation_type": conversation.conversation_type.value,
-            "created_by_id": conversation.created_by_id,
-            "participant_count": len(participant_ids),
-            "patient_id": conversation.patient_id,
-            "appointment_id": conversation.appointment_id,
-            "consultation_id": conversation.consultation_id,
+            "conversation_type":
+                conversation.conversation_type.value,
+            "created_by_id":
+                conversation.created_by_id,
+            "participant_count":
+                len(participant_ids),
+            "patient_id":
+                conversation.patient_id,
+            "appointment_id":
+                conversation.appointment_id,
+            "consultation_id":
+                conversation.consultation_id,
         },
     )
 
     return conversation
 
 
-# ============================================================================
-# GET / LIST CONVERSATIONS
-# ============================================================================
-
-
 def get_conversation(
     conversation_id: int,
-    clinic_id: int | None = None,
+    clinic_id: int,
+    user_id: int | None = None,
 ) -> Conversation:
-    return _get_conversation(
+    conversation = _get_conversation(
         conversation_id,
         clinic_id=clinic_id,
     )
+
+    if user_id is not None:
+        ChatSecurityService.ensure_user_can_access_conversation(
+            user_id,
+            conversation.id,
+        )
+
+    return conversation
 
 
 def list_conversations(
@@ -772,6 +868,7 @@ def list_conversations(
     conversation_type: ConversationType | None = None,
     patient_id: int | None = None,
     search: str | None = None,
+    user_id: int | None = None,
 ):
     _validate_positive_id(
         clinic_id,
@@ -782,6 +879,13 @@ def list_conversations(
         page,
         per_page,
     )
+
+    if user_id is not None:
+        _get_user(
+            user_id,
+            clinic_id=clinic_id,
+            active_only=True,
+        )
 
     status = (
         _normalize_enum(
@@ -815,57 +919,83 @@ def list_conversations(
         200,
     )
 
-    query = db.select(Conversation).where(
-        Conversation.clinic_id == clinic_id
+    query = db.select(
+        Conversation
+    ).where(
+        Conversation.clinic_id == clinic_id,
     )
 
     count_query = db.select(
         func.count(Conversation.id)
     ).where(
-        Conversation.clinic_id == clinic_id
+        Conversation.clinic_id == clinic_id,
     )
+
+    if user_id is not None:
+        query = query.join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id
+            == Conversation.id,
+        ).where(
+            ConversationParticipant.user_id == user_id,
+            ConversationParticipant.clinic_id == clinic_id,
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
+        )
+
+        count_query = count_query.join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id
+            == Conversation.id,
+        ).where(
+            ConversationParticipant.user_id == user_id,
+            ConversationParticipant.clinic_id == clinic_id,
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
+        )
 
     if status is not None:
         query = query.where(
-            Conversation.status == status
+            Conversation.status == status,
         )
         count_query = count_query.where(
-            Conversation.status == status
+            Conversation.status == status,
         )
 
     if conversation_type is not None:
         query = query.where(
             Conversation.conversation_type
-            == conversation_type
+            == conversation_type,
         )
         count_query = count_query.where(
             Conversation.conversation_type
-            == conversation_type
+            == conversation_type,
         )
 
     if patient_id is not None:
         query = query.where(
-            Conversation.patient_id == patient_id
+            Conversation.patient_id == patient_id,
         )
         count_query = count_query.where(
-            Conversation.patient_id == patient_id
+            Conversation.patient_id == patient_id,
         )
 
     if search is not None:
         like = f"%{search}%"
 
-        search_condition = db.or_(
+        condition = db.or_(
             Conversation.title.ilike(like),
             Conversation.description.ilike(like),
         )
 
-        query = query.where(search_condition)
-        count_query = count_query.where(
-            search_condition
-        )
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+
+    if user_id is not None:
+        query = query.distinct()
 
     total = db.session.execute(
-        count_query
+        count_query,
     ).scalar_one()
 
     offset = (page - 1) * per_page
@@ -877,8 +1007,8 @@ def list_conversations(
             Conversation.id.desc(),
         )
         .offset(offset)
-        .limit(per_page)
-    ).scalars().all()
+        .limit(per_page),
+    ).scalars().unique().all()
 
     pages = (
         (total + per_page - 1) // per_page
@@ -895,11 +1025,6 @@ def list_conversations(
         "has_next": page < pages,
         "has_previous": page > 1 and total > 0,
     }
-
-
-# ============================================================================
-# CONVERSATION UPDATE
-# ============================================================================
 
 
 @transactional
@@ -922,59 +1047,50 @@ def update_conversation(
     )
 
     allowed_fields = {
-        "conversation_type",
         "title",
         "description",
     }
 
-    unknown = set(fields) - allowed_fields
+    unknown_fields = (
+        set(fields) - allowed_fields
+    )
 
-    if unknown:
+    if unknown_fields:
         raise ValidationError(
             "Unknown conversation field(s): "
-            + ", ".join(sorted(unknown))
+            + ", ".join(
+                sorted(unknown_fields)
+            )
         )
 
     old_value = {}
     new_value = {}
 
-    if "conversation_type" in fields:
-        value = _normalize_enum(
-            fields["conversation_type"],
-            ConversationType,
-            "conversation type",
-        )
-
-        if value != conversation.conversation_type:
-            old_value["conversation_type"] = (
-                conversation.conversation_type.value
-            )
-            new_value["conversation_type"] = value.value
-            conversation.conversation_type = value
-
     if "title" in fields:
-        value = _normalize_optional_text(
+        title = _normalize_optional_text(
             fields["title"],
             "Conversation title",
             200,
         )
 
-        if value != conversation.title:
+        if title != conversation.title:
             old_value["title"] = conversation.title
-            new_value["title"] = value
-            conversation.title = value
+            new_value["title"] = title
+            conversation.title = title
 
     if "description" in fields:
-        value = _normalize_optional_text(
+        description = _normalize_optional_text(
             fields["description"],
             "Conversation description",
             1000,
         )
 
-        if value != conversation.description:
-            old_value["description"] = conversation.description
-            new_value["description"] = value
-            conversation.description = value
+        if description != conversation.description:
+            old_value["description"] = (
+                conversation.description
+            )
+            new_value["description"] = description
+            conversation.description = description
 
     if new_value:
         create_audit_log(
@@ -989,11 +1105,6 @@ def update_conversation(
         )
 
     return conversation
-
-
-# ============================================================================
-# CONVERSATION LIFECYCLE
-# ============================================================================
 
 
 @transactional
@@ -1038,7 +1149,10 @@ def update_conversation_status(
         ConversationStatus.CLOSED: set(),
     }
 
-    if new_status not in allowed_transitions[current_status]:
+    if new_status not in allowed_transitions.get(
+        current_status,
+        set(),
+    ):
         raise ConflictError(
             f"Conversation {conversation.id} cannot transition "
             f"from '{current_status.value}' to "
@@ -1079,11 +1193,6 @@ def update_conversation_status(
     return conversation
 
 
-# ============================================================================
-# PARTICIPANTS
-# ============================================================================
-
-
 @transactional
 def add_participant(
     conversation_id: int,
@@ -1109,6 +1218,11 @@ def add_participant(
         lock=True,
     )
 
+    ChatSecurityService.ensure_user_can_access_conversation(
+        user_id,
+        conversation.id,
+    )
+
     if conversation.status == ConversationStatus.CLOSED:
         raise ConflictError(
             "Cannot add participants to a closed conversation"
@@ -1120,9 +1234,10 @@ def add_participant(
         "participant role",
     )
 
-    user = _validate_conversation_participant(
-        conversation,
+    user = _get_user(
         user_id,
+        clinic_id=clinic_id,
+        active_only=True,
     )
 
     if conversation.patient_id is not None:
@@ -1133,7 +1248,9 @@ def add_participant(
         )
 
     existing = db.session.execute(
-        db.select(ConversationParticipant)
+        db.select(
+            ConversationParticipant
+        )
         .where(
             ConversationParticipant.conversation_id
             == conversation.id,
@@ -1145,17 +1262,17 @@ def add_participant(
 
     if existing is not None:
         if existing.status in (
-            ParticipantStatus.ACCEPTED,
             ParticipantStatus.PENDING,
+            ParticipantStatus.ACCEPTED,
         ):
             raise ConflictError(
                 f"User {user.id} is already a participant"
             )
 
         existing.status = ParticipantStatus.PENDING
+        existing.role = role
         existing.left_at = None
         existing.removed_at = None
-        existing.role = role
 
         create_audit_log(
             action=AuditAction.UPDATE,
@@ -1166,12 +1283,30 @@ def add_participant(
                 f"conversation {conversation.id}"
             ),
             new_value={
-                "status": ParticipantStatus.PENDING.value,
+                "status":
+                    ParticipantStatus.PENDING.value,
                 "role": role.value,
             },
         )
 
         return existing
+
+    active_count = _active_participant_count(
+        conversation.id,
+    )
+
+    if conversation.conversation_type == (
+        ConversationType.DIRECT
+    ):
+        raise ConflictError(
+            "A direct conversation cannot have "
+            "more than two participants"
+        )
+
+    ChatPolicyService.ensure_group_conversation_allowed(
+        clinic_id,
+        active_count + 1,
+    )
 
     participant = ConversationParticipant(
         clinic_id=clinic_id,
@@ -1196,7 +1331,8 @@ def add_participant(
             "conversation_id": conversation.id,
             "user_id": user.id,
             "role": role.value,
-            "status": ParticipantStatus.PENDING.value,
+            "status":
+                ParticipantStatus.PENDING.value,
         },
     )
 
@@ -1245,7 +1381,9 @@ def list_participants(
     )
 
     count_query = db.select(
-        func.count(ConversationParticipant.id)
+        func.count(
+            ConversationParticipant.id
+        )
     ).where(
         ConversationParticipant.conversation_id
         == conversation_id,
@@ -1255,14 +1393,14 @@ def list_participants(
 
     if status is not None:
         query = query.where(
-            ConversationParticipant.status == status
+            ConversationParticipant.status == status,
         )
         count_query = count_query.where(
-            ConversationParticipant.status == status
+            ConversationParticipant.status == status,
         )
 
     total = db.session.execute(
-        count_query
+        count_query,
     ).scalar_one()
 
     offset = (page - 1) * per_page
@@ -1274,7 +1412,7 @@ def list_participants(
             ConversationParticipant.id.asc(),
         )
         .offset(offset)
-        .limit(per_page)
+        .limit(per_page),
     ).scalars().all()
 
     pages = (
@@ -1290,14 +1428,15 @@ def list_participants(
         "total": total,
         "pages": pages,
         "has_next": page < pages,
-        "has_previous": page > 1 and total > 0,
+        "has_previous": (
+            page > 1 and total > 0
+        ),
     }
 
 
 @transactional
 def update_participant(
     participant_id: int,
-    conversation_id: int,
     clinic_id: int,
     *,
     role: ParticipantRole | None = None,
@@ -1313,9 +1452,20 @@ def update_participant(
     participant = _get_participant(
         participant_id,
         clinic_id=clinic_id,
-        conversation_id=conversation_id,
         lock=True,
     )
+
+    conversation = _get_conversation(
+        participant.conversation_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    if conversation.status == ConversationStatus.CLOSED:
+        raise ConflictError(
+            "Cannot modify participants "
+            "in a closed conversation"
+        )
 
     old_value = {}
     new_value = {}
@@ -1339,25 +1489,56 @@ def update_participant(
             "participant status",
         )
 
-        if status != participant.status:
-            old_value["status"] = participant.status.value
-            new_value["status"] = status.value
-            participant.status = status
+        _validate_participant_status_transition(
+            participant.status,
+            status,
+        )
 
-            now = _utcnow()
+        if status == ParticipantStatus.LEFT:
+            if participant.status == (
+                ParticipantStatus.ACCEPTED
+            ):
+                if participant.role == ParticipantRole.ADMIN:
+                    admin_count = _active_admin_count(
+                        conversation.id,
+                    )
 
-            if status == ParticipantStatus.ACCEPTED:
-                if participant.joined_at is None:
-                    participant.joined_at = now
+                    if admin_count <= 1:
+                        raise ConflictError(
+                            "The last active conversation "
+                            "administrator cannot leave"
+                        )
 
-                participant.left_at = None
-                participant.removed_at = None
+        old_value["status"] = participant.status.value
+        new_value["status"] = status.value
 
-            elif status == ParticipantStatus.LEFT:
-                participant.left_at = now
+        participant.status = status
 
-            elif status == ParticipantStatus.REMOVED:
-                participant.removed_at = now
+        now = _utcnow()
+
+        if status == ParticipantStatus.ACCEPTED:
+            if participant.joined_at is None:
+                participant.joined_at = now
+
+            participant.left_at = None
+            participant.removed_at = None
+
+        elif status == ParticipantStatus.LEFT:
+            participant.left_at = now
+            participant.removed_at = None
+
+        elif status == ParticipantStatus.REMOVED:
+            participant.removed_at = now
+            participant.left_at = None
+
+        elif status == ParticipantStatus.PENDING:
+            participant.joined_at = None
+            participant.left_at = None
+            participant.removed_at = None
+
+        elif status == ParticipantStatus.DECLINED:
+            participant.left_at = None
+            participant.removed_at = None
 
     if new_value:
         create_audit_log(
@@ -1393,87 +1574,70 @@ def leave_conversation(
 
     ensure_clinic_active(clinic_id)
 
+    conversation = _get_conversation(
+        conversation_id,
+        clinic_id=clinic_id,
+        lock=True,
+    )
+
+    ChatSecurityService.ensure_user_can_access_conversation(
+        user_id,
+        conversation.id,
+    )
+
     participant = db.session.execute(
-        db.select(ConversationParticipant)
+        db.select(
+            ConversationParticipant
+        )
         .where(
             ConversationParticipant.conversation_id
-            == conversation_id,
-            ConversationParticipant.clinic_id
-            == clinic_id,
+            == conversation.id,
             ConversationParticipant.user_id
             == user_id,
-            ConversationParticipant.status.in_(
-                (
-                    ParticipantStatus.PENDING,
-                    ParticipantStatus.ACCEPTED,
-                )
-            ),
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
         )
         .with_for_update()
     ).scalar_one_or_none()
 
     if participant is None:
         raise NotFoundError(
-            "Active conversation participant not found"
+            "Accepted conversation participant not found"
         )
 
     if participant.role == ParticipantRole.ADMIN:
-        active_count = _active_participant_count(
-            conversation_id
+        admin_count = _active_admin_count(
+            conversation.id,
         )
 
-        if active_count > 1:
-            admins = db.session.execute(
-                db.select(
-                    ConversationParticipant.id
-                ).where(
-                    ConversationParticipant.conversation_id
-                    == conversation_id,
-                    ConversationParticipant.role
-                    == ParticipantRole.ADMIN,
-                    ConversationParticipant.status.in_(
-                        (
-                            ParticipantStatus.PENDING,
-                            ParticipantStatus.ACCEPTED,
-                        )
-                    ),
-                )
-                .limit(2)
-            ).scalars().all()
-
-            if len(admins) == 1:
-                raise ConflictError(
-                    "The last conversation admin cannot leave; "
-                    "transfer admin role first"
-                )
-
-    participant_status_before_leave = participant.status
+        if admin_count <= 1:
+            raise ConflictError(
+                "The last active conversation "
+                "administrator cannot leave"
+            )
 
     participant.status = ParticipantStatus.LEFT
     participant.left_at = _utcnow()
 
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
+        action=AuditAction.UPDATE,
         entity_type="ConversationParticipant",
         entity_id=participant.id,
         description=(
             f"User {user_id} left "
-            f"conversation {conversation_id}"
+            f"conversation {conversation.id}"
         ),
         old_value={
-            "status": participant_status_before_leave.value,
+            "status":
+                ParticipantStatus.ACCEPTED.value,
         },
         new_value={
-            "status": ParticipantStatus.LEFT.value,
+            "status":
+                ParticipantStatus.LEFT.value,
         },
     )
 
     return participant
-
-
-# ============================================================================
-# READ STATE
-# ============================================================================
 
 
 @transactional
@@ -1493,18 +1657,28 @@ def update_participant_read_state(
         "User ID",
     )
 
-    _validate_positive_id(
-        last_read_message_id,
-        "Last read message ID",
+    conversation = _get_conversation(
+        conversation_id,
+        clinic_id=clinic_id,
     )
 
-    ensure_clinic_active(clinic_id)
+    ChatSecurityService.ensure_user_can_access_conversation(
+        user_id,
+        conversation.id,
+    )
+
+    _validate_read_message(
+        conversation,
+        last_read_message_id,
+    )
 
     participant = db.session.execute(
-        db.select(ConversationParticipant)
+        db.select(
+            ConversationParticipant
+        )
         .where(
             ConversationParticipant.conversation_id
-            == conversation_id,
+            == conversation.id,
             ConversationParticipant.clinic_id
             == clinic_id,
             ConversationParticipant.user_id
@@ -1519,9 +1693,11 @@ def update_participant_read_state(
         raise NotFoundError(
             "Accepted conversation participant not found"
         )
-        
+
     participant.last_read_message_id = (
         last_read_message_id
     )
+
+    participant.updated_at = _utcnow()
 
     return participant
