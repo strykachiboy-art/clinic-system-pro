@@ -26,14 +26,6 @@ class Conversation(db.Model):
             name="ck_chat_conversations_description_nonempty",
         ),
 
-        # A direct conversation uses a deterministic SHA-256 key generated
-        # by the conversation service from the two participant user IDs.
-        # Group / patient / department / team conversations leave this NULL.
-        db.Index(
-            "ix_chat_conversations_direct_key",
-            "direct_key",
-        ),
-
         # Only one active direct conversation may exist for a participant pair.
         #
         # Archived/closed conversations do not block creation of a new

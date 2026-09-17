@@ -1234,3 +1234,623 @@ def rollback_db(db_session):
         db_session.rollback()
 
     return _rollback
+
+
+# ============================================================================
+# Chat Fixtures
+# ============================================================================
+
+@pytest.fixture()
+def make_chat_usage(db_session):
+    from datetime import date
+
+    from app.modules.chat.models.chat_usage_model import ChatUsage
+
+    def _make(
+        clinic,
+        user,
+        usage_date=None,
+        direct_created=0,
+        group_created=0,
+        department_created=0,
+        team_created=0,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "user_id": user.id,
+            "usage_date": date.today() if usage_date is None else usage_date,
+            "direct_created": direct_created,
+            "group_created": group_created,
+            "department_created": department_created,
+            "team_created": team_created,
+            **overrides,
+        }
+
+        usage = ChatUsage(**values)
+        db_session.add(usage)
+        db_session.flush()
+        return usage
+
+    return _make
+
+
+@pytest.fixture()
+def make_conversation(db_session):
+    from app.modules.chat.models.conversation_model import Conversation
+    from app.core.enums.chat_enums import ConversationStatus, ConversationType
+
+    def _make(
+        clinic,
+        created_by,
+        conversation_type=ConversationType.DIRECT,
+        status=ConversationStatus.ACTIVE,
+        direct_key=None,
+        title=None,
+        description=None,
+        avatar_storage_key=None,
+        patient=None,
+        appointment=None,
+        consultation=None,
+        last_message_at=None,
+        archived_at=None,
+        closed_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "conversation_type": conversation_type,
+            "status": status,
+            "direct_key": direct_key,
+            "title": title,
+            "description": description,
+            "avatar_storage_key": avatar_storage_key,
+            "created_by_id": created_by.id,
+            "patient_id": patient.id if patient is not None else None,
+            "appointment_id": appointment.id if appointment is not None else None,
+            "consultation_id": (
+                consultation.id if consultation is not None else None
+            ),
+            "last_message_at": last_message_at,
+            "archived_at": archived_at,
+            "closed_at": closed_at,
+            **overrides,
+        }
+
+        conversation = Conversation(**values)
+        db_session.add(conversation)
+        db_session.flush()
+        return conversation
+
+    return _make
+
+
+@pytest.fixture()
+def conversation(db_session, clinic, user, make_conversation):
+    return make_conversation(
+        clinic=clinic,
+        created_by=user,
+    )
+
+
+@pytest.fixture()
+def make_conversation_participant(db_session):
+    from app.modules.chat.models.conversation_participant_model import (
+        ConversationParticipant,
+    )
+    from app.core.enums.chat_enums import ParticipantRole, ParticipantStatus
+
+    def _make(
+        clinic,
+        conversation,
+        user,
+        role=ParticipantRole.MEMBER,
+        status=ParticipantStatus.PENDING,
+        joined_at=None,
+        left_at=None,
+        removed_at=None,
+        last_read_message=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "conversation_id": conversation.id,
+            "user_id": user.id,
+            "role": role,
+            "status": status,
+            "joined_at": joined_at,
+            "left_at": left_at,
+            "removed_at": removed_at,
+            "last_read_message_id": (
+                last_read_message.id
+                if last_read_message is not None
+                else None
+            ),
+            **overrides,
+        }
+
+        participant = ConversationParticipant(**values)
+        db_session.add(participant)
+        db_session.flush()
+        return participant
+
+    return _make
+
+
+@pytest.fixture()
+def conversation_participant(
+    db_session,
+    clinic,
+    conversation,
+    user,
+    make_conversation_participant,
+):
+    return make_conversation_participant(
+        clinic=clinic,
+        conversation=conversation,
+        user=user,
+    )
+
+
+@pytest.fixture()
+def make_message(db_session):
+    from app.modules.chat.models.message_model import Message
+    from app.core.enums.chat_enums import (
+        MessagePriority,
+        MessageStatus,
+        MessageType,
+    )
+
+    def _make(
+        clinic,
+        conversation,
+        sender,
+        message_type=MessageType.TEXT,
+        content="Test clinical chat message",
+        reply_to_message=None,
+        status=MessageStatus.PENDING,
+        priority=MessagePriority.NORMAL,
+        created_at=None,
+        updated_at=None,
+        edited_at=None,
+        deleted_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "conversation_id": conversation.id,
+            "sender_id": sender.id,
+            "message_type": message_type,
+            "content": content,
+            "reply_to_message_id": (
+                reply_to_message.id
+                if reply_to_message is not None
+                else None
+            ),
+            "status": status,
+            "priority": priority,
+            "edited_at": edited_at,
+            "deleted_at": deleted_at,
+            **overrides,
+        }
+
+        if created_at is not None:
+            values["created_at"] = created_at
+
+        if updated_at is not None:
+            values["updated_at"] = updated_at
+
+        message = Message(**values)
+        db_session.add(message)
+        db_session.flush()
+        return message
+
+    return _make
+
+
+@pytest.fixture()
+def message(
+    db_session,
+    clinic,
+    conversation,
+    user,
+    make_message,
+):
+    return make_message(
+        clinic=clinic,
+        conversation=conversation,
+        sender=user,
+    )
+
+
+@pytest.fixture()
+def make_message_attachment(db_session):
+    from app.modules.chat.models.message_attachment_model import (
+        MessageAttachment,
+    )
+    from app.core.enums.chat_enums import AttachmentType
+
+    def _make(
+        clinic,
+        message,
+        attachment_type=None,
+        file_name="test-file.txt",
+        mime_type="text/plain",
+        file_size_bytes=128,
+        storage_key=None,
+        checksum=None,
+        created_at=None,
+        updated_at=None,
+        **overrides,
+    ):
+        if attachment_type is None:
+            attachment_type = next(iter(AttachmentType))
+
+        if storage_key is None:
+            storage_key = f"test/chat/{message.id}/attachment.txt"
+
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "attachment_type": attachment_type,
+            "file_name": file_name,
+            "mime_type": mime_type,
+            "file_size_bytes": file_size_bytes,
+            "storage_key": storage_key,
+            "checksum": checksum,
+            **overrides,
+        }
+
+        if created_at is not None:
+            values["created_at"] = created_at
+
+        if updated_at is not None:
+            values["updated_at"] = updated_at
+
+        attachment = MessageAttachment(**values)
+        db_session.add(attachment)
+        db_session.flush()
+        return attachment
+
+    return _make
+
+
+@pytest.fixture()
+def message_attachment(
+    db_session,
+    clinic,
+    message,
+    make_message_attachment,
+):
+    return make_message_attachment(
+        clinic=clinic,
+        message=message,
+    )
+
+
+@pytest.fixture()
+def make_message_mention(db_session):
+    from app.modules.chat.models.message_mention_model import MessageMention
+    from app.core.enums.chat_enums import MentionType
+
+    def _make(
+        clinic,
+        message,
+        mention_type,
+        mentioned_user=None,
+        mentioned_patient=None,
+        mentioned_conversation=None,
+        position_start=None,
+        position_end=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "mention_type": mention_type,
+            "mentioned_user_id": (
+                mentioned_user.id
+                if mentioned_user is not None
+                else None
+            ),
+            "mentioned_patient_id": (
+                mentioned_patient.id
+                if mentioned_patient is not None
+                else None
+            ),
+            "mentioned_conversation_id": (
+                mentioned_conversation.id
+                if mentioned_conversation is not None
+                else None
+            ),
+            "position_start": position_start,
+            "position_end": position_end,
+            **overrides,
+        }
+
+        mention = MessageMention(**values)
+        db_session.add(mention)
+        db_session.flush()
+        return mention
+
+    return _make
+
+
+@pytest.fixture()
+def message_mention_user(
+    db_session,
+    clinic,
+    message,
+    user,
+    make_message_mention,
+):
+    from app.core.enums.chat_enums import MentionType
+
+    return make_message_mention(
+        clinic=clinic,
+        message=message,
+        mention_type=MentionType.USER,
+        mentioned_user=user,
+    )
+
+
+@pytest.fixture()
+def make_message_pin(db_session):
+    from app.modules.chat.models.message_pin_model import MessagePin
+    from app.core.enums.chat_enums import PinStatus
+
+    def _make(
+        clinic,
+        message,
+        pinned_by,
+        status=PinStatus.PINNED,
+        pinned_at=None,
+        expires_at=None,
+        unpinned_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "pinned_by_id": pinned_by.id,
+            "status": status,
+            "expires_at": expires_at,
+            "unpinned_at": unpinned_at,
+            **overrides,
+        }
+
+        if pinned_at is not None:
+            values["pinned_at"] = pinned_at
+
+        pin = MessagePin(**values)
+        db_session.add(pin)
+        db_session.flush()
+        return pin
+
+    return _make
+
+
+@pytest.fixture()
+def message_pin(
+    db_session,
+    clinic,
+    message,
+    user,
+    make_message_pin,
+):
+    return make_message_pin(
+        clinic=clinic,
+        message=message,
+        pinned_by=user,
+    )
+
+
+@pytest.fixture()
+def make_message_reaction(db_session):
+    from app.modules.chat.models.message_reaction_model import MessageReaction
+
+    def _make(
+        clinic,
+        message,
+        user,
+        reaction="👍",
+        created_at=None,
+        updated_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "user_id": user.id,
+            "reaction": reaction,
+            **overrides,
+        }
+
+        if created_at is not None:
+            values["created_at"] = created_at
+
+        if updated_at is not None:
+            values["updated_at"] = updated_at
+
+        reaction_obj = MessageReaction(**values)
+        db_session.add(reaction_obj)
+        db_session.flush()
+        return reaction_obj
+
+    return _make
+
+
+@pytest.fixture()
+def message_reaction(
+    db_session,
+    clinic,
+    message,
+    user,
+    make_message_reaction,
+):
+    return make_message_reaction(
+        clinic=clinic,
+        message=message,
+        user=user,
+    )
+
+
+@pytest.fixture()
+def make_message_read_receipt(db_session):
+    from app.modules.chat.models.message_read_receipt_model import (
+        MessageReadReceipt,
+    )
+    from app.core.enums.chat_enums import ReadReceiptStatus
+
+    def _make(
+        clinic,
+        message,
+        user,
+        status=ReadReceiptStatus.DELIVERED,
+        delivered_at=None,
+        read_at=None,
+        created_at=None,
+        updated_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "user_id": user.id,
+            "status": status,
+            "delivered_at": delivered_at,
+            "read_at": read_at,
+            **overrides,
+        }
+
+        if created_at is not None:
+            values["created_at"] = created_at
+
+        if updated_at is not None:
+            values["updated_at"] = updated_at
+
+        receipt = MessageReadReceipt(**values)
+        db_session.add(receipt)
+        db_session.flush()
+        return receipt
+
+    return _make
+
+
+@pytest.fixture()
+def message_read_receipt(
+    db_session,
+    clinic,
+    message,
+    user,
+    make_message_read_receipt,
+):
+    return make_message_read_receipt(
+        clinic=clinic,
+        message=message,
+        user=user,
+    )
+
+
+@pytest.fixture()
+def make_message_revision(db_session):
+    from app.modules.chat.models.message_revision_model import MessageRevision
+
+    def _make(
+        clinic,
+        message,
+        edited_by,
+        revision_number=1,
+        previous_content="Original message content",
+        previous_message_type="text",
+        created_at=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": message.id,
+            "edited_by_id": edited_by.id,
+            "revision_number": revision_number,
+            "previous_content": previous_content,
+            "previous_message_type": previous_message_type,
+            **overrides,
+        }
+
+        if created_at is not None:
+            values["created_at"] = created_at
+
+        revision = MessageRevision(**values)
+        db_session.add(revision)
+        db_session.flush()
+        return revision
+
+    return _make
+
+
+@pytest.fixture()
+def message_revision(
+    db_session,
+    clinic,
+    message,
+    user,
+    make_message_revision,
+):
+    return make_message_revision(
+        clinic=clinic,
+        message=message,
+        edited_by=user,
+    )
+
+
+@pytest.fixture()
+def make_chat_outbox(db_session):
+    from app.modules.chat.models.chat_outbox_model import ChatOutbox
+
+    def _make(
+        clinic,
+        message=None,
+        event_type="message.created",
+        payload=None,
+        status="pending",
+        attempts=0,
+        available_at=None,
+        processed_at=None,
+        last_error=None,
+        **overrides,
+    ):
+        values = {
+            "clinic_id": clinic.id,
+            "message_id": (
+                message.id if message is not None else None
+            ),
+            "event_type": event_type,
+            "payload": {} if payload is None else payload,
+            "status": status,
+            "attempts": attempts,
+            "processed_at": processed_at,
+            "last_error": last_error,
+            **overrides,
+        }
+
+        if available_at is not None:
+            values["available_at"] = available_at
+
+        outbox = ChatOutbox(**values)
+        db_session.add(outbox)
+        db_session.flush()
+        return outbox
+
+    return _make
+
+
+@pytest.fixture()
+def chat_outbox(
+    db_session,
+    clinic,
+    message,
+    make_chat_outbox,
+):
+    return make_chat_outbox(
+        clinic=clinic,
+        message=message,
+    )
