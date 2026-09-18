@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
-    CheckConstraint,
-    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +25,10 @@ from app.core.enums.asset_enums import (
     AssetStatus,
     MaintenanceStatus,
 )
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Asset(db.Model):
@@ -127,7 +132,7 @@ class Asset(db.Model):
         nullable=True,
     )
 
-    purchase_cost: Mapped[float | None] = mapped_column(
+    purchase_cost: Mapped[Decimal | None] = mapped_column(
         Numeric(14, 2),
         nullable=True,
     )
@@ -193,14 +198,14 @@ class Asset(db.Model):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=_utcnow,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=_utcnow,
+        onupdate=_utcnow,
     )
 
     clinic = relationship(
@@ -211,6 +216,24 @@ class Asset(db.Model):
     assigned_to = relationship(
         "Staff",
         foreign_keys=[assigned_to_id],
+    )
+
+    history = relationship(
+        "AssetHistory",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+    )
+
+    assignments = relationship(
+        "AssetAssignment",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+    )
+
+    maintenance_records = relationship(
+        "AssetMaintenance",
+        back_populates="asset",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (

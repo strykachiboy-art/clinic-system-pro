@@ -50,3 +50,19 @@ class MaintenanceStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     OVERDUE = "overdue"
+    CANCELLED = "cancelled"
+    
+    
+class AssetHistoryEventType(str, Enum):
+    CREATED = "created"
+    UPDATED = "updated"
+    ASSIGNED = "assigned"
+    UNASSIGNED = "unassigned"
+    LOCATION_CHANGED = "location_changed"
+    STATUS_CHANGED = "status_changed"
+    CONDITION_CHANGED = "condition_changed"
+    MAINTENANCE_STARTED = "maintenance_started"
+    MAINTENANCE_COMPLETED = "maintenance_completed"
+    MAINTENANCE_CANCELLED = "maintenance_cancelled"
+    RETIRED = "retired"
+    DISPOSED = "disposed"

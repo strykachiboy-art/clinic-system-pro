@@ -41,8 +41,8 @@ class AssetCreateSchema(AssetSchemaBase):
     """
     Client-supplied fields for creating an asset.
 
-    clinic_id, status, is_active, lifecycle dates, and audit fields
-    are intentionally excluded because they are server-controlled.
+    clinic_id, status, is_active, assignment state, maintenance state,
+    lifecycle dates, and audit fields are server-controlled.
     """
 
     asset_tag: str = Field(
@@ -73,11 +73,6 @@ class AssetCreateSchema(AssetSchemaBase):
         max_length=255,
     )
 
-    assigned_to_id: int | None = Field(
-        default=None,
-        gt=0,
-    )
-
     serial_number: str | None = Field(
         default=None,
         max_length=150,
@@ -109,22 +104,12 @@ class AssetCreateSchema(AssetSchemaBase):
 
     warranty_expiry: date | None = None
 
-    maintenance_status: MaintenanceStatus = (
-        MaintenanceStatus.NOT_REQUIRED
-    )
-
-    last_maintenance_date: date | None = None
-
-    next_maintenance_date: date | None = None
-
     notes: str | None = Field(
         default=None,
         max_length=5000,
     )
 
     @field_validator(
-        "asset_tag",
-        "name",
         "description",
         "location",
         "serial_number",
@@ -134,7 +119,7 @@ class AssetCreateSchema(AssetSchemaBase):
         "notes",
     )
     @classmethod
-    def normalize_text_fields(
+    def normalize_optional_text(
         cls,
         value: str | None,
     ) -> str | None:
@@ -150,36 +135,15 @@ class AssetCreateSchema(AssetSchemaBase):
         "name",
     )
     @classmethod
-    def reject_blank_required_text(
+    def normalize_required_text(
         cls,
-        value: str | None,
+        value: str,
     ) -> str:
-        if value is None:
-            raise ValueError(
-                "must not be blank"
-            )
-
         value = value.strip()
 
         if not value:
             raise ValueError(
                 "must not be blank"
-            )
-
-        return value
-
-    @field_validator("assigned_to_id")
-    @classmethod
-    def validate_assigned_to_id(
-        cls,
-        value: int | None,
-    ) -> int | None:
-        if value is None:
-            return None
-
-        if isinstance(value, bool):
-            raise ValueError(
-                "assigned_to_id must be a positive integer"
             )
 
         return value
@@ -195,17 +159,6 @@ class AssetCreateSchema(AssetSchemaBase):
                 "warranty_expiry cannot be before purchase_date"
             )
 
-        if (
-            self.last_maintenance_date is not None
-            and self.next_maintenance_date is not None
-            and self.next_maintenance_date
-            < self.last_maintenance_date
-        ):
-            raise ValueError(
-                "next_maintenance_date cannot be before "
-                "last_maintenance_date"
-            )
-
         return self
 
 
@@ -215,13 +168,6 @@ class AssetCreateSchema(AssetSchemaBase):
 
 
 class AssetUpdateSchema(AssetSchemaBase):
-    """
-    Client-supplied fields for normal asset updates.
-
-    Lifecycle fields such as status, retirement, disposal, and
-    is_active are intentionally excluded and must use dedicated
-    lifecycle operations.
-    """
 
     asset_tag: str | None = Field(
         default=None,
@@ -251,11 +197,6 @@ class AssetUpdateSchema(AssetSchemaBase):
         max_length=255,
     )
 
-    assigned_to_id: int | None = Field(
-        default=None,
-        gt=0,
-    )
-
     serial_number: str | None = Field(
         default=None,
         max_length=150,
@@ -287,20 +228,12 @@ class AssetUpdateSchema(AssetSchemaBase):
 
     warranty_expiry: date | None = None
 
-    maintenance_status: MaintenanceStatus | None = None
-
-    last_maintenance_date: date | None = None
-
-    next_maintenance_date: date | None = None
-
     notes: str | None = Field(
         default=None,
         max_length=5000,
     )
 
     @field_validator(
-        "asset_tag",
-        "name",
         "description",
         "location",
         "serial_number",
@@ -310,7 +243,7 @@ class AssetUpdateSchema(AssetSchemaBase):
         "notes",
     )
     @classmethod
-    def normalize_text_fields(
+    def normalize_optional_text(
         cls,
         value: str | None,
     ) -> str | None:
@@ -326,7 +259,7 @@ class AssetUpdateSchema(AssetSchemaBase):
         "name",
     )
     @classmethod
-    def reject_blank_required_text(
+    def normalize_required_text(
         cls,
         value: str | None,
     ) -> str | None:
@@ -342,22 +275,6 @@ class AssetUpdateSchema(AssetSchemaBase):
 
         return value
 
-    @field_validator("assigned_to_id")
-    @classmethod
-    def validate_assigned_to_id(
-        cls,
-        value: int | None,
-    ) -> int | None:
-        if value is None:
-            return None
-
-        if isinstance(value, bool):
-            raise ValueError(
-                "assigned_to_id must be a positive integer"
-            )
-
-        return value
-
     @model_validator(mode="after")
     def validate_dates(self) -> "AssetUpdateSchema":
         if (
@@ -367,17 +284,6 @@ class AssetUpdateSchema(AssetSchemaBase):
         ):
             raise ValueError(
                 "warranty_expiry cannot be before purchase_date"
-            )
-
-        if (
-            self.last_maintenance_date is not None
-            and self.next_maintenance_date is not None
-            and self.next_maintenance_date
-            < self.last_maintenance_date
-        ):
-            raise ValueError(
-                "next_maintenance_date cannot be before "
-                "last_maintenance_date"
             )
 
         return self
@@ -486,12 +392,15 @@ class AssetListQuerySchema(AssetSchemaBase):
 
         return value or None
 
-    @field_validator("assigned_to_id")
+    @field_validator(
+        "assigned_to_id",
+        mode="before",
+    )
     @classmethod
     def validate_assigned_to_id(
         cls,
-        value: int | None,
-    ) -> int | None:
+        value,
+    ):
         if value is None:
             return None
 
@@ -512,6 +421,12 @@ class AssetResponseSchema(AssetSchemaBase):
     """
     Read-only API representation of an asset.
     """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        use_enum_values=False,
+        from_attributes=True,
+    )
 
     id: int = Field(
         ...,

@@ -5,10 +5,10 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from cryptography.fernet import Fernet
 from flask_jwt_extended import create_access_token
-from sqlalchemy import text
 
 from app import create_app
 from app.extensions import db as _db
+from app.extensions import socketio
 
 from app.core.enums.notification_enums import (
     NotificationChannel,
@@ -33,9 +33,6 @@ _TEST_INTEGRATION_ENCRYPTION_KEY = Fernet.generate_key().decode("utf-8")
 # ============================================================================
 # APP / DATABASE / CLIENT
 # ============================================================================
-
-
-_TEST_INTEGRATION_ENCRYPTION_KEY = Fernet.generate_key().decode("utf-8")
 
 
 @pytest.fixture(scope="function")
@@ -1237,13 +1234,12 @@ def rollback_db(db_session):
 
 
 # ============================================================================
-# Chat Fixtures
+# CHAT FIXTURES
 # ============================================================================
+
 
 @pytest.fixture()
 def make_chat_usage(db_session):
-    from datetime import date
-
     from app.modules.chat.models.chat_usage_model import ChatUsage
 
     def _make(
@@ -1259,7 +1255,11 @@ def make_chat_usage(db_session):
         values = {
             "clinic_id": clinic.id,
             "user_id": user.id,
-            "usage_date": date.today() if usage_date is None else usage_date,
+            "usage_date": (
+                date.today()
+                if usage_date is None
+                else usage_date
+            ),
             "direct_created": direct_created,
             "group_created": group_created,
             "department_created": department_created,
@@ -1270,6 +1270,7 @@ def make_chat_usage(db_session):
         usage = ChatUsage(**values)
         db_session.add(usage)
         db_session.flush()
+
         return usage
 
     return _make
@@ -1278,7 +1279,10 @@ def make_chat_usage(db_session):
 @pytest.fixture()
 def make_conversation(db_session):
     from app.modules.chat.models.conversation_model import Conversation
-    from app.core.enums.chat_enums import ConversationStatus, ConversationType
+    from app.core.enums.chat_enums import (
+        ConversationStatus,
+        ConversationType,
+    )
 
     def _make(
         clinic,
@@ -1306,10 +1310,20 @@ def make_conversation(db_session):
             "description": description,
             "avatar_storage_key": avatar_storage_key,
             "created_by_id": created_by.id,
-            "patient_id": patient.id if patient is not None else None,
-            "appointment_id": appointment.id if appointment is not None else None,
+            "patient_id": (
+                patient.id
+                if patient is not None
+                else None
+            ),
+            "appointment_id": (
+                appointment.id
+                if appointment is not None
+                else None
+            ),
             "consultation_id": (
-                consultation.id if consultation is not None else None
+                consultation.id
+                if consultation is not None
+                else None
             ),
             "last_message_at": last_message_at,
             "archived_at": archived_at,
@@ -1320,13 +1334,19 @@ def make_conversation(db_session):
         conversation = Conversation(**values)
         db_session.add(conversation)
         db_session.flush()
+
         return conversation
 
     return _make
 
 
 @pytest.fixture()
-def conversation(db_session, clinic, user, make_conversation):
+def conversation(
+    db_session,
+    clinic,
+    user,
+    make_conversation,
+):
     return make_conversation(
         clinic=clinic,
         created_by=user,
@@ -1338,7 +1358,10 @@ def make_conversation_participant(db_session):
     from app.modules.chat.models.conversation_participant_model import (
         ConversationParticipant,
     )
-    from app.core.enums.chat_enums import ParticipantRole, ParticipantStatus
+    from app.core.enums.chat_enums import (
+        ParticipantRole,
+        ParticipantStatus,
+    )
 
     def _make(
         clinic,
@@ -1372,6 +1395,7 @@ def make_conversation_participant(db_session):
         participant = ConversationParticipant(**values)
         db_session.add(participant)
         db_session.flush()
+
         return participant
 
     return _make
@@ -1443,6 +1467,7 @@ def make_message(db_session):
         message = Message(**values)
         db_session.add(message)
         db_session.flush()
+
         return message
 
     return _make
@@ -1487,7 +1512,9 @@ def make_message_attachment(db_session):
             attachment_type = next(iter(AttachmentType))
 
         if storage_key is None:
-            storage_key = f"test/chat/{message.id}/attachment.txt"
+            storage_key = (
+                f"test/chat/{message.id}/attachment.txt"
+            )
 
         values = {
             "clinic_id": clinic.id,
@@ -1510,6 +1537,7 @@ def make_message_attachment(db_session):
         attachment = MessageAttachment(**values)
         db_session.add(attachment)
         db_session.flush()
+
         return attachment
 
     return _make
@@ -1571,6 +1599,7 @@ def make_message_mention(db_session):
         mention = MessageMention(**values)
         db_session.add(mention)
         db_session.flush()
+
         return mention
 
     return _make
@@ -1625,6 +1654,7 @@ def make_message_pin(db_session):
         pin = MessagePin(**values)
         db_session.add(pin)
         db_session.flush()
+
         return pin
 
     return _make
@@ -1675,6 +1705,7 @@ def make_message_reaction(db_session):
         reaction_obj = MessageReaction(**values)
         db_session.add(reaction_obj)
         db_session.flush()
+
         return reaction_obj
 
     return _make
@@ -1732,6 +1763,7 @@ def make_message_read_receipt(db_session):
         receipt = MessageReadReceipt(**values)
         db_session.add(receipt)
         db_session.flush()
+
         return receipt
 
     return _make
@@ -1782,6 +1814,7 @@ def make_message_revision(db_session):
         revision = MessageRevision(**values)
         db_session.add(revision)
         db_session.flush()
+
         return revision
 
     return _make
@@ -1821,10 +1854,16 @@ def make_chat_outbox(db_session):
         values = {
             "clinic_id": clinic.id,
             "message_id": (
-                message.id if message is not None else None
+                message.id
+                if message is not None
+                else None
             ),
             "event_type": event_type,
-            "payload": {} if payload is None else payload,
+            "payload": (
+                {}
+                if payload is None
+                else payload
+            ),
             "status": status,
             "attempts": attempts,
             "processed_at": processed_at,
@@ -1838,6 +1877,7 @@ def make_chat_outbox(db_session):
         outbox = ChatOutbox(**values)
         db_session.add(outbox)
         db_session.flush()
+
         return outbox
 
     return _make
@@ -1854,18 +1894,19 @@ def chat_outbox(
         clinic=clinic,
         message=message,
     )
-    
+
+
 @pytest.fixture()
 def no_audit(monkeypatch):
     monkeypatch.setattr(
         "app.modules.chat.services.conversation_service.create_audit_log",
         lambda *args, **kwargs: None,
     )
-    
-import pytest
-from flask_jwt_extended import create_access_token
 
-from app.extensions import socketio
+
+# ============================================================================
+# SOCKETIO
+# ============================================================================
 
 
 @pytest.fixture()

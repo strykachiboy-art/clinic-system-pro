@@ -108,6 +108,9 @@ from app.core.auth.user.models.user_device_model import UserDevice
 
 # Asset Control
 from app.modules.asset_control.models.asset_model import Asset
+from app.modules.asset_control.models.asset_history_model import AssetHistory
+from app.modules.asset_control.models.asset_assignment_model import AssetAssignment
+from app.modules.asset_control.models.asset_maintenance_model import AssetMaintenance
 
 # Chat
 from app.modules.chat.models.conversation_model import Conversation
@@ -212,6 +215,9 @@ __all__ = [
 
     # Asset Control
     "Asset",
+    "AssetHistory",
+    "AssetAssignment",
+    "AssetMaintenance",
 
     # Chat
     "Conversation",

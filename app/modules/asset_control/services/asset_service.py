@@ -8,7 +8,12 @@ from sqlalchemy import or_
 
 from app.extensions import db
 from app.core.audit.services.audit_service import create_audit_log
-from app.core.enums.asset_enums import AssetStatus
+from app.core.auth.user.models.user_model import User
+from app.core.enums.asset_enums import (
+    AssetHistoryEventType,
+    AssetStatus,
+    MaintenanceStatus,
+)
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.staff_enums import StaffStatus
@@ -24,13 +29,11 @@ from app.modules.asset_control.schemas.asset_schema import (
     AssetListQuerySchema,
     AssetUpdateSchema,
 )
+from app.modules.asset_control.services.asset_history_service import (
+    record_asset_history,
+)
 from app.modules.clinic.models.clinic_model import Clinic
 from app.modules.staff.models.staff_model import Staff
-
-
-# ============================================================================
-# CONSTANTS
-# ============================================================================
 
 
 DEFAULT_PAGE = 1
@@ -38,18 +41,14 @@ DEFAULT_PER_PAGE = 50
 MAX_PER_PAGE = 500
 
 
-# ============================================================================
-# VALIDATION HELPERS
-# ============================================================================
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _validate_positive_id(
     value,
     field_name: str,
 ) -> int:
-    """
-    Validate that an identifier is a positive integer.
-    """
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
@@ -65,9 +64,6 @@ def _validate_positive_id(
 def _validate_clinic_for_write(
     clinic_id: int,
 ) -> Clinic:
-    """
-    Validate that the clinic exists and is active for write operations.
-    """
     clinic_id = _validate_positive_id(
         clinic_id,
         "clinic_id",
@@ -91,14 +87,45 @@ def _validate_clinic_for_write(
     return clinic
 
 
+def _validate_actor_user(
+    *,
+    actor_user_id: int,
+    clinic_id: int,
+) -> User:
+    actor_user_id = _validate_positive_id(
+        actor_user_id,
+        "actor_user_id",
+    )
+
+    user = db.session.get(
+        User,
+        actor_user_id,
+    )
+
+    if user is None:
+        raise NotFoundError(
+            "Authenticated user not found"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            f"Authenticated user {user.id} is inactive"
+        )
+
+    if user.clinic_id != clinic_id:
+        raise NotFoundError(
+            "Authenticated user not found"
+        )
+
+    return user
+
+
 def _get_asset(
     *,
     asset_id: int,
     clinic_id: int,
+    for_update: bool = False,
 ) -> Asset:
-    """
-    Fetch an asset within the authenticated clinic boundary.
-    """
     asset_id = _validate_positive_id(
         asset_id,
         "asset_id",
@@ -109,12 +136,19 @@ def _get_asset(
         "clinic_id",
     )
 
-    asset = db.session.get(
-        Asset,
-        asset_id,
+    statement = db.select(Asset).where(
+        Asset.id == asset_id,
+        Asset.clinic_id == clinic_id,
     )
 
-    if asset is None or asset.clinic_id != clinic_id:
+    if for_update:
+        statement = statement.with_for_update()
+
+    asset = db.session.execute(
+        statement
+    ).scalar_one_or_none()
+
+    if asset is None:
         raise NotFoundError(
             f"Asset {asset_id} not found"
         )
@@ -122,24 +156,9 @@ def _get_asset(
     return asset
 
 
-def _validate_actor_user_id(
-    actor_user_id: int,
-) -> int:
-    """
-    Validate the audit actor identifier.
-    """
-    return _validate_positive_id(
-        actor_user_id,
-        "actor_user_id",
-    )
-
-
 def _normalize_optional_text(
     value: str | None,
 ) -> str | None:
-    """
-    Normalize optional text fields.
-    """
     if value is None:
         return None
 
@@ -153,15 +172,7 @@ def _normalize_optional_text(
     return value or None
 
 
-# ============================================================================
-# AUDIT HELPERS
-# ============================================================================
-
-
 def _audit_value(value):
-    """
-    Convert model values into JSON-safe audit values.
-    """
     if value is None:
         return None
 
@@ -182,40 +193,23 @@ def _build_audit_changes(
     old_values: dict,
     new_values: dict,
 ) -> tuple[dict, dict]:
-    """
-    Convert old/new values into audit-safe dictionaries.
-    """
-    old_audit = {
-        field_name: _audit_value(value)
-        for field_name, value in old_values.items()
-    }
-
-    new_audit = {
-        field_name: _audit_value(value)
-        for field_name, value in new_values.items()
-    }
-
-    return old_audit, new_audit
+    return (
+        {
+            field: _audit_value(value)
+            for field, value in old_values.items()
+        },
+        {
+            field: _audit_value(value)
+            for field, value in new_values.items()
+        },
+    )
 
 
-# ============================================================================
-# DATE VALIDATION
-# ============================================================================
-
-
-def _validate_dates(
+def _validate_purchase_dates(
     *,
     purchase_date: date | None,
     warranty_expiry: date | None,
-    last_maintenance_date: date | None,
-    next_maintenance_date: date | None,
-    retirement_date: date | None,
-    disposal_date: date | None,
 ) -> None:
-    """
-    Validate chronological relationships between asset dates.
-    """
-
     if (
         purchase_date is not None
         and warranty_expiry is not None
@@ -225,87 +219,38 @@ def _validate_dates(
             "warranty_expiry cannot be before purchase_date"
         )
 
-    if (
-        last_maintenance_date is not None
-        and next_maintenance_date is not None
-        and next_maintenance_date < last_maintenance_date
-    ):
-        raise ValidationError(
-            "next_maintenance_date cannot be before "
-            "last_maintenance_date"
-        )
-
-    if (
-        purchase_date is not None
-        and retirement_date is not None
-        and retirement_date < purchase_date
-    ):
-        raise ValidationError(
-            "retirement_date cannot be before purchase_date"
-        )
-
-    if (
-        retirement_date is not None
-        and disposal_date is not None
-        and disposal_date < retirement_date
-    ):
-        raise ValidationError(
-            "disposal_date cannot be before retirement_date"
-        )
-
-
-# ============================================================================
-# STAFF ASSIGNMENT VALIDATION
-# ============================================================================
-
 
 def _validate_assigned_staff(
     *,
-    assigned_to_id: int | None,
+    staff_id: int,
     clinic_id: int,
-) -> Staff | None:
-    """
-    Validate an assigned staff member.
-
-    Staff must:
-    - exist
-    - belong to the same clinic
-    - be active
-    """
-    if assigned_to_id is None:
-        return None
-
-    assigned_to_id = _validate_positive_id(
-        assigned_to_id,
-        "assigned_to_id",
+) -> Staff:
+    staff_id = _validate_positive_id(
+        staff_id,
+        "staff_id",
     )
 
     staff = db.session.get(
         Staff,
-        assigned_to_id,
+        staff_id,
     )
 
     if staff is None:
         raise NotFoundError(
-            f"Staff {assigned_to_id} not found"
+            f"Staff {staff_id} not found"
         )
 
     if staff.clinic_id != clinic_id:
         raise NotFoundError(
-            f"Staff {assigned_to_id} not found"
+            f"Staff {staff_id} not found"
         )
 
     if staff.status != StaffStatus.ACTIVE:
         raise ValidationError(
-            f"Staff {assigned_to_id} is not active"
+            f"Staff {staff_id} is not active"
         )
 
     return staff
-
-
-# ============================================================================
-# ASSET TAG UNIQUENESS
-# ============================================================================
 
 
 def _validate_asset_tag_unique(
@@ -314,12 +259,7 @@ def _validate_asset_tag_unique(
     asset_tag: str,
     exclude_asset_id: int | None = None,
 ) -> None:
-    """
-    Enforce clinic-scoped asset-tag uniqueness.
-    """
-    statement = db.select(
-        Asset.id
-    ).where(
+    statement = db.select(Asset.id).where(
         Asset.clinic_id == clinic_id,
         Asset.asset_tag == asset_tag,
     )
@@ -344,9 +284,36 @@ def _validate_asset_tag_unique(
         )
 
 
-# ============================================================================
-# CREATE ASSET
-# ============================================================================
+def _asset_is_terminal(
+    asset: Asset,
+) -> bool:
+    return asset.status in (
+        AssetStatus.RETIRED,
+        AssetStatus.DISPOSED,
+    )
+
+
+def _validate_asset_available_for_assignment(
+    asset: Asset,
+) -> None:
+    if _asset_is_terminal(asset):
+        raise ConflictError(
+            f"Asset {asset.id} is no longer assignable"
+        )
+
+    if asset.status in (
+        AssetStatus.UNDER_MAINTENANCE,
+        AssetStatus.OUT_OF_SERVICE,
+        AssetStatus.LOST,
+    ):
+        raise ConflictError(
+            f"Asset {asset.id} is not available for assignment"
+        )
+
+    if not asset.is_active:
+        raise ConflictError(
+            f"Asset {asset.id} is inactive"
+        )
 
 
 @transactional
@@ -356,42 +323,24 @@ def create_asset(
     actor_user_id: int,
     data: AssetCreateSchema | dict,
 ) -> Asset:
-    """
-    Create a new asset for an active clinic.
+    clinic = _validate_clinic_for_write(clinic_id)
 
-    Status and is_active are controlled by the service.
-    """
-
-    clinic = _validate_clinic_for_write(
-        clinic_id
-    )
-
-    actor_user_id = _validate_actor_user_id(
-        actor_user_id
+    actor = _validate_actor_user(
+        actor_user_id=actor_user_id,
+        clinic_id=clinic.id,
     )
 
     if isinstance(data, dict):
-        data = AssetCreateSchema.model_validate(
-            data
-        )
+        data = AssetCreateSchema.model_validate(data)
 
     _validate_asset_tag_unique(
         clinic_id=clinic.id,
         asset_tag=data.asset_tag,
     )
 
-    _validate_assigned_staff(
-        assigned_to_id=data.assigned_to_id,
-        clinic_id=clinic.id,
-    )
-
-    _validate_dates(
+    _validate_purchase_dates(
         purchase_date=data.purchase_date,
         warranty_expiry=data.warranty_expiry,
-        last_maintenance_date=data.last_maintenance_date,
-        next_maintenance_date=data.next_maintenance_date,
-        retirement_date=None,
-        disposal_date=None,
     )
 
     asset = Asset(
@@ -408,7 +357,6 @@ def create_asset(
         location=_normalize_optional_text(
             data.location
         ),
-        assigned_to_id=data.assigned_to_id,
         serial_number=_normalize_optional_text(
             data.serial_number
         ),
@@ -424,52 +372,51 @@ def create_asset(
             data.supplier
         ),
         warranty_expiry=data.warranty_expiry,
-        maintenance_status=data.maintenance_status,
-        last_maintenance_date=data.last_maintenance_date,
-        next_maintenance_date=data.next_maintenance_date,
+        maintenance_status=(
+            MaintenanceStatus.NOT_REQUIRED
+        ),
+        is_active=True,
         notes=_normalize_optional_text(
             data.notes
         ),
-        is_active=True,
     )
 
     db.session.add(asset)
     db.session.flush()
 
+    record_asset_history(
+        clinic_id=asset.clinic_id,
+        asset_id=asset.id,
+        event_type=AssetHistoryEventType.CREATED,
+        actor_user_id=actor.id,
+        new_status=asset.status,
+        new_condition=asset.condition,
+        new_assigned_to_id=asset.assigned_to_id,
+        new_location=asset.location,
+        event_metadata={
+            "asset_tag": asset.asset_tag,
+            "name": asset.name,
+        },
+    )
+
     create_audit_log(
         action=AuditAction.CREATE,
         entity_type="Asset",
         entity_id=asset.id,
-        user_id=actor_user_id,
-        description=(
-            f"Asset '{asset.asset_tag}' created"
-        ),
+        user_id=actor.id,
+        description=f"Asset '{asset.asset_tag}' created",
         new_value={
             "clinic_id": asset.clinic_id,
             "asset_tag": asset.asset_tag,
             "name": asset.name,
-            "category": _audit_value(
-                asset.category
-            ),
-            "status": _audit_value(
-                asset.status
-            ),
-            "condition": _audit_value(
-                asset.condition
-            ),
-            "ownership": _audit_value(
-                asset.ownership
-            ),
-            "assigned_to_id": asset.assigned_to_id,
+            "category": _audit_value(asset.category),
+            "status": _audit_value(asset.status),
+            "condition": _audit_value(asset.condition),
+            "ownership": _audit_value(asset.ownership),
         },
     )
 
     return asset
-
-
-# ============================================================================
-# GET SINGLE ASSET
-# ============================================================================
 
 
 def get_asset(
@@ -477,18 +424,10 @@ def get_asset(
     asset_id: int,
     clinic_id: int,
 ) -> Asset:
-    """
-    Return one asset within the clinic boundary.
-    """
     return _get_asset(
         asset_id=asset_id,
         clinic_id=clinic_id,
     )
-
-
-# ============================================================================
-# LIST ASSETS
-# ============================================================================
 
 
 def list_assets(
@@ -496,11 +435,6 @@ def list_assets(
     clinic_id: int,
     query: AssetListQuerySchema | dict | None = None,
 ) -> dict:
-    """
-    List assets with clinic isolation, filtering, searching,
-    deterministic ordering, and pagination.
-    """
-
     clinic_id = _validate_positive_id(
         clinic_id,
         "clinic_id",
@@ -514,15 +448,9 @@ def list_assets(
             query
         )
 
-    statement = db.select(
-        Asset
-    ).where(
+    statement = db.select(Asset).where(
         Asset.clinic_id == clinic_id
     )
-
-    # ------------------------------------------------------------------------
-    # SEARCH
-    # ------------------------------------------------------------------------
 
     if query.search:
         search = f"%{query.search}%"
@@ -537,10 +465,6 @@ def list_assets(
                 Asset.location.ilike(search),
             )
         )
-
-    # ------------------------------------------------------------------------
-    # FILTERS
-    # ------------------------------------------------------------------------
 
     if query.category is not None:
         statement = statement.where(
@@ -579,18 +503,10 @@ def list_assets(
             Asset.is_active == query.is_active
         )
 
-    # ------------------------------------------------------------------------
-    # DETERMINISTIC ORDERING
-    # ------------------------------------------------------------------------
-
     statement = statement.order_by(
         Asset.created_at.desc(),
         Asset.id.desc(),
     )
-
-    # ------------------------------------------------------------------------
-    # PAGINATION
-    # ------------------------------------------------------------------------
 
     pagination = db.paginate(
         statement,
@@ -610,11 +526,6 @@ def list_assets(
     }
 
 
-# ============================================================================
-# UPDATE ASSET
-# ============================================================================
-
-
 @transactional
 def update_asset(
     *,
@@ -623,37 +534,21 @@ def update_asset(
     actor_user_id: int,
     data: AssetUpdateSchema | dict,
 ) -> Asset:
-    """
-    Update ordinary mutable asset fields.
+    clinic = _validate_clinic_for_write(clinic_id)
 
-    Lifecycle fields such as:
-    - status
-    - is_active
-    - retirement_date
-    - disposal_date
-    - disposal_reason
-
-    are intentionally NOT handled here. They belong to the
-    dedicated lifecycle operations.
-    """
-
-    _validate_clinic_for_write(
-        clinic_id
-    )
-
-    actor_user_id = _validate_actor_user_id(
-        actor_user_id
+    actor = _validate_actor_user(
+        actor_user_id=actor_user_id,
+        clinic_id=clinic.id,
     )
 
     asset = _get_asset(
         asset_id=asset_id,
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
+        for_update=True,
     )
 
     if isinstance(data, dict):
-        data = AssetUpdateSchema.model_validate(
-            data
-        )
+        data = AssetUpdateSchema.model_validate(data)
 
     updates = data.model_dump(
         exclude_unset=True
@@ -664,63 +559,28 @@ def update_asset(
             "No fields provided for update"
         )
 
-    # ------------------------------------------------------------------------
-    # DATE VALIDATION
-    # ------------------------------------------------------------------------
+    if _asset_is_terminal(asset):
+        raise ConflictError(
+            f"Asset {asset.id} is no longer editable"
+        )
 
-    next_purchase_date = updates.get(
-        "purchase_date",
-        asset.purchase_date,
+    _validate_purchase_dates(
+        purchase_date=updates.get(
+            "purchase_date",
+            asset.purchase_date,
+        ),
+        warranty_expiry=updates.get(
+            "warranty_expiry",
+            asset.warranty_expiry,
+        ),
     )
-
-    next_warranty_expiry = updates.get(
-        "warranty_expiry",
-        asset.warranty_expiry,
-    )
-
-    next_last_maintenance_date = updates.get(
-        "last_maintenance_date",
-        asset.last_maintenance_date,
-    )
-
-    next_next_maintenance_date = updates.get(
-        "next_maintenance_date",
-        asset.next_maintenance_date,
-    )
-
-    _validate_dates(
-        purchase_date=next_purchase_date,
-        warranty_expiry=next_warranty_expiry,
-        last_maintenance_date=next_last_maintenance_date,
-        next_maintenance_date=next_next_maintenance_date,
-        retirement_date=asset.retirement_date,
-        disposal_date=asset.disposal_date,
-    )
-
-    # ------------------------------------------------------------------------
-    # ASSET TAG
-    # ------------------------------------------------------------------------
 
     if "asset_tag" in updates:
         _validate_asset_tag_unique(
-            clinic_id=clinic_id,
+            clinic_id=clinic.id,
             asset_tag=updates["asset_tag"],
             exclude_asset_id=asset.id,
         )
-
-    # ------------------------------------------------------------------------
-    # STAFF ASSIGNMENT
-    # ------------------------------------------------------------------------
-
-    if "assigned_to_id" in updates:
-        _validate_assigned_staff(
-            assigned_to_id=updates["assigned_to_id"],
-            clinic_id=clinic_id,
-        )
-
-    # ------------------------------------------------------------------------
-    # MUTABLE TEXT FIELDS
-    # ------------------------------------------------------------------------
 
     text_fields = {
         "asset_tag",
@@ -762,16 +622,10 @@ def update_asset(
             value,
         )
 
-    # ------------------------------------------------------------------------
-    # NO-OP UPDATE
-    # ------------------------------------------------------------------------
-
     if not new_values:
         return asset
 
-    asset.updated_at = datetime.now(
-        timezone.utc
-    )
+    asset.updated_at = _utcnow()
 
     db.session.flush()
 
@@ -780,24 +634,76 @@ def update_asset(
         new_values=new_values,
     )
 
+    if "condition" in new_values:
+        record_asset_history(
+            clinic_id=asset.clinic_id,
+            asset_id=asset.id,
+            event_type=(
+                AssetHistoryEventType.CONDITION_CHANGED
+            ),
+            actor_user_id=actor.id,
+            previous_condition=old_values[
+                "condition"
+            ],
+            new_condition=new_values[
+                "condition"
+            ],
+        )
+
+    if "location" in new_values:
+        record_asset_history(
+            clinic_id=asset.clinic_id,
+            asset_id=asset.id,
+            event_type=(
+                AssetHistoryEventType.LOCATION_CHANGED
+            ),
+            actor_user_id=actor.id,
+            previous_location=old_values[
+                "location"
+            ],
+            new_location=new_values[
+                "location"
+            ],
+        )
+
+    general_changes = {
+        key: value
+        for key, value in old_values.items()
+        if key not in {
+            "condition",
+            "location",
+        }
+    }
+
+    if general_changes:
+        record_asset_history(
+            clinic_id=asset.clinic_id,
+            asset_id=asset.id,
+            event_type=AssetHistoryEventType.UPDATED,
+            actor_user_id=actor.id,
+            event_metadata={
+                "old": {
+                    key: old_audit[key]
+                    for key in general_changes
+                },
+                "new": {
+                    key: new_audit[key]
+                    for key in general_changes
+                },
+            },
+        )
+
     create_audit_log(
         action=AuditAction.UPDATE,
         entity_type="Asset",
         entity_id=asset.id,
-        user_id=actor_user_id,
-        description=(
-            f"Asset '{asset.asset_tag}' updated"
-        ),
+        user_id=actor.id,
+        description=f"Asset '{asset.asset_tag}' updated",
         old_value=old_audit,
         new_value=new_audit,
     )
 
     return asset
-
-
-# ============================================================================
-# RETIRE ASSET
-# ============================================================================
 
 
 @transactional
@@ -808,26 +714,17 @@ def retire_asset(
     actor_user_id: int,
     retirement_date: date | None = None,
 ) -> Asset:
-    """
-    Retire an asset.
+    clinic = _validate_clinic_for_write(clinic_id)
 
-    A retired asset:
-    - has RETIRED status
-    - is inactive
-    - receives a retirement date
-    """
-
-    _validate_clinic_for_write(
-        clinic_id
-    )
-
-    actor_user_id = _validate_actor_user_id(
-        actor_user_id
+    actor = _validate_actor_user(
+        actor_user_id=actor_user_id,
+        clinic_id=clinic.id,
     )
 
     asset = _get_asset(
         asset_id=asset_id,
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
+        for_update=True,
     )
 
     if asset.status == AssetStatus.RETIRED:
@@ -840,67 +737,81 @@ def retire_asset(
             f"Asset {asset.id} has already been disposed"
         )
 
+    if asset.assigned_to_id is not None:
+        raise ConflictError(
+            "Assigned assets must be returned before retirement"
+        )
+
+    if asset.maintenance_status in (
+        MaintenanceStatus.SCHEDULED,
+        MaintenanceStatus.DUE,
+        MaintenanceStatus.IN_PROGRESS,
+        MaintenanceStatus.OVERDUE,
+    ):
+        raise ConflictError(
+            "Active maintenance must be resolved before retirement"
+        )
+
     retirement_date = (
-        retirement_date
-        or date.today()
+        retirement_date or date.today()
     )
 
-    _validate_dates(
+    _validate_purchase_dates(
         purchase_date=asset.purchase_date,
         warranty_expiry=asset.warranty_expiry,
-        last_maintenance_date=asset.last_maintenance_date,
-        next_maintenance_date=asset.next_maintenance_date,
-        retirement_date=retirement_date,
-        disposal_date=None,
     )
 
+    if (
+        asset.purchase_date is not None
+        and retirement_date < asset.purchase_date
+    ):
+        raise ValidationError(
+            "retirement_date cannot be before purchase_date"
+        )
+
     old_status = asset.status
-    old_is_active = asset.is_active
-    old_retirement_date = asset.retirement_date
 
     asset.status = AssetStatus.RETIRED
     asset.retirement_date = retirement_date
     asset.is_active = False
-    asset.updated_at = datetime.now(
-        timezone.utc
-    )
+    asset.updated_at = _utcnow()
 
     db.session.flush()
 
+    record_asset_history(
+        clinic_id=asset.clinic_id,
+        asset_id=asset.id,
+        event_type=AssetHistoryEventType.RETIRED,
+        actor_user_id=actor.id,
+        previous_status=old_status,
+        new_status=asset.status,
+        reason="Asset retired",
+        event_metadata={
+            "retirement_date": retirement_date.isoformat()
+        },
+    )
+
     create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
+        action=AuditAction.UPDATE,
         entity_type="Asset",
         entity_id=asset.id,
-        user_id=actor_user_id,
-        description=(
-            f"Asset '{asset.asset_tag}' retired"
-        ),
+        user_id=actor.id,
+        description=f"Asset '{asset.asset_tag}' retired",
         old_value={
-            "status": _audit_value(
-                old_status
-            ),
-            "is_active": old_is_active,
-            "retirement_date": _audit_value(
-                old_retirement_date
-            ),
+            "status": _audit_value(old_status),
+            "is_active": True,
+            "retirement_date": None,
         },
         new_value={
-            "status": _audit_value(
-                asset.status
-            ),
-            "is_active": asset.is_active,
-            "retirement_date": _audit_value(
-                asset.retirement_date
+            "status": _audit_value(asset.status),
+            "is_active": False,
+            "retirement_date": (
+                retirement_date.isoformat()
             ),
         },
     )
 
     return asset
-
-
-# ============================================================================
-# DISPOSE ASSET
-# ============================================================================
 
 
 @transactional
@@ -912,28 +823,17 @@ def dispose_asset(
     disposal_reason: str,
     disposal_date: date | None = None,
 ) -> Asset:
-    """
-    Dispose a previously retired asset.
+    clinic = _validate_clinic_for_write(clinic_id)
 
-    Disposal:
-    - requires retirement
-    - sets DISPOSED status
-    - marks asset inactive
-    - stores disposal reason/date
-    - clears staff assignment
-    """
-
-    _validate_clinic_for_write(
-        clinic_id
-    )
-
-    actor_user_id = _validate_actor_user_id(
-        actor_user_id
+    actor = _validate_actor_user(
+        actor_user_id=actor_user_id,
+        clinic_id=clinic.id,
     )
 
     asset = _get_asset(
         asset_id=asset_id,
-        clinic_id=clinic_id,
+        clinic_id=clinic.id,
+        for_update=True,
     )
 
     if asset.status == AssetStatus.DISPOSED:
@@ -946,83 +846,80 @@ def dispose_asset(
             "Asset must be retired before disposal"
         )
 
-    if not isinstance(disposal_reason, str):
+    disposal_reason = _normalize_optional_text(
+        disposal_reason
+    )
+
+    if disposal_reason is None:
         raise ValidationError(
             "disposal_reason is required"
         )
 
-    disposal_reason = disposal_reason.strip()
-
-    if not disposal_reason:
-        raise ValidationError(
-            "disposal_reason is required"
+    if asset.assigned_to_id is not None:
+        raise ConflictError(
+            "Assigned assets must be returned before disposal"
         )
 
-    if len(disposal_reason) > 500:
-        raise ValidationError(
-            "disposal_reason must not exceed 500 characters"
+    if asset.maintenance_status in (
+        MaintenanceStatus.SCHEDULED,
+        MaintenanceStatus.DUE,
+        MaintenanceStatus.IN_PROGRESS,
+        MaintenanceStatus.OVERDUE,
+    ):
+        raise ConflictError(
+            "Active maintenance must be resolved before disposal"
         )
 
     disposal_date = (
-        disposal_date
-        or date.today()
+        disposal_date or date.today()
     )
 
-    _validate_dates(
-        purchase_date=asset.purchase_date,
-        warranty_expiry=asset.warranty_expiry,
-        last_maintenance_date=asset.last_maintenance_date,
-        next_maintenance_date=asset.next_maintenance_date,
-        retirement_date=asset.retirement_date,
-        disposal_date=disposal_date,
-    )
+    if disposal_date < asset.retirement_date:
+        raise ValidationError(
+            "disposal_date cannot be before retirement_date"
+        )
 
     old_status = asset.status
-    old_is_active = asset.is_active
-    old_disposal_date = asset.disposal_date
-    old_disposal_reason = asset.disposal_reason
-    old_assigned_to_id = asset.assigned_to_id
 
     asset.status = AssetStatus.DISPOSED
     asset.disposal_date = disposal_date
     asset.disposal_reason = disposal_reason
     asset.is_active = False
-    asset.assigned_to_id = None
-    asset.updated_at = datetime.now(
-        timezone.utc
-    )
+    asset.updated_at = _utcnow()
 
     db.session.flush()
 
-    create_audit_log(
-        action=AuditAction.STATUS_CHANGE,
-        entity_type="Asset",
-        entity_id=asset.id,
-        user_id=actor_user_id,
-        description=(
-            f"Asset '{asset.asset_tag}' disposed"
-        ),
-        old_value={
-            "status": _audit_value(
-                old_status
-            ),
-            "is_active": old_is_active,
-            "disposal_date": _audit_value(
-                old_disposal_date
-            ),
-            "disposal_reason": old_disposal_reason,
-            "assigned_to_id": old_assigned_to_id,
-        },
-        new_value={
-            "status": _audit_value(
-                asset.status
-            ),
-            "is_active": asset.is_active,
-            "disposal_date": _audit_value(
-                asset.disposal_date
-            ),
-            "disposal_reason": asset.disposal_reason,
-            "assigned_to_id": asset.assigned_to_id,
+    record_asset_history(
+        clinic_id=asset.clinic_id,
+        asset_id=asset.id,
+        event_type=AssetHistoryEventType.DISPOSED,
+        actor_user_id=actor.id,
+        previous_status=old_status,
+        new_status=asset.status,
+        reason=disposal_reason,
+        event_metadata={
+            "disposal_date": disposal_date.isoformat(),
         },
     )
+
+    create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="Asset",
+        entity_id=asset.id,
+        user_id=actor.id,
+        description=f"Asset '{asset.asset_tag}' disposed",
+        old_value={
+            "status": _audit_value(old_status),
+            "is_active": False,
+            "disposal_date": None,
+            "disposal_reason": None,
+        },
+        new_value={
+            "status": _audit_value(asset.status),
+            "is_active": False,
+            "disposal_date": disposal_date.isoformat(),
+            "disposal_reason": disposal_reason,
+        },
+    )
+
     return asset
