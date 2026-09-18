@@ -683,6 +683,19 @@ def edit_message(
     message.edited_at = _utcnow()
     message.updated_at = _utcnow()
 
+    create_outbox_event(
+        clinic_id=clinic_id,
+        event_type="message.updated",
+        payload={
+            "conversation_id": message.conversation_id,
+            "message_id": message.id,
+            "sender_id": message.sender_id,
+            "status": message.status.value,
+            "edited_at": message.edited_at.isoformat(),
+        },
+        message_id=message.id,
+    )
+
     create_audit_log(
         action=AuditAction.UPDATE,
         entity_type="Message",
@@ -741,6 +754,19 @@ def delete_message(
     message.status = MessageStatus.DELETED
     message.deleted_at = _utcnow()
     message.updated_at = _utcnow()
+
+    create_outbox_event(
+        clinic_id=clinic_id,
+        event_type="message.deleted",
+        payload={
+            "conversation_id": message.conversation_id,
+            "message_id": message.id,
+            "sender_id": message.sender_id,
+            "status": message.status.value,
+            "deleted_at": message.deleted_at.isoformat(),
+        },
+        message_id=message.id,
+    )
 
     create_audit_log(
         action=AuditAction.DELETE,

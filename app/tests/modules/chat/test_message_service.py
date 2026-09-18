@@ -118,6 +118,13 @@ def _update_chat_security_preference(
     db.session.flush()
 
 
+def _utc_iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def test_create_message(
     clinic,
     user,
@@ -1050,6 +1057,167 @@ def test_multiple_edits_increment_revision_number(
     assert revisions[1].previous_content == "Version two"
 
 
+def test_edit_message_creates_outbox_event(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Original content",
+    )
+
+    edited = edit_message(
+        message_id=message.id,
+        clinic_id=clinic.id,
+        user_id=user.id,
+        content="Updated content",
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == edited.id,
+            ChatOutbox.clinic_id == clinic.id,
+            ChatOutbox.event_type == "message.updated",
+        )
+    ).scalar_one_or_none()
+
+    assert event is not None
+    assert event.message_id == edited.id
+    assert event.clinic_id == clinic.id
+    assert event.status == "pending"
+    assert event.attempts == 0
+    assert event.processed_at is None
+    assert event.last_error is None
+    assert event.payload == {
+        "conversation_id": edited.conversation_id,
+        "message_id": edited.id,
+        "sender_id": edited.sender_id,
+        "status": MessageStatus.EDITED.value,
+        "edited_at": _utc_iso(edited.edited_at),
+    }
+
+
+def test_edit_message_outbox_payload_does_not_contain_content(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Original confidential content",
+    )
+
+    updated_content = "Updated confidential content"
+
+    edited = edit_message(
+        message_id=message.id,
+        clinic_id=clinic.id,
+        user_id=user.id,
+        content=updated_content,
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == edited.id,
+            ChatOutbox.clinic_id == clinic.id,
+            ChatOutbox.event_type == "message.updated",
+        )
+    ).scalar_one()
+
+    assert "content" not in event.payload
+    assert "previous_content" not in event.payload
+    assert updated_content not in str(event.payload)
+    assert "Original confidential content" not in str(event.payload)
+
+
+def test_edit_message_rolls_back_message_revision_and_outbox_when_outbox_fails(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+    monkeypatch,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Original content",
+    )
+
+    def fail_outbox(*args, **kwargs):
+        raise RuntimeError("Simulated outbox failure")
+
+    monkeypatch.setattr(
+        "app.modules.chat.services.message_service.create_outbox_event",
+        fail_outbox,
+    )
+
+    with pytest.raises(RuntimeError):
+        edit_message(
+            message_id=message.id,
+            clinic_id=clinic.id,
+            user_id=user.id,
+            content="Updated content",
+        )
+
+    db.session.expire_all()
+
+    stored = db.session.get(
+        Message,
+        message.id,
+    )
+
+    assert stored is not None
+    assert stored.content == "Original content"
+    assert stored.status == MessageStatus.PENDING
+    assert stored.edited_at is None
+
+    revisions = db.session.execute(
+        db.select(MessageRevision).where(
+            MessageRevision.message_id == message.id,
+        )
+    ).scalars().all()
+
+    assert revisions == []
+
+    events = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == message.id,
+            ChatOutbox.event_type == "message.updated",
+        )
+    ).scalars().all()
+
+    assert events == []
+
+
 def test_edit_message_rejects_empty_content(
     clinic,
     user,
@@ -1223,6 +1391,154 @@ def test_delete_message(
     assert deleted.id == message.id
     assert deleted.status == MessageStatus.DELETED
     assert deleted.deleted_at is not None
+
+
+def test_delete_message_creates_outbox_event(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Message to delete",
+    )
+
+    deleted = delete_message(
+        message_id=message.id,
+        clinic_id=clinic.id,
+        user_id=user.id,
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == deleted.id,
+            ChatOutbox.clinic_id == clinic.id,
+            ChatOutbox.event_type == "message.deleted",
+        )
+    ).scalar_one_or_none()
+
+    assert event is not None
+    assert event.message_id == deleted.id
+    assert event.clinic_id == clinic.id
+    assert event.status == "pending"
+    assert event.attempts == 0
+    assert event.processed_at is None
+    assert event.last_error is None
+    assert event.payload == {
+        "conversation_id": deleted.conversation_id,
+        "message_id": deleted.id,
+        "sender_id": deleted.sender_id,
+        "status": MessageStatus.DELETED.value,
+        "deleted_at": _utc_iso(deleted.deleted_at),
+    }
+
+
+def test_delete_message_outbox_payload_does_not_contain_content(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    content = "Confidential message to delete"
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content=content,
+    )
+
+    deleted = delete_message(
+        message_id=message.id,
+        clinic_id=clinic.id,
+        user_id=user.id,
+    )
+
+    event = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == deleted.id,
+            ChatOutbox.clinic_id == clinic.id,
+            ChatOutbox.event_type == "message.deleted",
+        )
+    ).scalar_one()
+
+    assert "content" not in event.payload
+    assert content not in str(event.payload)
+
+
+def test_delete_message_rolls_back_message_and_outbox_when_outbox_fails(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+    monkeypatch,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Message to preserve",
+    )
+
+    def fail_outbox(*args, **kwargs):
+        raise RuntimeError("Simulated outbox failure")
+
+    monkeypatch.setattr(
+        "app.modules.chat.services.message_service.create_outbox_event",
+        fail_outbox,
+    )
+
+    with pytest.raises(RuntimeError):
+        delete_message(
+            message_id=message.id,
+            clinic_id=clinic.id,
+            user_id=user.id,
+        )
+
+    db.session.expire_all()
+
+    stored = db.session.get(
+        Message,
+        message.id,
+    )
+
+    assert stored is not None
+    assert stored.content == "Message to preserve"
+    assert stored.status == MessageStatus.PENDING
+    assert stored.deleted_at is None
+
+    events = db.session.execute(
+        db.select(ChatOutbox).where(
+            ChatOutbox.message_id == message.id,
+            ChatOutbox.event_type == "message.deleted",
+        )
+    ).scalars().all()
+
+    assert events == []
 
 
 def test_delete_message_is_soft_delete(

@@ -85,7 +85,7 @@ from app.modules.ambulance.models.ambulance_model import (
     AmbulanceTrip,
 )
 
-# HIE (Health Information Exchange)
+# HIE
 from app.modules.hie.models.hie_model import (
     HIEIntegration,
     HIESubmission,

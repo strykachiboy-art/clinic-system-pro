@@ -44,42 +44,11 @@ def check_if_token_revoked(
 def init_extensions(app):
     global redis_client
 
-    # ------------------------------------------------------------------
-    # Flask-SQLAlchemy
-    # ------------------------------------------------------------------
-
     db.init_app(app)
-
-    # ------------------------------------------------------------------
-    # Flask-Migrate
-    # ------------------------------------------------------------------
-
-    migrate.init_app(
-        app,
-        db,
-    )
-
-    # ------------------------------------------------------------------
-    # JWT
-    # ------------------------------------------------------------------
-
+    migrate.init_app(app, db)
     jwt.init_app(app)
-
-    # ------------------------------------------------------------------
-    # CORS
-    # ------------------------------------------------------------------
-
     cors.init_app(app)
-
-    # ------------------------------------------------------------------
-    # Rate limiting
-    # ------------------------------------------------------------------
-
     limiter.init_app(app)
-
-    # ------------------------------------------------------------------
-    # Redis
-    # ------------------------------------------------------------------
 
     redis_url = app.config["REDIS_URL"]
 
@@ -88,19 +57,17 @@ def init_extensions(app):
         decode_responses=True,
     )
 
-    # ------------------------------------------------------------------
-    # Socket.IO
-    # ------------------------------------------------------------------
+    socketio_options = {
+        "cors_allowed_origins": "*",
+    }
+
+    if not app.config.get("TESTING", False):
+        socketio_options["message_queue"] = redis_url
 
     socketio.init_app(
         app,
-        cors_allowed_origins="*",
-        message_queue=redis_url,
+        **socketio_options,
     )
-
-    # ------------------------------------------------------------------
-    # Celery
-    # ------------------------------------------------------------------
 
     celery.conf.update(
         broker_url=app.config.get(
@@ -119,10 +86,7 @@ def init_extensions(app):
             },
             "mark-overdue-invoices-daily": {
                 "task": "mark_overdue_invoices",
-                "schedule": crontab(
-                    hour=0,
-                    minute=0,
-                ),
+                "schedule": 3600.0,
             },
             "reset-monthly-ai-usage": {
                 "task": "reset_monthly_ai_usage",

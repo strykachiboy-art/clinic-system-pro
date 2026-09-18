@@ -1861,3 +1861,51 @@ def no_audit(monkeypatch):
         "app.modules.chat.services.conversation_service.create_audit_log",
         lambda *args, **kwargs: None,
     )
+    
+import pytest
+from flask_jwt_extended import create_access_token
+
+from app.extensions import socketio
+
+
+@pytest.fixture()
+def chat_socket_client_for(app):
+    def _make(
+        user=None,
+        *,
+        token=None,
+        auth=None,
+        namespace="/chat",
+    ):
+        if auth is None:
+            if token is not None:
+                auth = {
+                    "access_token": token,
+                }
+
+            elif user is not None:
+                claim_role = user.role
+
+                if hasattr(claim_role, "value"):
+                    claim_role = claim_role.value
+
+                with app.test_request_context():
+                    token = create_access_token(
+                        identity=str(user.id),
+                        additional_claims={
+                            "role": claim_role,
+                            "token_version": user.token_version,
+                        },
+                    )
+
+                auth = {
+                    "access_token": token,
+                }
+
+        return socketio.test_client(
+            app,
+            namespace=namespace,
+            auth=auth,
+        )
+
+    return _make

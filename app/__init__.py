@@ -27,9 +27,6 @@ def create_app(config_name=None):
     )
 
     init_extensions(app)
-
-    # Import all registered models so SQLAlchemy
-    # knows about them before migrations/table creation.
     with app.app_context():
         from app import models_registry  # noqa: F401
 
