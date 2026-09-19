@@ -1950,3 +1950,420 @@ def chat_socket_client_for(app):
         )
 
     return _make
+
+
+
+# ============================================================================
+# DASHBOARD SUPPORT FIXTURES
+# ============================================================================
+
+
+@pytest.fixture()
+def make_inventory_item(db):
+    from app.core.enums.inventory_enums import InventoryCategory
+    from app.modules.inventory.models.inventory_model import InventoryItem
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        name=None,
+        category=InventoryCategory.MEDICAL_SUPPLY,
+        sku=None,
+        barcode=None,
+        unit="pcs",
+        quantity_on_hand=100,
+        reorder_level=10,
+        is_active=True,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if name is None:
+            name = f"Test Inventory Item {counter['n']}"
+
+        if sku is None:
+            sku = f"SKU-{counter['n']:06d}"
+
+        if barcode is None:
+            barcode = f"BAR-{counter['n']:06d}"
+
+        item = InventoryItem(
+            clinic_id=clinic.id,
+            name=name,
+            category=category,
+            sku=sku,
+            barcode=barcode,
+            unit=unit,
+            quantity_on_hand=quantity_on_hand,
+            reorder_level=reorder_level,
+            is_active=is_active,
+            **overrides,
+        )
+
+        db.session.add(item)
+        db.session.flush()
+
+        return item
+
+    return _make
+
+
+@pytest.fixture()
+def make_invoice(db):
+    from decimal import Decimal
+
+    from app.core.enums.billing_enums import InvoiceStatus
+    from app.modules.billing.models.billing_model import Invoice
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        patient,
+        appointment=None,
+        invoice_number=None,
+        total_amount=Decimal("100.00"),
+        amount_paid=Decimal("0.00"),
+        status=InvoiceStatus.ISSUED,
+        due_date=None,
+        is_insurance_claim=False,
+        insurance_provider=None,
+        created_at=None,
+        updated_at=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if invoice_number is None:
+            invoice_number = f"INV-{counter['n']:06d}"
+
+        invoice = Invoice(
+            clinic_id=clinic.id,
+            patient_id=patient.id,
+            appointment_id=(
+                appointment.id
+                if appointment is not None
+                else None
+            ),
+            invoice_number=invoice_number,
+            total_amount=total_amount,
+            amount_paid=amount_paid,
+            status=status,
+            due_date=due_date,
+            is_insurance_claim=is_insurance_claim,
+            insurance_provider=insurance_provider,
+            **overrides,
+        )
+
+        if created_at is not None:
+            invoice.created_at = created_at
+
+        if updated_at is not None:
+            invoice.updated_at = updated_at
+
+        db.session.add(invoice)
+        db.session.flush()
+
+        return invoice
+
+    return _make
+
+
+@pytest.fixture()
+def make_payment(db):
+    from decimal import Decimal
+
+    from app.core.enums.billing_enums import (
+        PaymentMethod,
+        PaymentStatus,
+    )
+    from app.modules.billing.models.billing_model import Payment
+
+    counter = {"n": 0}
+
+    def _make(
+        invoice,
+        amount=Decimal("25.00"),
+        method=PaymentMethod.CASH,
+        status=PaymentStatus.SUCCESSFUL,
+        gateway=None,
+        reference=None,
+        gateway_transaction_id=None,
+        failure_reason=None,
+        created_at=None,
+        updated_at=None,
+        paid_at=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if reference is None:
+            reference = f"PAY-{counter['n']:06d}"
+
+        payment = Payment(
+            invoice_id=invoice.id,
+            amount=amount,
+            method=method,
+            status=status,
+            gateway=gateway,
+            reference=reference,
+            gateway_transaction_id=gateway_transaction_id,
+            failure_reason=failure_reason,
+            paid_at=paid_at,
+            **overrides,
+        )
+
+        if created_at is not None:
+            payment.created_at = created_at
+
+        if updated_at is not None:
+            payment.updated_at = updated_at
+
+        db.session.add(payment)
+        db.session.flush()
+
+        return payment
+
+    return _make
+
+
+@pytest.fixture()
+def make_ambulance_vehicle(db):
+    from app.core.enums.ambulance_enums import (
+        EquipmentLevel,
+        VehicleStatus,
+    )
+    from app.modules.ambulance.models.ambulance_model import AmbulanceVehicle
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        plate_number=None,
+        equipment_level=EquipmentLevel.BLS,
+        capacity=1,
+        status=VehicleStatus.AVAILABLE,
+        last_service_date=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        if plate_number is None:
+            plate_number = f"AMB-{counter['n']:04d}"
+
+        vehicle = AmbulanceVehicle(
+            clinic_id=clinic.id,
+            plate_number=plate_number,
+            equipment_level=equipment_level,
+            capacity=capacity,
+            status=status,
+            last_service_date=last_service_date,
+            **overrides,
+        )
+
+        db.session.add(vehicle)
+        db.session.flush()
+
+        return vehicle
+
+    return _make
+
+
+@pytest.fixture()
+def make_ambulance_trip(db):
+    from app.core.enums.ambulance_enums import (
+        TripStatus,
+        TripType,
+    )
+    from app.modules.ambulance.models.ambulance_model import AmbulanceTrip
+
+    def _make(
+        clinic,
+        trip_type=TripType.NON_EMERGENCY,
+        status=TripStatus.REQUESTED,
+        vehicle=None,
+        patient=None,
+        driver=None,
+        paramedic=None,
+        admission=None,
+        invoice=None,
+        pickup_address=None,
+        pickup_lat=None,
+        pickup_lng=None,
+        destination_address=None,
+        destination_lat=None,
+        destination_lng=None,
+        created_at=None,
+        updated_at=None,
+        requested_at=None,
+        dispatched_at=None,
+        pickup_at=None,
+        completed_at=None,
+        cancelled_at=None,
+        cancellation_reason=None,
+        notes=None,
+        **overrides,
+    ):
+        trip = AmbulanceTrip(
+            clinic_id=clinic.id,
+            vehicle_id=(
+                vehicle.id
+                if vehicle is not None
+                else None
+            ),
+            patient_id=(
+                patient.id
+                if patient is not None
+                else None
+            ),
+            driver_id=(
+                driver.id
+                if driver is not None
+                else None
+            ),
+            paramedic_id=(
+                paramedic.id
+                if paramedic is not None
+                else None
+            ),
+            admission_id=(
+                admission.id
+                if admission is not None
+                else None
+            ),
+            invoice_id=(
+                invoice.id
+                if invoice is not None
+                else None
+            ),
+            trip_type=trip_type,
+            status=status,
+            pickup_address=pickup_address,
+            pickup_lat=pickup_lat,
+            pickup_lng=pickup_lng,
+            destination_address=destination_address,
+            destination_lat=destination_lat,
+            destination_lng=destination_lng,
+            cancellation_reason=cancellation_reason,
+            notes=notes,
+            **overrides,
+        )
+
+        if created_at is not None:
+            trip.created_at = created_at
+
+        if updated_at is not None:
+            trip.updated_at = updated_at
+
+        if requested_at is not None:
+            trip.requested_at = requested_at
+
+        if dispatched_at is not None:
+            trip.dispatched_at = dispatched_at
+
+        if pickup_at is not None:
+            trip.pickup_at = pickup_at
+
+        if completed_at is not None:
+            trip.completed_at = completed_at
+
+        if cancelled_at is not None:
+            trip.cancelled_at = cancelled_at
+
+        db.session.add(trip)
+        db.session.flush()
+
+        return trip
+
+    return _make
+
+
+@pytest.fixture()
+def make_ai_log(db):
+    from decimal import Decimal
+
+    from app.core.enums.ai_enums import (
+        AIFeature,
+        AIApprovalStatus,
+        AIRiskLevel,
+    )
+    from app.modules.ai.models.ai_model import AILog
+
+    counter = {"n": 0}
+
+    def _make(
+        clinic,
+        patient=None,
+        user=None,
+        feature_used=AIFeature.DRUG_INTERACTION_CHECK,
+        risk_level=AIRiskLevel.LOW,
+        model="test-model",
+        model_version="test-v1",
+        input_context_version="v1",
+        generated_by_system=True,
+        input_data=None,
+        output_data=None,
+        approval_status=AIApprovalStatus.PENDING,
+        credits_used=1,
+        input_tokens=10,
+        output_tokens=20,
+        total_tokens=30,
+        estimated_cost=Decimal("0.010000"),
+        cost_currency="USD",
+        created_at=None,
+        updated_at=None,
+        **overrides,
+    ):
+        counter["n"] += 1
+
+        log = AILog(
+            clinic_id=clinic.id,
+            patient_id=(
+                patient.id
+                if patient is not None
+                else None
+            ),
+            user_id=(
+                user.id
+                if user is not None
+                else None
+            ),
+            feature_used=feature_used,
+            risk_level=risk_level,
+            model=model,
+            model_version=model_version,
+            input_context_version=input_context_version,
+            generated_by_system=generated_by_system,
+            input_data=(
+                {}
+                if input_data is None
+                else input_data
+            ),
+            output_data=(
+                {}
+                if output_data is None
+                else output_data
+            ),
+            approval_status=approval_status,
+            credits_used=credits_used,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            estimated_cost=estimated_cost,
+            cost_currency=cost_currency,
+            **overrides,
+        )
+
+        if created_at is not None:
+            log.created_at = created_at
+
+        if updated_at is not None:
+            log.updated_at = updated_at
+
+        db.session.add(log)
+        db.session.flush()
+
+        return log
+
+    return _make

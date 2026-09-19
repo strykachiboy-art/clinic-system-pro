@@ -256,6 +256,9 @@ def build_chat_summary(
                 MessageReadReceipt.id,
             ),
         )
+        .select_from(
+            MessageReadReceipt,
+        )
         .join(
             Message,
             Message.id == MessageReadReceipt.message_id,
@@ -288,6 +291,9 @@ def build_chat_summary(
                 )
             )
         )
+        .select_from(
+            MessageReadReceipt,
+        )
         .join(
             Message,
             Message.id == MessageReadReceipt.message_id,
@@ -318,6 +324,9 @@ def build_chat_summary(
                 MessageMention.id,
             ),
         )
+        .select_from(
+            MessageMention,
+        )
         .join(
             Message,
             Message.id == MessageMention.message_id,
@@ -344,6 +353,9 @@ def build_chat_summary(
             db.func.count(
                 Message.id,
             ),
+        )
+        .select_from(
+            Message,
         )
         .where(
             Message.clinic_id == clinic_id,
@@ -373,6 +385,9 @@ def build_chat_summary(
             db.func.count(
                 Message.id,
             ),
+        )
+        .select_from(
+            Message,
         )
         .where(
             Message.clinic_id == clinic_id,
