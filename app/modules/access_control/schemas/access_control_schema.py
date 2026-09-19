@@ -36,6 +36,22 @@ class AccessControlStatusUpdateSchema(BaseModel):
     )
 
 
+class AccessControlClinicTransferSchema(BaseModel):
+    destination_clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
+    reason: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
 class AccessControlUserResponseSchema(BaseModel):
     id: int = Field(
         ...,
@@ -70,6 +86,23 @@ class AccessControlStatusChangeResponseSchema(BaseModel):
     user: AccessControlUserResponseSchema
     previous_status: bool
     new_status: bool
+    reason: str | None = None
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
+class AccessControlClinicTransferResponseSchema(BaseModel):
+    user: AccessControlUserResponseSchema
+    previous_clinic_id: int | None = Field(
+        default=None,
+        gt=0,
+    )
+    new_clinic_id: int = Field(
+        ...,
+        gt=0,
+    )
     reason: str | None = None
 
     model_config = ConfigDict(

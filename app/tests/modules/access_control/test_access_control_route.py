@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import ceil
+
 from unittest.mock import Mock
 
 import pytest
@@ -14,6 +16,7 @@ from app.modules.access_control.routes import (
     access_control_routes,
 )
 from app.modules.access_control.schemas.access_control_schema import (
+    AccessControlClinicTransferResponseSchema,
     AccessControlRoleChangeResponseSchema,
     AccessControlStatusChangeResponseSchema,
     AccessControlUserResponseSchema,
@@ -53,6 +56,14 @@ def valid_role_payload():
 def valid_status_payload():
     return {
         "is_active": False,
+    }
+
+
+def valid_clinic_transfer_payload(
+    clinic_id: int = 2,
+):
+    return {
+        "destination_clinic_id": clinic_id,
     }
 
 
@@ -114,6 +125,19 @@ class TestAccessControlRouteRegistration:
             "/access-control/users/<int:user_id>/status"
         )
 
+    def test_transfer_clinic_route_is_registered(
+        self,
+        app,
+    ):
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        )
+
+        assert path.endswith(
+            "/access-control/users/<int:user_id>/clinic"
+        )
+
     @pytest.mark.parametrize(
         "endpoint,method",
         [
@@ -131,6 +155,10 @@ class TestAccessControlRouteRegistration:
             ),
             (
                 "access_control.change_user_status_route",
+                "PATCH",
+            ),
+            (
+                "access_control.transfer_user_clinic_route",
                 "PATCH",
             ),
         ],
@@ -184,6 +212,8 @@ class TestCurrentUserResolution:
             "abc",
             "0",
             "-1",
+            True,
+            False,
         ],
     )
     def test_get_current_user_rejects_invalid_identity(
@@ -337,6 +367,42 @@ class TestAccessControlSerialization:
         assert result["previous_status"] is True
         assert result["new_status"] is False
         assert result["reason"] == "Suspension"
+        assert result["user"]["id"] == target.id
+
+    def test_serializes_clinic_transfer_response(
+        self,
+        app,
+        user,
+        make_user,
+        clinic,
+        make_clinic,
+    ):
+        destination = make_clinic()
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="serialize-transfer@test.com",
+        )
+
+        payload = AccessControlClinicTransferResponseSchema(
+            user=AccessControlUserResponseSchema.model_validate(
+                target,
+                from_attributes=True,
+            ),
+            previous_clinic_id=clinic.id,
+            new_clinic_id=destination.id,
+            reason="Clinic reassignment",
+        )
+
+        result = access_control_routes._serialize(
+            AccessControlClinicTransferResponseSchema,
+            payload,
+        )
+
+        assert result["previous_clinic_id"] == clinic.id
+        assert result["new_clinic_id"] == destination.id
+        assert result["reason"] == "Clinic reassignment"
         assert result["user"]["id"] == target.id
 
 
@@ -1478,8 +1544,6 @@ class TestChangeUserStatusRoute:
 
         assert response.status_code == 200
 
-        result = result
-
         result.assert_called_once_with(
             actor_id=super_admin.id,
             user_id=target.id,
@@ -1778,4 +1842,645 @@ class TestChangeUserStatusRoute:
         assert body["success"] is False
         assert body["error"] == (
             "User already has the requested account status"
+        )
+
+
+# ============================================================================
+# TRANSFER USER CLINIC
+# ============================================================================
+
+
+class TestTransferUserClinicRoute:
+    def test_requires_authentication(
+        self,
+        app,
+        client,
+    ):
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            "1",
+        )
+
+        response = client.patch(
+            path,
+            json=valid_clinic_transfer_payload(),
+        )
+
+        assert response.status_code == 401
+
+    def test_admin_is_rejected_by_route_authorization(
+        self,
+        app,
+        client,
+        user,
+        auth_headers_for,
+    ):
+        user.role = Role.ADMIN
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(user.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(user),
+            json=valid_clinic_transfer_payload(),
+        )
+
+        assert response.status_code == 403
+
+    def test_non_admin_user_is_rejected_by_route_authorization(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+    ):
+        patient = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="transfer-route-patient@test.com",
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(patient.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(patient),
+            json=valid_clinic_transfer_payload(),
+        )
+
+        assert response.status_code == 403
+
+    def test_super_admin_can_transfer_user_between_clinics(
+        self,
+        app,
+        client,
+        make_user,
+        make_clinic,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-route-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-route-target@test.com",
+        )
+
+        result = Mock(
+            return_value={
+                "user": AccessControlUserResponseSchema.model_validate(
+                    target,
+                    from_attributes=True,
+                ),
+                "previous_clinic_id": clinic.id,
+                "new_clinic_id": destination.id,
+                "reason": "Clinic reassignment",
+            },
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            result,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": destination.id,
+                "reason": "Clinic reassignment",
+            },
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"]["previous_clinic_id"] == clinic.id
+        assert body["data"]["new_clinic_id"] == destination.id
+        assert body["data"]["reason"] == (
+            "Clinic reassignment"
+        )
+        assert body["data"]["user"]["id"] == target.id
+
+        result.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+            reason="Clinic reassignment",
+        )
+
+    def test_transfer_allows_missing_reason(
+        self,
+        app,
+        client,
+        make_user,
+        make_clinic,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-no-reason-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-no-reason-target@test.com",
+        )
+
+        result = Mock(
+            return_value={
+                "user": AccessControlUserResponseSchema.model_validate(
+                    target,
+                    from_attributes=True,
+                ),
+                "previous_clinic_id": clinic.id,
+                "new_clinic_id": destination.id,
+                "reason": None,
+            },
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            result,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": destination.id,
+            },
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"]["reason"] is None
+
+        result.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+            reason=None,
+        )
+
+    def test_transfer_rejects_missing_body(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-missing-body-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-missing-body-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation error"
+        assert "details" in body
+
+        service.assert_not_called()
+
+    def test_transfer_rejects_missing_destination_clinic_id(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-missing-clinic-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-missing-clinic-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={},
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation error"
+        assert "details" in body
+
+        service.assert_not_called()
+
+    def test_transfer_rejects_invalid_destination_clinic_id(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-invalid-clinic-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-invalid-clinic-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": 0,
+            },
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation error"
+        assert "details" in body
+
+        service.assert_not_called()
+
+    def test_transfer_rejects_unknown_fields(
+        self,
+        app,
+        client,
+        make_user,
+        make_clinic,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-unknown-field-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-unknown-field-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": destination.id,
+                "unexpected": "value",
+            },
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation error"
+        assert "details" in body
+
+        service.assert_not_called()
+
+    def test_transfer_rejects_non_object_json(
+        self,
+        app,
+        client,
+        make_user,
+        make_clinic,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-non-object-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-non-object-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json=[
+                destination.id,
+            ],
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "JSON body must be an object"
+
+        service.assert_not_called()
+
+    def test_transfer_handles_conflict_error(
+        self,
+        app,
+        client,
+        make_user,
+        make_clinic,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-conflict-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-conflict-target@test.com",
+        )
+
+        service = Mock(
+            side_effect=ConflictError(
+                "User already belongs to the destination clinic",
+            ),
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": destination.id,
+            },
+        )
+
+        assert response.status_code == 409
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "User already belongs to the destination clinic"
+        )
+
+        service.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+            reason=None,
+        )
+
+    def test_transfer_handles_not_found_error(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-not-found-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-not-found-target@test.com",
+        )
+
+        service = Mock(
+            side_effect=NotFoundError(
+                "Clinic 999999 not found",
+            ),
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "transfer_user_clinic",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.transfer_user_clinic_route",
+        ).replace(
+            "<int:user_id>",
+            str(target.id),
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "destination_clinic_id": 999999,
+            },
+        )
+
+        assert response.status_code == 404
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "Clinic 999999 not found"
+        )
+
+        service.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=target.id,
+            destination_clinic_id=999999,
+            reason=None,
         )

@@ -6,6 +6,7 @@ import pytest
 
 from app.core.auth.user.models.user_model import User
 from app.core.enums.audit_enums import AuditAction
+from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
@@ -2103,3 +2104,893 @@ class TestChangeUserStatus:
         )
 
         assert result.reason is None
+
+
+# ============================================================================
+# CLINIC TRANSFER VALIDATION
+# ============================================================================
+
+
+class TestValidateClinicTransferPermissions:
+    def test_admin_cannot_transfer_user_between_clinics(
+        self,
+        app,
+        user,
+        make_user,
+        clinic,
+    ):
+        user.role = Role.ADMIN
+        user.clinic_id = clinic.id
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-admin-target@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Only a super administrator can transfer users "
+                "between clinics"
+            ),
+        ):
+            access_control_service._validate_clinic_transfer_permissions(
+                user,
+                target,
+            )
+
+    def test_super_admin_cannot_transfer_self(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-self@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Super administrators cannot transfer their own account"
+            ),
+        ):
+            access_control_service._validate_clinic_transfer_permissions(
+                actor,
+                actor,
+            )
+
+    def test_super_admin_cannot_transfer_another_super_admin(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-super-actor@test.com",
+        )
+
+        target = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-super-target@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "A super administrator cannot transfer another "
+                "super administrator"
+            ),
+        ):
+            access_control_service._validate_clinic_transfer_permissions(
+                actor,
+                target,
+            )
+
+    def test_super_admin_cannot_transfer_patient_account(
+        self,
+        app,
+        make_user,
+        make_patient,
+        clinic,
+        db_session,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-patient-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="transfer-patient-target@test.com",
+        )
+
+        patient = make_patient(
+            clinic,
+            patient_number="TRANSFER-PATIENT-001",
+        )
+
+        patient.user_id = target.id
+        db_session.flush()
+
+        assert target.patient is not None
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Patient accounts cannot be transferred "
+                "through access control"
+            ),
+        ):
+            access_control_service._validate_clinic_transfer_permissions(
+                actor,
+                target,
+            )
+
+    def test_super_admin_can_transfer_regular_user(
+        self,
+        app,
+        make_user,
+        clinic,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-allowed-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-allowed-target@test.com",
+        )
+
+        access_control_service._validate_clinic_transfer_permissions(
+            actor,
+            target,
+        )
+
+
+# ============================================================================
+# ACTIVE DESTINATION CLINIC
+# ============================================================================
+
+
+class TestGetActiveClinic:
+    def test_returns_active_clinic(
+        self,
+        app,
+        clinic,
+    ):
+        result = access_control_service._get_active_clinic(
+            clinic.id
+        )
+
+        assert result.id == clinic.id
+        assert result.status is ClinicStatus.ACTIVE
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            0,
+            -1,
+            None,
+            True,
+            False,
+            "1",
+        ],
+    )
+    def test_rejects_invalid_destination_clinic_id(
+        self,
+        app,
+        clinic_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match=(
+                "Destination clinic ID must be a positive integer"
+            ),
+        ):
+            access_control_service._get_active_clinic(
+                clinic_id
+            )
+
+    def test_raises_not_found_for_missing_destination_clinic(
+        self,
+        app,
+    ):
+        with pytest.raises(
+            NotFoundError,
+            match=r"Clinic 999999 not found",
+        ):
+            access_control_service._get_active_clinic(
+                999999
+            )
+
+    def test_rejects_suspended_destination_clinic(
+        self,
+        app,
+        suspended_clinic,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="Destination clinic is not active",
+        ):
+            access_control_service._get_active_clinic(
+                suspended_clinic.id
+            )
+
+
+# ============================================================================
+# TRANSFER USER CLINIC
+# ============================================================================
+
+
+class TestTransferUserClinic:
+    def test_super_admin_transfers_regular_user(
+        self,
+        app,
+        make_user,
+        make_clinic,
+        clinic,
+        db_session,
+        monkeypatch,
+    ):
+        second_clinic = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-target@test.com",
+        )
+
+        original_version = target.token_version
+
+        audit = Mock()
+
+        monkeypatch.setattr(
+            access_control_service,
+            "create_audit_log",
+            audit,
+        )
+
+        result = access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=second_clinic.id,
+            reason="  Staff reassignment  ",
+        )
+
+        assert result.user.id == target.id
+        assert result.previous_clinic_id == clinic.id
+        assert result.new_clinic_id == second_clinic.id
+        assert result.reason == "Staff reassignment"
+
+        db_session.refresh(target)
+
+        assert target.clinic_id == second_clinic.id
+        assert target.token_version == (
+            original_version + 1
+        )
+
+        audit.assert_called_once()
+
+        call = audit.call_args.kwargs
+
+        assert call["action"] is AuditAction.UPDATE
+        assert call["entity_type"] == "User"
+        assert call["entity_id"] == target.id
+        assert call["user_id"] == actor.id
+
+        assert call["old_value"] == {
+            "clinic_id": clinic.id,
+            "staff_clinic_id": None,
+            "token_version": original_version,
+        }
+
+        assert call["new_value"] == {
+            "clinic_id": second_clinic.id,
+            "staff_clinic_id": None,
+            "token_version": original_version + 1,
+            "reason": "Staff reassignment",
+        }
+
+    def test_transfers_user_without_existing_clinic(
+        self,
+        app,
+        make_user,
+        make_clinic,
+        db_session,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-no-clinic-actor@test.com",
+        )
+
+        target = make_user(
+            None,
+            role=Role.DOCTOR,
+            email="transfer-no-clinic-target@test.com",
+        )
+
+        original_version = target.token_version
+
+        result = access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+        )
+
+        assert result.previous_clinic_id is None
+        assert result.new_clinic_id == destination.id
+        assert result.reason is None
+
+        db_session.refresh(target)
+
+        assert target.clinic_id == destination.id
+        assert target.token_version == (
+            original_version + 1
+        )
+
+    def test_transfers_staff_user_and_updates_staff_clinic(
+        self,
+        app,
+        make_user,
+        make_staff,
+        make_clinic,
+        clinic,
+        db_session,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="staff-transfer-actor@test.com",
+        )
+
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            user_overrides={
+                "email": "staff-transfer-target@test.com",
+            },
+        )
+
+        target = staff.user
+
+        original_version = target.token_version
+
+        result = access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+            reason="Doctor reassigned to new clinic",
+        )
+
+        assert result.user.id == target.id
+        assert result.previous_clinic_id == clinic.id
+        assert result.new_clinic_id == destination.id
+
+        db_session.refresh(target)
+        db_session.refresh(staff)
+
+        assert target.clinic_id == destination.id
+        assert staff.clinic_id == destination.id
+        assert target.token_version == (
+            original_version + 1
+        )
+
+    def test_rejects_admin_transfer(
+        self,
+        app,
+        user,
+        make_user,
+        make_clinic,
+        clinic,
+    ):
+        destination = make_clinic()
+
+        user.role = Role.ADMIN
+        user.clinic_id = clinic.id
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="admin-transfer-target@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Only a super administrator can transfer users "
+                "between clinics"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=user.id,
+                user_id=target.id,
+                destination_clinic_id=destination.id,
+            )
+
+    def test_rejects_self_transfer(
+        self,
+        app,
+        make_user,
+        make_clinic,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="self-transfer-actor@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Super administrators cannot transfer their own account"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=actor.id,
+                destination_clinic_id=destination.id,
+            )
+
+    def test_rejects_super_admin_target(
+        self,
+        app,
+        make_user,
+        make_clinic,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="protected-transfer-actor@test.com",
+        )
+
+        target = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="protected-transfer-target@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "A super administrator cannot transfer another "
+                "super administrator"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=destination.id,
+            )
+
+    def test_rejects_patient_account(
+        self,
+        app,
+        make_user,
+        make_patient,
+        make_clinic,
+        clinic,
+        db_session,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="patient-transfer-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="patient-transfer-target@test.com",
+        )
+
+        patient = make_patient(
+            clinic,
+            patient_number="PATIENT-TRANSFER-001",
+        )
+
+        patient.user_id = target.id
+        db_session.flush()
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Patient accounts cannot be transferred "
+                "through access control"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=destination.id,
+            )
+
+    def test_rejects_missing_destination_clinic(
+        self,
+        app,
+        make_user,
+        clinic,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="missing-destination-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="missing-destination-target@test.com",
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=r"Clinic 999999 not found",
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=999999,
+            )
+
+    def test_rejects_inactive_destination_clinic(
+        self,
+        app,
+        make_user,
+        suspended_clinic,
+        clinic,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="inactive-destination-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="inactive-destination-target@test.com",
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="Destination clinic is not active",
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=suspended_clinic.id,
+            )
+
+    def test_rejects_same_destination_clinic(
+        self,
+        app,
+        make_user,
+        clinic,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="same-destination-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="same-destination-target@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "User already belongs to the destination clinic"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=clinic.id,
+            )
+
+    @pytest.mark.parametrize(
+        "destination_clinic_id",
+        [
+            0,
+            -1,
+            None,
+            True,
+            False,
+            "1",
+        ],
+    )
+    def test_rejects_invalid_destination_clinic_id(
+        self,
+        app,
+        make_user,
+        clinic,
+        destination_clinic_id,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email=(
+                f"invalid-destination-actor-"
+                f"{str(destination_clinic_id)}@test.com"
+            ),
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email=(
+                f"invalid-destination-target-"
+                f"{str(destination_clinic_id)}@test.com"
+            ),
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match=(
+                "Destination clinic ID must be a positive integer"
+            ),
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=destination_clinic_id,
+            )
+
+    def test_rejects_missing_target_user(
+        self,
+        app,
+        make_user,
+        clinic,
+    ):
+        destination = clinic
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="missing-target-actor@test.com",
+        )
+
+        with pytest.raises(
+            NotFoundError,
+            match=r"User 999999 not found",
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=999999,
+                destination_clinic_id=destination.id,
+            )
+
+    def test_rejects_invalid_actor_id(
+        self,
+        app,
+        clinic,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="User ID must be a positive integer",
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=0,
+                user_id=1,
+                destination_clinic_id=clinic.id,
+            )
+
+    def test_transfer_without_reason(
+        self,
+        app,
+        make_user,
+        make_clinic,
+        clinic,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-no-reason-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-no-reason-target@test.com",
+        )
+
+        result = access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+        )
+
+        assert result.reason is None
+        assert result.previous_clinic_id == clinic.id
+        assert result.new_clinic_id == destination.id
+
+    def test_transfer_invalidates_existing_token_version(
+        self,
+        app,
+        make_user,
+        make_clinic,
+        clinic,
+        db_session,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-token-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.DOCTOR,
+            email="transfer-token-target@test.com",
+        )
+
+        original_version = target.token_version
+
+        access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+        )
+
+        db_session.refresh(target)
+
+        assert target.token_version == (
+            original_version + 1
+        )
+
+    def test_transfer_is_atomic_when_audit_log_fails(
+        self,
+        app,
+        make_user,
+        make_staff,
+        make_clinic,
+        clinic,
+        db_session,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-rollback-actor@test.com",
+        )
+
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            user_overrides={
+                "email": "transfer-rollback-target@test.com",
+            },
+        )
+
+        target = staff.user
+
+        original_clinic_id = target.clinic_id
+        original_staff_clinic_id = staff.clinic_id
+        original_version = target.token_version
+
+        db_session.commit()
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError(
+                "audit failure"
+            )
+
+        monkeypatch.setattr(
+            access_control_service,
+            "create_audit_log",
+            fail_audit,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="audit failure",
+        ):
+            access_control_service.transfer_user_clinic(
+                actor_id=actor.id,
+                user_id=target.id,
+                destination_clinic_id=destination.id,
+                reason="Rollback test",
+            )
+
+        db_session.refresh(target)
+        db_session.refresh(staff)
+
+        assert target.clinic_id == original_clinic_id
+        assert staff.clinic_id == original_staff_clinic_id
+        assert target.token_version == original_version
+
+    def test_transfer_audit_contains_staff_clinic_state(
+        self,
+        app,
+        make_user,
+        make_staff,
+        make_clinic,
+        clinic,
+        monkeypatch,
+    ):
+        destination = make_clinic()
+
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="transfer-audit-staff-actor@test.com",
+        )
+
+        staff = make_staff(
+            clinic,
+            role=Role.DOCTOR,
+            user_overrides={
+                "email": "transfer-audit-staff-target@test.com",
+            },
+        )
+
+        target = staff.user
+
+        original_version = target.token_version
+        audit = Mock()
+
+        monkeypatch.setattr(
+            access_control_service,
+            "create_audit_log",
+            audit,
+        )
+
+        access_control_service.transfer_user_clinic(
+            actor_id=actor.id,
+            user_id=target.id,
+            destination_clinic_id=destination.id,
+            reason="Cross-clinic reassignment",
+        )
+
+        audit.assert_called_once()
+
+        call = audit.call_args.kwargs
+
+        assert call["old_value"] == {
+            "clinic_id": clinic.id,
+            "staff_clinic_id": clinic.id,
+            "token_version": original_version,
+        }
+
+        assert call["new_value"] == {
+            "clinic_id": destination.id,
+            "staff_clinic_id": destination.id,
+            "token_version": original_version + 1,
+            "reason": "Cross-clinic reassignment",
+        }

@@ -12,6 +12,8 @@ from app.core.utils.decorators import role_required
 from app.extensions import db
 
 from app.modules.access_control.schemas.access_control_schema import (
+    AccessControlClinicTransferResponseSchema,
+    AccessControlClinicTransferSchema,
     AccessControlRoleChangeResponseSchema,
     AccessControlRoleUpdateSchema,
     AccessControlStatusChangeResponseSchema,
@@ -24,6 +26,7 @@ from app.modules.access_control.services.access_control_service import (
     change_user_status,
     get_access_control_user,
     list_access_control_users,
+    transfer_user_clinic,
 )
 
 
@@ -52,6 +55,14 @@ def _json_body() -> dict:
 
 def _get_current_user() -> User:
     identity = get_jwt_identity()
+
+    if (
+        isinstance(identity, bool)
+        or identity is None
+    ):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
 
     try:
         user_id = int(identity)
@@ -236,6 +247,39 @@ def change_user_status_route(
             "success": True,
             "data": _serialize(
                 AccessControlStatusChangeResponseSchema,
+                result,
+            ),
+        }
+    ), 200
+
+
+@access_control_bp.patch(
+    "/users/<int:user_id>/clinic"
+)
+@role_required(
+    Role.SUPER_ADMIN,
+)
+def transfer_user_clinic_route(
+    user_id: int,
+):
+    current_user = _get_current_user()
+
+    payload = AccessControlClinicTransferSchema.model_validate(
+        _json_body()
+    )
+
+    result = transfer_user_clinic(
+        actor_id=current_user.id,
+        user_id=user_id,
+        destination_clinic_id=payload.destination_clinic_id,
+        reason=payload.reason,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "data": _serialize(
+                AccessControlClinicTransferResponseSchema,
                 result,
             ),
         }

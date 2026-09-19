@@ -5,6 +5,7 @@ from typing import Any
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.auth.user.models.user_model import User
 from app.core.enums.audit_enums import AuditAction
+from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
@@ -14,11 +15,13 @@ from app.core.exceptions import (
 from app.core.utils.decorators import transactional
 from app.extensions import db
 from app.modules.access_control.schemas.access_control_schema import (
+    AccessControlClinicTransferResponseSchema,
     AccessControlRoleChangeResponseSchema,
     AccessControlStatusChangeResponseSchema,
     AccessControlUserListQuerySchema,
     AccessControlUserResponseSchema,
 )
+from app.modules.clinic.models.clinic_model import Clinic
 
 
 def _validate_positive_id(
@@ -170,6 +173,57 @@ def _validate_status_change_permissions(
         )
 
 
+def _validate_clinic_transfer_permissions(
+    actor: User,
+    target: User,
+) -> None:
+    if actor.role is not Role.SUPER_ADMIN:
+        raise ConflictError(
+            "Only a super administrator can transfer users between clinics"
+        )
+
+    if actor.id == target.id:
+        raise ConflictError(
+            "Super administrators cannot transfer their own account"
+        )
+
+    if target.role is Role.SUPER_ADMIN:
+        raise ConflictError(
+            "A super administrator cannot transfer another super administrator"
+        )
+
+    if target.patient is not None:
+        raise ConflictError(
+            "Patient accounts cannot be transferred through access control"
+        )
+
+
+def _get_active_clinic(
+    clinic_id: int,
+) -> Clinic:
+    _validate_positive_id(
+        clinic_id,
+        "Destination clinic ID",
+    )
+
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
+
+    if clinic is None:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
+
+    if clinic.status is not ClinicStatus.ACTIVE:
+        raise ValidationError(
+            "Destination clinic is not active"
+        )
+
+    return clinic
+
+
 def get_access_control_user(
     *,
     actor_id: int,
@@ -273,6 +327,8 @@ def change_user_role(
         else None
     )
 
+    previous_token_version = target.token_version
+
     target.role = new_role
     target.token_version += 1
 
@@ -292,7 +348,7 @@ def change_user_role(
         ),
         old_value={
             "role": previous_role.value,
-            "token_version": target.token_version - 1,
+            "token_version": previous_token_version,
         },
         new_value={
             "role": new_role.value,
@@ -349,6 +405,8 @@ def change_user_status(
         else None
     )
 
+    previous_token_version = target.token_version
+
     target.is_active = is_active
     target.token_version += 1
 
@@ -368,7 +426,7 @@ def change_user_status(
         ),
         old_value={
             "is_active": previous_status,
-            "token_version": target.token_version - 1,
+            "token_version": previous_token_version,
         },
         new_value={
             "is_active": is_active,
@@ -382,5 +440,92 @@ def change_user_status(
         user=_serialize_user(target),
         previous_status=previous_status,
         new_status=is_active,
+        reason=normalized_reason,
+    )
+
+
+@transactional
+def transfer_user_clinic(
+    *,
+    actor_id: int,
+    user_id: int,
+    destination_clinic_id: int,
+    reason: str | None = None,
+) -> AccessControlClinicTransferResponseSchema:
+    actor = _validate_actor(actor_id)
+    target = _get_user(user_id)
+
+    _validate_clinic_transfer_permissions(
+        actor,
+        target,
+    )
+
+    destination_clinic = _get_active_clinic(
+        destination_clinic_id,
+    )
+
+    previous_clinic_id = target.clinic_id
+
+    if previous_clinic_id == destination_clinic.id:
+        raise ConflictError(
+            "User already belongs to the destination clinic"
+        )
+
+    normalized_reason = (
+        reason.strip()
+        if reason is not None
+        else None
+    )
+
+    previous_token_version = target.token_version
+    previous_staff_clinic_id = (
+        target.staff.clinic_id
+        if target.staff is not None
+        else None
+    )
+
+    target.clinic_id = destination_clinic.id
+
+    if target.staff is not None:
+        target.staff.clinic_id = destination_clinic.id
+
+    target.token_version += 1
+
+    create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="User",
+        entity_id=target.id,
+        description=(
+            f"User clinic transferred from "
+            f"'{previous_clinic_id}' to "
+            f"'{destination_clinic.id}'"
+            + (
+                f": {normalized_reason}"
+                if normalized_reason
+                else ""
+            )
+        ),
+        old_value={
+            "clinic_id": previous_clinic_id,
+            "staff_clinic_id": previous_staff_clinic_id,
+            "token_version": previous_token_version,
+        },
+        new_value={
+            "clinic_id": target.clinic_id,
+            "staff_clinic_id": (
+                target.staff.clinic_id
+                if target.staff is not None
+                else None
+            ),
+            "token_version": target.token_version,
+            "reason": normalized_reason,
+        },
+        user_id=actor.id,
+    )
+
+    return AccessControlClinicTransferResponseSchema(
+        user=_serialize_user(target),
+        previous_clinic_id=previous_clinic_id,
+        new_clinic_id=destination_clinic.id,
         reason=normalized_reason,
     )
