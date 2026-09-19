@@ -336,6 +336,7 @@ def test_empty_dashboard_returns_zero_counts(
     overview = result.overview
 
     assert overview.appointments_today == 0
+    assert overview.missed_appointments_today == 0
     assert overview.scheduled_appointments_today == 0
     assert overview.confirmed_appointments_today == 0
     assert overview.active_ambulance_trips == 0
@@ -399,6 +400,7 @@ def test_default_period_uses_current_day(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 0
     assert result.overview.scheduled_appointments_today == 1
     assert result.overview.confirmed_appointments_today == 0
 
@@ -448,6 +450,24 @@ def test_explicit_period_filters_appointments(
         AppointmentStatus.CONFIRMED,
     )
 
+    _make_appointment(
+        db_session,
+        operations_actor.clinic,
+        patient,
+        staff,
+        inside_start + timedelta(hours=2),
+        AppointmentStatus.NO_SHOW,
+    )
+
+    _make_appointment(
+        db_session,
+        operations_actor.clinic,
+        patient,
+        staff,
+        outside_start + timedelta(hours=1),
+        AppointmentStatus.NO_SHOW,
+    )
+
     query = DashboardQuerySchema(
         date_from=target_date,
         date_to=target_date,
@@ -461,9 +481,17 @@ def test_explicit_period_filters_appointments(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 1
     assert result.overview.scheduled_appointments_today == 1
     assert result.overview.confirmed_appointments_today == 0
 
+    metrics = {
+        item.key: item
+        for item in result.metrics
+    }
+
+    assert metrics["missed_appointments"].value == 1
+    assert metrics["missed_appointments"].unit == "appointments"
 
 def test_single_sided_date_from_resolves_to_same_day(
     db_session,
@@ -510,6 +538,7 @@ def test_single_sided_date_from_resolves_to_same_day(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 0
 
 
 def test_single_sided_date_to_resolves_to_same_day(
@@ -557,6 +586,7 @@ def test_single_sided_date_to_resolves_to_same_day(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 0
     assert result.overview.confirmed_appointments_today == 1
 
 
@@ -617,6 +647,65 @@ def test_counts_supported_appointment_statuses(
         assert result.overview.confirmed_appointments_today == 1
 
 
+def test_counts_no_show_appointments_as_missed(
+    db_session,
+    operations_actor,
+    make_patient,
+    make_staff,
+    dashboard_helpers,
+):
+    patient = make_patient(
+        clinic=operations_actor.clinic,
+    )
+
+    staff = make_staff(
+        clinic=operations_actor.clinic,
+        role=Role.RECEPTIONIST,
+    )
+
+    today = _utcnow().date()
+
+    start = datetime.combine(
+        today,
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    ) + timedelta(hours=9)
+
+    _make_appointment(
+        db_session,
+        operations_actor.clinic,
+        patient,
+        staff,
+        start,
+        AppointmentStatus.NO_SHOW,
+    )
+
+    result = (
+        operations_dashboard_service.get_operations_dashboard(
+            actor=operations_actor,
+        )
+    )
+
+    assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 1
+    assert (
+        next(
+            metric
+            for metric in result.metrics
+            if metric.key == "missed_appointments"
+        ).value
+        == 1
+    )
+
+    metrics = {
+        item.key: item
+        for item in result.metrics
+    }
+
+    assert metrics["missed_appointments"].value == 1
+    assert metrics["missed_appointments"].unit == "appointments"
+
+
 def test_excludes_cancelled_appointments(
     db_session,
     operations_actor,
@@ -657,6 +746,7 @@ def test_excludes_cancelled_appointments(
     )
 
     assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 0
     assert result.overview.scheduled_appointments_today == 0
     assert result.overview.confirmed_appointments_today == 0
 
@@ -989,6 +1079,15 @@ def test_appointment_counts_are_clinic_scoped(
         AppointmentStatus.CONFIRMED,
     )
 
+    _make_appointment(
+        db_session,
+        other_clinic,
+        other_patient,
+        other_staff,
+        other_start + timedelta(hours=1),
+        AppointmentStatus.NO_SHOW,
+    )
+
     result = (
         operations_dashboard_service.get_operations_dashboard(
             actor=operations_actor,
@@ -996,6 +1095,8 @@ def test_appointment_counts_are_clinic_scoped(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 0
+    assert result.overview.missed_appointments_today == 0
     assert result.overview.confirmed_appointments_today == 1
 
 
@@ -1152,6 +1253,7 @@ def test_metrics_have_expected_keys(
 
     assert [metric.key for metric in result.metrics] == [
         "appointments",
+        "missed_appointments",
         "active_ambulance_trips",
         "available_ambulances",
         "maintenance_ambulances",
@@ -1175,6 +1277,7 @@ def test_metrics_have_expected_units(
     }
 
     assert metrics["appointments"].unit == "appointments"
+    assert metrics["missed_appointments"].unit == "appointments"
     assert metrics["active_ambulance_trips"].unit == "trips"
     assert metrics["available_ambulances"].unit == "vehicles"
     assert metrics["maintenance_ambulances"].unit == "vehicles"
@@ -1259,6 +1362,7 @@ def test_metrics_reflect_dashboard_counts(
     }
 
     assert metrics["appointments"].value == 1
+    assert metrics["missed_appointments"].value == 0
     assert metrics["active_ambulance_trips"].value == 1
     assert metrics["available_ambulances"].value == 1
     assert metrics["maintenance_ambulances"].value == 1
@@ -1579,6 +1683,15 @@ def test_combined_dashboard_summary(
         AppointmentStatus.CONFIRMED,
     )
 
+    _make_appointment(
+        db_session,
+        operations_actor.clinic,
+        patient,
+        staff,
+        appointment_start + timedelta(hours=4),
+        AppointmentStatus.NO_SHOW,
+    )
+
     _make_trip(
         db_session,
         operations_actor.clinic,
@@ -1637,6 +1750,7 @@ def test_combined_dashboard_summary(
     )
 
     assert result.overview.appointments_today == 2
+    assert result.overview.missed_appointments_today == 1
     assert result.overview.scheduled_appointments_today == 1
     assert result.overview.confirmed_appointments_today == 1
     assert result.overview.active_ambulance_trips == 2
@@ -1649,6 +1763,7 @@ def test_combined_dashboard_summary(
     }
 
     assert metrics["appointments"].value == 2
+    assert metrics["missed_appointments"].value == 1
     assert metrics["active_ambulance_trips"].value == 2
     assert metrics["available_ambulances"].value == 1
     assert metrics["maintenance_ambulances"].value == 1
@@ -1682,6 +1797,11 @@ def test_service_preserves_zero_values_as_integers(
 
     assert isinstance(
         result.overview.appointments_today,
+        int,
+    )
+
+    assert isinstance(
+        result.overview.missed_appointments_today,
         int,
     )
 
@@ -1757,6 +1877,7 @@ def test_appointments_outside_end_boundary_are_excluded(
     )
 
     assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 0
 
 
 def test_operations_role_fallback_can_be_disabled(

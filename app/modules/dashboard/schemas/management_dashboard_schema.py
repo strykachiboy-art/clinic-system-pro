@@ -45,6 +45,11 @@ class ManagementDashboardOverviewSchema(BaseModel):
         ge=0,
     )
 
+    missed_appointments_today: int = Field(
+        ...,
+        ge=0,
+    )
+
     active_admissions: int = Field(
         ...,
         ge=0,

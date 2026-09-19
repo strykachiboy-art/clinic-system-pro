@@ -179,6 +179,23 @@ def get_management_dashboard(
         or 0
     )
 
+    missed_appointments_today = (
+        db.session.execute(
+            db.select(
+                db.func.count(
+                    Appointment.id,
+                )
+            ).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.status
+                == AppointmentStatus.NO_SHOW,
+                Appointment.scheduled_start >= start,
+                Appointment.scheduled_start < end,
+            )
+        ).scalar_one()
+        or 0
+    )
+
     active_admissions = (
         db.session.execute(
             db.select(
@@ -256,6 +273,9 @@ def get_management_dashboard(
         ),
         appointments_today=int(
             appointments_today
+        ),
+        missed_appointments_today=int(
+            missed_appointments_today
         ),
         active_admissions=int(
             active_admissions
@@ -399,6 +419,14 @@ def get_management_dashboard(
                 "total_ai_requests"
             ],
             unit="requests",
+        ),
+        build_metric(
+            key="missed_appointments",
+            label="Missed appointments",
+            value=int(
+                missed_appointments_today
+            ),
+            unit="appointments",
         ),
         build_metric(
             key="unread_chat_messages",

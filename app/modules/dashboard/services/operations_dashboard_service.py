@@ -109,6 +109,22 @@ def get_operations_dashboard(
         or 0
     )
 
+    missed_appointments_today = (
+        db.session.execute(
+            db.select(
+                db.func.count(
+                    Appointment.id,
+                )
+            ).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.status == AppointmentStatus.NO_SHOW,
+                Appointment.scheduled_start >= start,
+                Appointment.scheduled_start < end,
+            )
+        ).scalar_one()
+        or 0
+    )
+
     scheduled_appointments_today = (
         db.session.execute(
             db.select(
@@ -234,6 +250,9 @@ def get_operations_dashboard(
         appointments_today=int(
             appointments_today
         ),
+        missed_appointments_today=int(
+            missed_appointments_today
+        ),
         scheduled_appointments_today=int(
             scheduled_appointments_today
         ),
@@ -263,6 +282,14 @@ def get_operations_dashboard(
             label="Appointments",
             value=int(
                 appointments_today
+            ),
+            unit="appointments",
+        ),
+        build_metric(
+            key="missed_appointments",
+            label="Missed appointments",
+            value=int(
+                missed_appointments_today
             ),
             unit="appointments",
         ),

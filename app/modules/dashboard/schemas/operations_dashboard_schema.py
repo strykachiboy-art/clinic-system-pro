@@ -17,6 +17,11 @@ class OperationsDashboardOverviewSchema(BaseModel):
         ge=0,
     )
 
+    missed_appointments_today: int = Field(
+        ...,
+        ge=0,
+    )
+
     scheduled_appointments_today: int = Field(
         ...,
         ge=0,

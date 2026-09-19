@@ -34,6 +34,9 @@ from app.core.enums.ward_enums import (
 )
 from app.core.exceptions import ValidationError
 
+from app.modules.appointment.models.appointment_model import (
+    Appointment,
+)
 from app.modules.billing.models.billing_model import (
     Invoice,
 )
@@ -208,6 +211,7 @@ def test_get_management_dashboard_returns_zeroed_dashboard_when_empty(
     assert result.overview.total_staff == 0
     assert result.overview.active_staff == 0
     assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 0
     assert result.overview.active_admissions == 0
     assert result.overview.occupied_beds == 0
     assert result.overview.pending_lab_orders == 0
@@ -418,7 +422,7 @@ def test_get_management_dashboard_counts_active_appointments_today(
         clinic=clinic,
     )
 
-    today = date.today()
+    today = _utcnow().date()
 
     make_appointment(
         clinic=clinic,
@@ -434,6 +438,55 @@ def test_get_management_dashboard_counts_active_appointments_today(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 0
+
+
+def test_get_management_dashboard_counts_missed_appointments_today(
+    clinic,
+    make_user,
+    make_staff,
+    make_patient,
+    make_appointment,
+):
+    actor = make_user(
+        clinic,
+        role=Role.ADMIN,
+    )
+
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    patient = make_patient(
+        clinic=clinic,
+    )
+
+    today = _utcnow().date()
+
+    make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(today, 9),
+        scheduled_end=_date_at(today, 10),
+    )
+
+    result = get_management_dashboard(
+        actor=actor,
+    )
+
+    assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 1
+
+    metrics = {
+        item.key: item
+        for item in result.metrics
+    }
+
+    assert metrics["missed_appointments"].value == 1
+    assert metrics["missed_appointments"].unit == "appointments"
 
 
 @pytest.mark.parametrize(
@@ -465,7 +518,7 @@ def test_get_management_dashboard_excludes_inactive_appointment_statuses(
         clinic=clinic,
     )
 
-    today = date.today()
+    today = _utcnow().date()
 
     make_appointment(
         clinic=clinic,
@@ -481,6 +534,7 @@ def test_get_management_dashboard_excludes_inactive_appointment_statuses(
     )
 
     assert result.overview.appointments_today == 0
+    assert result.overview.missed_appointments_today == 0
 
 
 def test_get_management_dashboard_excludes_appointments_outside_period(
@@ -504,7 +558,7 @@ def test_get_management_dashboard_excludes_appointments_outside_period(
         clinic=clinic,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     previous_date = selected_date - timedelta(days=1)
     next_date = selected_date + timedelta(days=1)
 
@@ -542,6 +596,21 @@ def test_get_management_dashboard_excludes_appointments_outside_period(
         clinic=clinic,
         patient=patient,
         staff=staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(
+            selected_date,
+            12,
+        ),
+        scheduled_end=_date_at(
+            selected_date,
+            13,
+        ),
+    )
+
+    make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
         status=AppointmentStatus.SCHEDULED,
         scheduled_start=_date_at(
             next_date,
@@ -550,6 +619,21 @@ def test_get_management_dashboard_excludes_appointments_outside_period(
         scheduled_end=_date_at(
             next_date,
             11,
+        ),
+    )
+
+    make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(
+            next_date,
+            12,
+        ),
+        scheduled_end=_date_at(
+            next_date,
+            13,
         ),
     )
 
@@ -562,6 +646,67 @@ def test_get_management_dashboard_excludes_appointments_outside_period(
     )
 
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 1
+
+
+def test_get_management_dashboard_missed_appointments_are_clinic_scoped(
+    clinic,
+    make_clinic,
+    make_user,
+    make_staff,
+    make_patient,
+    make_appointment,
+):
+    actor = make_user(
+        clinic,
+        role=Role.ADMIN,
+    )
+
+    local_staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    local_patient = make_patient(
+        clinic=clinic,
+    )
+
+    other_clinic = make_clinic()
+
+    other_staff = make_staff(
+        clinic=other_clinic,
+        role=Role.DOCTOR,
+    )
+
+    other_patient = make_patient(
+        clinic=other_clinic,
+    )
+
+    today = _utcnow().date()
+
+    make_appointment(
+        clinic=clinic,
+        patient=local_patient,
+        staff=local_staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(today, 9),
+        scheduled_end=_date_at(today, 10),
+    )
+
+    make_appointment(
+        clinic=other_clinic,
+        patient=other_patient,
+        staff=other_staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(today, 10),
+        scheduled_end=_date_at(today, 11),
+    )
+
+    result = get_management_dashboard(
+        actor=actor,
+    )
+
+    assert result.overview.missed_appointments_today == 1
 
 
 def test_get_management_dashboard_counts_multi_day_appointment_period(
@@ -585,8 +730,8 @@ def test_get_management_dashboard_counts_multi_day_appointment_period(
         clinic=clinic,
     )
 
-    start_date = date.today() - timedelta(days=2)
-    end_date = date.today()
+    start_date = _utcnow().date() - timedelta(days=2)
+    end_date = _utcnow().date()
 
     make_appointment(
         clinic=clinic,
@@ -618,6 +763,21 @@ def test_get_management_dashboard_counts_multi_day_appointment_period(
         ),
     )
 
+    make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(
+            start_date + timedelta(days=1),
+            12,
+        ),
+        scheduled_end=_date_at(
+            start_date + timedelta(days=1),
+            13,
+        ),
+    )
+
     result = get_management_dashboard(
         actor=actor,
         query=DashboardQuerySchema(
@@ -627,6 +787,7 @@ def test_get_management_dashboard_counts_multi_day_appointment_period(
     )
 
     assert result.overview.appointments_today == 2
+    assert result.overview.missed_appointments_today == 1
 
 
 # ============================================================================
@@ -925,7 +1086,7 @@ def test_get_management_dashboard_builds_ai_overview(
         role=Role.ADMIN,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
 
     make_ai_log(
         clinic=clinic,
@@ -1144,7 +1305,7 @@ def test_get_management_dashboard_excludes_ai_logs_outside_period(
         role=Role.ADMIN,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     previous_date = selected_date - timedelta(days=1)
 
     make_ai_log(
@@ -1514,7 +1675,7 @@ def test_get_management_dashboard_creates_priority_chat_alert(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.URGENT,
-        created_at=_date_at(date.today(), 10),
+        created_at=_date_at(_utcnow().date(), 10),
     )
 
     result = get_management_dashboard(
@@ -1660,17 +1821,18 @@ def test_get_management_dashboard_builds_expected_metrics(
     make_staff,
     make_inventory_item,
     make_ai_log,
+    make_appointment,
 ):
     actor = make_user(
         clinic,
         role=Role.ADMIN,
     )
 
-    make_patient(
+    patient = make_patient(
         clinic=clinic,
     )
 
-    make_staff(
+    staff = make_staff(
         clinic=clinic,
         role=Role.DOCTOR,
         status=StaffStatus.ACTIVE,
@@ -1688,6 +1850,21 @@ def test_get_management_dashboard_builds_expected_metrics(
         user=actor,
     )
 
+    make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
+        status=AppointmentStatus.NO_SHOW,
+        scheduled_start=_date_at(
+            _utcnow().date(),
+            10,
+        ),
+        scheduled_end=_date_at(
+            _utcnow().date(),
+            11,
+        ),
+    )
+
     result = get_management_dashboard(
         actor=actor,
     )
@@ -1700,6 +1877,7 @@ def test_get_management_dashboard_builds_expected_metrics(
         "active_staff",
         "low_stock_items",
         "ai_requests",
+        "missed_appointments",
         "unread_chat_messages",
     ]
 
@@ -1715,8 +1893,11 @@ def test_get_management_dashboard_builds_expected_metrics(
     assert result.metrics[3].value == 1
     assert result.metrics[3].unit == "requests"
 
-    assert result.metrics[4].value == 0
-    assert result.metrics[4].unit == "messages"
+    assert result.metrics[4].value == 1
+    assert result.metrics[4].unit == "appointments"
+
+    assert result.metrics[5].value == 0
+    assert result.metrics[5].unit == "messages"
 
 
 # ============================================================================
@@ -1843,11 +2024,7 @@ def test_get_management_dashboard_builds_complete_summary(
         is_active=False,
     )
 
-    today = date.today()
-
-    from app.modules.appointment.models.appointment_model import (
-        Appointment,
-    )
+    today = _utcnow().date()
 
     db_session.add(
         Appointment(
@@ -1857,6 +2034,19 @@ def test_get_management_dashboard_builds_complete_summary(
             scheduled_start=_date_at(today, 9),
             scheduled_end=_date_at(today, 10),
             status=AppointmentStatus.CONFIRMED,
+        )
+    )
+
+    db_session.flush()
+
+    db_session.add(
+        Appointment(
+            clinic_id=clinic.id,
+            patient_id=another_patient.id,
+            staff_id=doctor.id,
+            scheduled_start=_date_at(today, 12),
+            scheduled_end=_date_at(today, 13),
+            status=AppointmentStatus.NO_SHOW,
         )
     )
 
@@ -1955,6 +2145,7 @@ def test_get_management_dashboard_builds_complete_summary(
     assert result.overview.total_staff == 2
     assert result.overview.active_staff == 2
     assert result.overview.appointments_today == 1
+    assert result.overview.missed_appointments_today == 1
     assert result.overview.active_admissions == 1
     assert result.overview.occupied_beds == 1
     assert result.overview.pending_lab_orders == 1
@@ -1982,8 +2173,17 @@ def test_get_management_dashboard_builds_complete_summary(
         "active_staff",
         "low_stock_items",
         "ai_requests",
+        "missed_appointments",
         "unread_chat_messages",
     ]
+
+    metrics = {
+        item.key: item
+        for item in result.metrics
+    }
+
+    assert metrics["missed_appointments"].value == 1
+    assert metrics["missed_appointments"].unit == "appointments"
 
     assert {
         alert.key
