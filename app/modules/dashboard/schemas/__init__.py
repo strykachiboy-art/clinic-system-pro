@@ -1,6 +1,7 @@
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
+    DashboardChatSummarySchema,
     DashboardContextSchema,
     DashboardMetricSchema,
     DashboardPeriodSchema,
@@ -9,6 +10,7 @@ from app.modules.dashboard.schemas.dashboard_schema import (
 )
 
 from app.modules.dashboard.schemas.super_admin_dashboard_schema import (
+    SuperAdminAccessControlOverviewSchema,
     SuperAdminAIDashboardSchema,
     SuperAdminAIApprovalSummarySchema,
     SuperAdminAIFeatureUsageSchema,
@@ -57,12 +59,14 @@ from app.modules.dashboard.schemas.patient_dashboard_schema import (
 __all__ = [
     "DashboardActivitySchema",
     "DashboardAlertSchema",
+    "DashboardChatSummarySchema",
     "DashboardContextSchema",
     "DashboardMetricSchema",
     "DashboardPeriodSchema",
     "DashboardQuerySchema",
     "DashboardTrendSchema",
 
+    "SuperAdminAccessControlOverviewSchema",
     "SuperAdminAIDashboardSchema",
     "SuperAdminAIApprovalSummarySchema",
     "SuperAdminAIFeatureUsageSchema",

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
+    DashboardChatSummarySchema,
     DashboardContextSchema,
     DashboardMetricSchema,
 )
@@ -80,6 +81,8 @@ class FinanceDashboardSchema(BaseModel):
     overview: FinanceDashboardOverviewSchema
 
     ai: FinanceAICostSchema
+
+    chat: DashboardChatSummarySchema
 
     metrics: list[
         DashboardMetricSchema

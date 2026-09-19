@@ -59,6 +59,46 @@ class SuperAdminDashboardOverviewSchema(BaseModel):
     )
 
 
+class SuperAdminAccessControlOverviewSchema(BaseModel):
+    total_users: int = Field(
+        ...,
+        ge=0,
+    )
+
+    active_users: int = Field(
+        ...,
+        ge=0,
+    )
+
+    inactive_users: int = Field(
+        ...,
+        ge=0,
+    )
+
+    total_admins: int = Field(
+        ...,
+        ge=0,
+    )
+
+    active_admins: int = Field(
+        ...,
+        ge=0,
+    )
+
+    total_super_admins: int = Field(
+        ...,
+        ge=0,
+    )
+
+    users_by_role: dict[str, int] = Field(
+        default_factory=dict,
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+
 class SuperAdminAIOverviewSchema(BaseModel):
     total_ai_requests: int = Field(
         ...,
@@ -209,6 +249,8 @@ class SuperAdminDashboardSchema(BaseModel):
     context: DashboardContextSchema
 
     overview: SuperAdminDashboardOverviewSchema
+
+    access_control: SuperAdminAccessControlOverviewSchema
 
     ai: SuperAdminAIDashboardSchema
 

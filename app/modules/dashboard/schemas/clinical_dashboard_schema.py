@@ -11,6 +11,7 @@ from app.core.enums.ai_enums import (
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
+    DashboardChatSummarySchema,
     DashboardContextSchema,
     DashboardMetricSchema,
 )
@@ -159,6 +160,8 @@ class ClinicalDashboardSchema(BaseModel):
     overview: ClinicalDashboardOverviewSchema
 
     ai: ClinicalAIDashboardSchema
+
+    chat: DashboardChatSummarySchema
 
     metrics: list[
         DashboardMetricSchema
