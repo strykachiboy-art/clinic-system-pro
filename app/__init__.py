@@ -76,6 +76,7 @@ def register_blueprints(app):
     from app.modules.profile.routes.profile_route import profile_bp
     from app.modules.access_control.routes.access_control_routes import access_control_bp
     from app.modules.chat.routes.chat_routes import chat_bp
+    from app.modules.dashboard.routes.dashboard_route import dashboard_bp
     
 
     app.register_blueprint(web_bp)
@@ -107,3 +108,4 @@ def register_blueprints(app):
     app.register_blueprint(profile_bp)
     app.register_blueprint(access_control_bp)
     app.register_blueprint(chat_bp)
+    app.register_blueprint(dashboard_bp)
