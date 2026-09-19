@@ -577,8 +577,8 @@ def test_build_chat_summary_rejects_invalid_ids(
         "user_id": 1,
         "clinic_id": 1,
         "period": DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     }
 
@@ -608,8 +608,8 @@ def test_build_chat_summary_returns_zeroes_when_user_has_no_conversations(
     )
 
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_chat_summary(
@@ -667,12 +667,12 @@ def test_build_chat_summary_ignores_pending_participant(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.URGENT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_chat_summary(
@@ -741,7 +741,7 @@ def test_build_chat_summary_counts_unread_messages_and_conversations(
         conversation=conversation_one,
         sender=sender,
         status=MessageStatus.SENT,
-        created_at=_date_at(date.today(), 10),
+        created_at=_date_at(_utcnow().date(), 10),
     )
 
     message_two = make_message(
@@ -749,7 +749,7 @@ def test_build_chat_summary_counts_unread_messages_and_conversations(
         conversation=conversation_one,
         sender=sender,
         status=MessageStatus.EDITED,
-        created_at=_date_at(date.today(), 11),
+        created_at=_date_at(_utcnow().date(), 11),
     )
 
     message_three = make_message(
@@ -757,7 +757,7 @@ def test_build_chat_summary_counts_unread_messages_and_conversations(
         conversation=conversation_two,
         sender=sender,
         status=MessageStatus.SENT,
-        created_at=_date_at(date.today(), 12),
+        created_at=_date_at(_utcnow().date(), 12),
     )
 
     for message in (
@@ -773,8 +773,8 @@ def test_build_chat_summary_counts_unread_messages_and_conversations(
         )
 
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_chat_summary(
@@ -830,7 +830,7 @@ def test_build_chat_summary_read_receipt_is_not_unread(
         conversation=conversation,
         sender=sender,
         status=MessageStatus.SENT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     make_message_read_receipt(
@@ -841,8 +841,8 @@ def test_build_chat_summary_read_receipt_is_not_unread(
     )
 
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_chat_summary(
@@ -887,7 +887,7 @@ def test_build_chat_summary_ignores_own_messages_for_unread_and_priority(
         sender=actor,
         status=MessageStatus.SENT,
         priority=MessagePriority.STAT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     make_message_read_receipt(
@@ -898,8 +898,8 @@ def test_build_chat_summary_ignores_own_messages_for_unread_and_priority(
     )
 
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_chat_summary(
@@ -956,7 +956,7 @@ def test_build_chat_summary_counts_mentions_for_user(
         conversation=conversation,
         sender=sender,
         status=MessageStatus.SENT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     make_message_mention(
@@ -970,8 +970,8 @@ def test_build_chat_summary_counts_mentions_for_user(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1020,7 +1020,7 @@ def test_build_chat_summary_counts_urgent_and_stat_messages(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.URGENT,
-        created_at=_date_at(date.today(), 10),
+        created_at=_date_at(_utcnow().date(), 10),
     )
 
     make_message(
@@ -1029,7 +1029,7 @@ def test_build_chat_summary_counts_urgent_and_stat_messages(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.STAT,
-        created_at=_date_at(date.today(), 11),
+        created_at=_date_at(_utcnow().date(), 11),
     )
 
     make_message(
@@ -1038,15 +1038,15 @@ def test_build_chat_summary_counts_urgent_and_stat_messages(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.NORMAL,
-        created_at=_date_at(date.today(), 12),
+        created_at=_date_at(_utcnow().date(), 12),
     )
 
     result = dashboard_widget_service.build_chat_summary(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1105,15 +1105,15 @@ def test_build_chat_summary_excludes_non_visible_message_statuses(
         sender=sender,
         status=message_status,
         priority=MessagePriority.STAT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     result = dashboard_widget_service.build_chat_summary(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1179,7 +1179,7 @@ def test_build_chat_summary_enforces_clinic_isolation(
         sender=other_sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.STAT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     make_message_read_receipt(
@@ -1193,8 +1193,8 @@ def test_build_chat_summary_enforces_clinic_isolation(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1241,14 +1241,14 @@ def test_build_chat_summary_excludes_messages_outside_period(
         status=ParticipantStatus.ACCEPTED,
     )
 
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = _utcnow().date() - timedelta(days=1)
 
     today_message = make_message(
         clinic=clinic,
         conversation=conversation,
         sender=sender,
         status=MessageStatus.SENT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     yesterday_message = make_message(
@@ -1277,8 +1277,8 @@ def test_build_chat_summary_excludes_messages_outside_period(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1333,7 +1333,7 @@ def test_build_chat_summary_ignores_archived_conversation(
         sender=sender,
         status=MessageStatus.SENT,
         priority=MessagePriority.STAT,
-        created_at=_date_at(date.today()),
+        created_at=_date_at(_utcnow().date()),
     )
 
     make_message_read_receipt(
@@ -1347,8 +1347,8 @@ def test_build_chat_summary_ignores_archived_conversation(
         user_id=actor.id,
         clinic_id=clinic.id,
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1367,8 +1367,8 @@ def test_build_ai_aggregates_returns_zeroes_when_empty(
     app,
 ):
     period = DashboardPeriodSchema(
-        date_from=date.today(),
-        date_to=date.today(),
+        date_from=_utcnow().date(),
+        date_to=_utcnow().date(),
     )
 
     result = dashboard_widget_service.build_ai_aggregates(
@@ -1416,8 +1416,8 @@ def test_build_ai_aggregates_rejects_invalid_clinic_id(
     ):
         dashboard_widget_service.build_ai_aggregates(
             period=DashboardPeriodSchema(
-                date_from=date.today(),
-                date_to=date.today(),
+                date_from=_utcnow().date(),
+                date_to=_utcnow().date(),
             ),
             clinic_id=clinic_id,
         )
@@ -1441,8 +1441,8 @@ def test_build_ai_aggregates_rejects_invalid_user_id(
     ):
         dashboard_widget_service.build_ai_aggregates(
             period=DashboardPeriodSchema(
-                date_from=date.today(),
-                date_to=date.today(),
+                date_from=_utcnow().date(),
+                date_to=_utcnow().date(),
             ),
             user_id=user_id,
         )
@@ -1523,8 +1523,8 @@ def test_build_ai_aggregates_builds_complete_summary(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,
@@ -1629,8 +1629,8 @@ def test_build_ai_aggregates_filters_by_clinic(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
     )
@@ -1670,8 +1670,8 @@ def test_build_ai_aggregates_filters_by_user(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,
@@ -1715,8 +1715,8 @@ def test_build_ai_aggregates_without_scope_filters_includes_multiple_clinics(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
     )
 
@@ -1739,7 +1739,7 @@ def test_build_ai_aggregates_excludes_logs_outside_period(
         role=Role.DOCTOR,
     )
 
-    today = date.today()
+    today = _utcnow().date()
     yesterday = today - timedelta(days=1)
 
     make_ai_log(
@@ -1779,7 +1779,7 @@ def test_build_ai_aggregates_excludes_end_boundary(
         role=Role.DOCTOR,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     next_date = selected_date + timedelta(days=1)
 
     make_ai_log(
@@ -1837,8 +1837,8 @@ def test_build_ai_aggregates_handles_null_token_and_cost_values(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,
@@ -1881,8 +1881,8 @@ def test_build_ai_aggregates_sorts_feature_usage_deterministically(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,
@@ -1926,8 +1926,8 @@ def test_build_ai_aggregates_sorts_risk_summary_deterministically(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,
@@ -1971,8 +1971,8 @@ def test_build_ai_aggregates_sorts_approval_summary_deterministically(
 
     result = dashboard_widget_service.build_ai_aggregates(
         period=DashboardPeriodSchema(
-            date_from=date.today(),
-            date_to=date.today(),
+            date_from=_utcnow().date(),
+            date_to=_utcnow().date(),
         ),
         clinic_id=clinic.id,
         user_id=actor_staff.user.id,

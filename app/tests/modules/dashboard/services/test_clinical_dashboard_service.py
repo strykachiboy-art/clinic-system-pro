@@ -39,10 +39,13 @@ from app.modules.dashboard.services.clinical_dashboard_service import (
 
 from app.modules.ward.models.ward_model import Admission
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 def _today_start() -> datetime:
     return datetime.combine(
-        date.today(),
+        _utcnow().date(),
         datetime.min.time(),
         tzinfo=timezone.utc,
     )
@@ -806,7 +809,7 @@ def test_clinical_dashboard_excludes_ai_logs_outside_selected_period(
         role=Role.DOCTOR,
     )
 
-    today = date.today()
+    today = _utcnow().date()
     yesterday = today - timedelta(days=1)
 
     make_ai_log(
@@ -1107,7 +1110,7 @@ def test_clinical_dashboard_applies_selected_period_to_appointments(
         clinic,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
 
     make_appointment(
         clinic=clinic,

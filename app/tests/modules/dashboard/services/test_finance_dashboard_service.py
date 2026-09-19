@@ -495,7 +495,7 @@ def test_get_finance_dashboard_counts_successful_payments_in_period(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
 
     invoice = _make_invoice(
         db_session,
@@ -592,7 +592,7 @@ def test_get_finance_dashboard_excludes_successful_payments_outside_period(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     previous_date = selected_date - timedelta(days=1)
 
     invoice = _make_invoice(
@@ -643,7 +643,7 @@ def test_get_finance_dashboard_excludes_payment_at_period_end_boundary(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     next_date = selected_date + timedelta(days=1)
 
     invoice = _make_invoice(
@@ -737,7 +737,7 @@ def test_get_finance_dashboard_pending_payment_count_is_not_period_filtered(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     previous_date = selected_date - timedelta(days=5)
 
     invoice = _make_invoice(
@@ -850,7 +850,7 @@ def test_get_finance_dashboard_builds_ai_cost_summary(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
 
     make_ai_log(
         clinic=clinic,
@@ -894,7 +894,7 @@ def test_get_finance_dashboard_excludes_ai_logs_outside_period(
         role=Role.ACCOUNTANT,
     )
 
-    selected_date = date.today()
+    selected_date = _utcnow().date()
     previous_date = selected_date - timedelta(days=1)
 
     make_ai_log(
@@ -1444,7 +1444,7 @@ def test_get_finance_dashboard_defaults_to_current_day(
         role=Role.ACCOUNTANT,
     )
 
-    today = date.today()
+    today = _utcnow().date()
 
     invoice = _make_invoice(
         db_session,
