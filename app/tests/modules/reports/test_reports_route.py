@@ -6,8 +6,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.core.enums.reports_enums import ReportFormat, ReportType
+from app.core.enums.reports_enums import (
+    ReportFormat,
+    ReportType,
+)
 from app.core.enums.role_enums import Role
+from app.core.exceptions import (
+    DomainError,
+    NotFoundError,
+    ValidationError,
+)
 from app.modules.reports.routes import reports_route
 
 
@@ -72,6 +80,10 @@ def _make_report(
     )
 
 
+# ============================================================================
+# Create report
+# ============================================================================
+
 class TestCreateReport:
     def test_create_report_success(
         self,
@@ -104,10 +116,7 @@ class TestCreateReport:
 
         response = client.post(
             "/api/reports",
-            json=_report_payload(
-                report_type=ReportType.PATIENTS,
-                report_format=ReportFormat.CSV,
-            ),
+            json=_report_payload(),
             headers=headers,
         )
 
@@ -184,8 +193,6 @@ class TestCreateReport:
         response = client.post(
             "/api/reports",
             json=_report_payload(
-                report_type=ReportType.PATIENTS,
-                report_format=ReportFormat.CSV,
                 filters=filters,
             ),
             headers=headers,
@@ -602,8 +609,6 @@ class TestCreateReport:
             Role.ADMIN,
         )
 
-        from app.core.exceptions import ValidationError
-
         error = ValidationError(
             "Clinic is inactive"
         )
@@ -664,7 +669,7 @@ class TestCreateReport:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 500
 
         body = response.get_json()
 
@@ -706,7 +711,7 @@ class TestCreateReport:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 500
 
         body = response.get_json()
 
@@ -827,10 +832,15 @@ class TestCreateReport:
         assert body["error"] == "Validation failed"
 
 
+# ============================================================================
+# Create report authorization
+# ============================================================================
+
 class TestCreateReportAuthorization:
     @pytest.mark.parametrize(
         "role",
         [
+            Role.SUPER_ADMIN,
             Role.ADMIN,
             Role.DOCTOR,
             Role.NURSE,
@@ -917,12 +927,1290 @@ class TestCreateReportAuthorization:
         create_mock.assert_not_called()
 
 
-def test_create_report_route_exists(
-    client,
-):
-    response = client.post(
-        "/api/reports",
-        json={},
-    )
+# ============================================================================
+# List reports
+# ============================================================================
 
-    assert response.status_code != 404
+class TestGetReports:
+    def test_get_reports_success(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        report = _make_report(
+            report_id=101,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [
+                    report,
+                ],
+                "total": 1,
+                "page": 1,
+                "per_page": 20,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"]["total"] == 1
+        assert body["data"]["page"] == 1
+        assert body["data"]["per_page"] == 20
+        assert len(body["data"]["items"]) == 1
+
+        item = body["data"]["items"][0]
+
+        assert item["id"] == 101
+        assert item["clinic_id"] == clinic.id
+
+        list_mock.assert_called_once()
+
+        call = list_mock.call_args
+
+        assert call.kwargs["requester_user_id"] == staff.user_id
+        assert call.kwargs["clinic_id"] == clinic.id
+        assert call.kwargs["generated_by_id"] is None
+        assert call.kwargs["report_type"] is None
+        assert call.kwargs["report_format"] is None
+        assert call.kwargs["date_from"] is None
+        assert call.kwargs["date_to"] is None
+        assert call.kwargs["page"] == 1
+        assert call.kwargs["per_page"] == 20
+
+    def test_get_reports_passes_query_filters(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [],
+                "total": 0,
+                "page": 2,
+                "per_page": 10,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            query_string={
+                "report_type": ReportType.PATIENTS.value,
+                "report_format": ReportFormat.CSV.value,
+                "date_from": "2026-09-01",
+                "date_to": "2026-09-08",
+                "generated_by_id": str(
+                    staff.user_id
+                ),
+                "page": "2",
+                "per_page": "10",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        list_mock.assert_called_once()
+
+        call = list_mock.call_args
+
+        assert call.kwargs["requester_user_id"] == staff.user_id
+        assert call.kwargs["clinic_id"] == clinic.id
+        assert call.kwargs["report_type"] == ReportType.PATIENTS
+        assert call.kwargs["report_format"] == ReportFormat.CSV
+        assert call.kwargs["date_from"] == datetime(
+            2026,
+            9,
+            1,
+        ).date()
+        assert call.kwargs["date_to"] == datetime(
+            2026,
+            9,
+            8,
+        ).date()
+        assert call.kwargs["generated_by_id"] == staff.user_id
+        assert call.kwargs["page"] == 2
+        assert call.kwargs["per_page"] == 10
+
+    def test_get_reports_rejects_invalid_report_type(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        response = client.get(
+            "/api/reports",
+            query_string={
+                "report_type": "invalid",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+    def test_get_reports_rejects_invalid_report_format(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        response = client.get(
+            "/api/reports",
+            query_string={
+                "report_format": "invalid",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+    def test_get_reports_rejects_invalid_date_range(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        response = client.get(
+            "/api/reports",
+            query_string={
+                "date_from": "2026-09-08",
+                "date_to": "2026-09-01",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+    def test_get_reports_rejects_invalid_pagination(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        response = client.get(
+            "/api/reports",
+            query_string={
+                "page": "0",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "Validation failed"
+
+    def test_get_reports_handles_domain_error(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        error = ValidationError(
+            "Unauthorized clinic access"
+        )
+
+        list_mock = Mock(
+            side_effect=error,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == error.status_code
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "Unauthorized clinic access"
+        )
+
+    def test_get_reports_handles_unexpected_service_error(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        list_mock = Mock(
+            side_effect=RuntimeError(
+                "unexpected database failure"
+            ),
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 500
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "An unexpected error occurred"
+        )
+
+        assert "unexpected database failure" not in (
+            response.get_data(
+                as_text=True
+            )
+        )
+
+    def test_get_reports_serializes_items_through_schema(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        report = _make_report(
+            report_id=55,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+            report_type=ReportType.BILLING,
+            report_format=ReportFormat.CSV,
+            filters={
+                "date_from": "2026-09-01",
+                "active_only": True,
+            },
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [
+                    report,
+                ],
+                "total": 1,
+                "page": 1,
+                "per_page": 20,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+        item = body["data"]["items"][0]
+
+        assert item["id"] == 55
+        assert item["clinic_id"] == clinic.id
+        assert item["generated_by_id"] == staff.id
+        assert item["report_type"] == (
+            ReportType.BILLING.value
+        )
+        assert item["report_format"] == (
+            ReportFormat.CSV.value
+        )
+
+        assert item["filters"] == {
+            "date_from": "2026-09-01",
+            "active_only": True,
+        }
+
+    def test_get_reports_non_admin_is_scoped_to_authenticated_clinic(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "per_page": 20,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        assert (
+            list_mock.call_args.kwargs["clinic_id"]
+            == clinic.id
+        )
+
+        assert (
+            list_mock.call_args.kwargs[
+                "requester_user_id"
+            ]
+            == staff.user_id
+        )
+
+    def test_get_reports_super_admin_is_system_wide(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.SUPER_ADMIN,
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "per_page": 20,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        list_mock.assert_called_once()
+
+        assert (
+            list_mock.call_args.kwargs[
+                "requester_user_id"
+            ]
+            == staff.user_id
+        )
+
+        assert (
+            list_mock.call_args.kwargs[
+                "clinic_id"
+            ]
+            is None
+        )
+
+
+class TestGetReportsAuthorization:
+    @pytest.mark.parametrize(
+        "role",
+        [
+            Role.SUPER_ADMIN,
+            Role.ADMIN,
+            Role.DOCTOR,
+            Role.NURSE,
+            Role.RECEPTIONIST,
+            Role.ACCOUNTANT,
+            Role.PHARMACIST,
+            Role.LAB_TECHNICIAN,
+        ],
+    )
+    def test_view_role_is_allowed(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+        role,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            role,
+        )
+
+        list_mock = Mock(
+            return_value={
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "per_page": 20,
+            },
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        list_mock.assert_called_once()
+
+    def test_patient_cannot_view_reports(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.PATIENT,
+        )
+
+        list_mock = Mock()
+
+        monkeypatch.setattr(
+            reports_route,
+            "list_reports",
+            list_mock,
+        )
+
+        response = client.get(
+            "/api/reports",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        list_mock.assert_not_called()
+
+
+# ============================================================================
+# Get single report
+# ============================================================================
+
+class TestGetSingleReport:
+    def test_get_single_report_success(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        report = _make_report(
+            report_id=101,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+        )
+
+        get_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/101",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"]["id"] == 101
+        assert body["data"]["clinic_id"] == clinic.id
+        assert body["data"]["generated_by_id"] == staff.id
+
+        get_mock.assert_called_once()
+
+        call = get_mock.call_args
+
+        assert call.kwargs["report_id"] == 101
+        assert (
+            call.kwargs["requester_user_id"]
+            == staff.user_id
+        )
+
+    @pytest.mark.parametrize(
+        "report_id",
+        [
+            1,
+            10,
+            999999,
+        ],
+    )
+    def test_get_single_report_passes_path_id_to_service(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+        report_id,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        report = _make_report(
+            report_id=report_id,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+        )
+
+        get_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            f"/api/reports/{report_id}",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        assert (
+            get_mock.call_args.kwargs[
+                "report_id"
+            ]
+            == report_id
+        )
+
+        assert (
+            get_mock.call_args.kwargs[
+                "requester_user_id"
+            ]
+            == staff.user_id
+        )
+
+    def test_get_single_report_handles_not_found(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        error = NotFoundError(
+            "Report 999 not found"
+        )
+
+        get_mock = Mock(
+            side_effect=error,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/999",
+            headers=headers,
+        )
+
+        assert response.status_code == error.status_code
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "Report 999 not found"
+        )
+
+    def test_get_single_report_handles_domain_error(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.DOCTOR,
+        )
+
+        error = ValidationError(
+            "Unauthorized report access"
+        )
+
+        get_mock = Mock(
+            side_effect=error,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/123",
+            headers=headers,
+        )
+
+        assert response.status_code == error.status_code
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "Unauthorized report access"
+        )
+
+    def test_get_single_report_handles_unexpected_service_error(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        get_mock = Mock(
+            side_effect=RuntimeError(
+                "private database failure"
+            ),
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/123",
+            headers=headers,
+        )
+
+        assert response.status_code == 500
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == (
+            "An unexpected error occurred"
+        )
+
+        assert "private database failure" not in (
+            response.get_data(
+                as_text=True
+            )
+        )
+
+    def test_get_single_report_serializes_response_through_schema(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.ADMIN,
+        )
+
+        report = _make_report(
+            report_id=77,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+            report_type=ReportType.LAB,
+            report_format=ReportFormat.PDF,
+            filters={
+                "date_from": "2026-09-01",
+            },
+            file_url=(
+                "generated_reports/"
+                "clinic_1_lab_test.pdf"
+            ),
+        )
+
+        get_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/77",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+        data = body["data"]
+
+        assert data["id"] == 77
+        assert data["clinic_id"] == clinic.id
+        assert data["generated_by_id"] == staff.id
+        assert data["report_type"] == (
+            ReportType.LAB.value
+        )
+        assert data["report_format"] == (
+            ReportFormat.PDF.value
+        )
+        assert data["filters"] == {
+            "date_from": "2026-09-01",
+        }
+        assert data["file_url"] == (
+            "generated_reports/"
+            "clinic_1_lab_test.pdf"
+        )
+
+        assert "created_at" in data
+        assert "updated_at" in data
+
+    def test_get_single_report_super_admin_can_request_cross_clinic_report(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.SUPER_ADMIN,
+        )
+
+        report = _make_report(
+            report_id=200,
+            clinic_id=999,
+            generated_by_id=300,
+        )
+
+        get_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/200",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+
+        assert (
+            get_mock.call_args.kwargs[
+                "report_id"
+            ]
+            == 200
+        )
+
+        assert (
+            get_mock.call_args.kwargs[
+                "requester_user_id"
+            ]
+            == staff.user_id
+        )
+
+
+class TestGetSingleReportAuthorization:
+    @pytest.mark.parametrize(
+        "role",
+        [
+            Role.SUPER_ADMIN,
+            Role.ADMIN,
+            Role.DOCTOR,
+            Role.NURSE,
+            Role.RECEPTIONIST,
+            Role.ACCOUNTANT,
+            Role.PHARMACIST,
+            Role.LAB_TECHNICIAN,
+        ],
+    )
+    def test_view_role_can_access_single_report_route(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+        role,
+    ):
+        headers, staff = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            role,
+        )
+
+        report = _make_report(
+            report_id=10,
+            clinic_id=clinic.id,
+            generated_by_id=staff.id,
+        )
+
+        get_mock = Mock(
+            return_value=report,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/10",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        get_mock.assert_called_once()
+
+    def test_patient_cannot_access_single_report(
+        self,
+        client,
+        clinic,
+        make_authenticated_staff,
+        monkeypatch,
+    ):
+        headers, _ = _json_headers(
+            make_authenticated_staff,
+            clinic,
+            Role.PATIENT,
+        )
+
+        get_mock = Mock()
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_report",
+            get_mock,
+        )
+
+        response = client.get(
+            "/api/reports/10",
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        get_mock.assert_not_called()
+
+
+# ============================================================================
+# Authentication helper hardening
+# ============================================================================
+
+class TestAuthenticatedUserHelpers:
+    @pytest.mark.parametrize(
+        "identity",
+        [
+            "1",
+            1,
+        ],
+    )
+    def test_parse_authenticated_user_id_accepts_positive_integer_identity(
+        self,
+        identity,
+    ):
+        assert (
+            reports_route._parse_authenticated_user_id(
+                identity
+            )
+            == 1
+        )
+
+    @pytest.mark.parametrize(
+        "identity",
+        [
+            "",
+            " ",
+            "abc",
+            "1.0",
+            "1abc",
+            0,
+            -1,
+            True,
+            False,
+            1.0,
+            None,
+            [],
+            {},
+        ],
+    )
+    def test_parse_authenticated_user_id_rejects_invalid_identity(
+        self,
+        identity,
+    ):
+        with pytest.raises(ValidationError):
+            reports_route._parse_authenticated_user_id(
+                identity
+            )
+
+    def test_get_current_user_rejects_unresolvable_user(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            reports_route,
+            "get_jwt_identity",
+            lambda: "999999",
+        )
+
+        monkeypatch.setattr(
+            reports_route.db.session,
+            "get",
+            lambda *args, **kwargs: None,
+        )
+
+        with pytest.raises(ValidationError):
+            reports_route._get_current_user()
+
+    def test_get_current_user_rejects_inactive_user(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=False,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_jwt_identity",
+            lambda: "1",
+        )
+
+        monkeypatch.setattr(
+            reports_route.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        with pytest.raises(ValidationError):
+            reports_route._get_current_user()
+
+    def test_get_current_user_returns_active_user(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=True,
+        )
+
+        monkeypatch.setattr(
+            reports_route,
+            "get_jwt_identity",
+            lambda: "1",
+        )
+
+        monkeypatch.setattr(
+            reports_route.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        result = reports_route._get_current_user()
+
+        assert result is user
+
+    def test_get_current_user_id_uses_valid_user_object(
+        self,
+    ):
+        user = SimpleNamespace(
+            id=10,
+        )
+
+        assert (
+            reports_route._get_current_user_id(
+                user
+            )
+            == 10
+        )
+
+    @pytest.mark.parametrize(
+        "user_id",
+        [
+            0,
+            -1,
+            True,
+            "10",
+            10.0,
+            None,
+        ],
+    )
+    def test_get_current_user_id_rejects_invalid_user_object_id(
+        self,
+        user_id,
+    ):
+        user = SimpleNamespace(
+            id=user_id,
+        )
+
+        with pytest.raises(ValidationError):
+            reports_route._get_current_user_id(
+                user
+            )
+
+    def test_get_current_user_id_rejects_invalid_identity(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            reports_route,
+            "get_jwt_identity",
+            lambda: "invalid",
+        )
+
+        with pytest.raises(ValidationError):
+            reports_route._get_current_user_id()
+
+    def test_get_current_clinic_id_returns_valid_clinic(
+        self,
+    ):
+        user = SimpleNamespace(
+            clinic_id=10,
+        )
+
+        assert (
+            reports_route._get_current_clinic_id(
+                user
+            )
+            == 10
+        )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            None,
+            0,
+            -1,
+            True,
+            False,
+            "10",
+            10.0,
+            "0010",
+        ],
+    )
+    def test_get_current_clinic_id_rejects_non_strict_values(
+        self,
+        clinic_id,
+    ):
+        user = SimpleNamespace(
+            clinic_id=clinic_id,
+        )
+
+        with pytest.raises(DomainError):
+            reports_route._get_current_clinic_id(
+                user
+            )
+
+
+# ============================================================================
+# Route existence
+# ============================================================================
+
+class TestRouteExistence:
+    def test_create_report_route_exists(
+        self,
+        client,
+    ):
+        response = client.post(
+            "/api/reports",
+            json={},
+        )
+
+        assert response.status_code != 404
+
+    def test_get_reports_route_exists(
+        self,
+        client,
+    ):
+        response = client.get(
+            "/api/reports",
+        )
+
+        assert response.status_code != 404
+
+    def test_get_single_report_route_exists(
+        self,
+        client,
+    ):
+        response = client.get(
+            "/api/reports/1",
+        )
+
+        assert response.status_code != 404
+
+    def test_non_integer_report_id_does_not_match_single_report_route(
+        self,
+        client,
+    ):
+        response = client.get(
+            "/api/reports/not-an-integer",
+        )
+
+        assert response.status_code == 404

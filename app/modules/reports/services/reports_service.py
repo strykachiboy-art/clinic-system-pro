@@ -656,7 +656,7 @@ def _get_requester_clinic_id(
         return None
 
     return _validate_positive_id(
-        int(clinic_id),
+        clinic_id,
         "authenticated clinic assignment",
     )
 
@@ -723,7 +723,7 @@ def _require_active_clinic(
     return clinic
 
 
-def _is_admin(
+def _is_super_admin(
     requester: Staff,
 ) -> bool:
     user = getattr(
@@ -740,8 +740,29 @@ def _is_admin(
 
     return (
         _enum_value(role)
-        == _enum_value(Role.ADMIN)
+        == _enum_value(Role.SUPER_ADMIN)
     )
+
+
+def _is_admin(
+    requester: Staff,
+) -> bool:
+    user = getattr(
+        requester,
+        "user",
+        None,
+    )
+
+    role = getattr(
+        user,
+        "role",
+        None,
+    )
+
+    return _enum_value(role) in {
+        _enum_value(Role.ADMIN),
+        _enum_value(Role.SUPER_ADMIN),
+    }
 
 
 def _resolve_clinic_scope(
@@ -751,13 +772,13 @@ def _resolve_clinic_scope(
     """
     Resolve the clinic scope available to the requester.
 
-    Admin:
-        may select a clinic or omit it for system-wide listing.
+    Super Admin:
+        may select any clinic or omit it for system-wide listing.
 
-    Non-admin:
-        is always restricted to their own clinic.
+    Admin / Non-admin:
+        are restricted to their own clinic.
     """
-    if _is_admin(
+    if _is_super_admin(
         requester
     ):
         if requested_clinic_id is None:
@@ -817,7 +838,7 @@ def _validate_report_generator(
         "clinic_id",
     )
 
-    if _is_admin(
+    if _is_super_admin(
         requester
     ):
         return requester
@@ -845,12 +866,14 @@ def _validate_generated_by_scope(
     generated_by_id: int,
     clinic_id: int,
 ) -> None:
-    """
-    Ensure a generator staff ID belongs to the requested clinic.
-    """
     _validate_positive_id(
         generated_by_id,
         "generated_by_id",
+    )
+
+    _validate_positive_id(
+        clinic_id,
+        "clinic_id",
     )
 
     staff = db.session.get(

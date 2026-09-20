@@ -10,7 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.enums.reports_enums import ReportFormat, ReportType
+from app.core.enums.reports_enums import (
+    ReportFormat,
+    ReportType,
+)
+from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
     DomainError,
@@ -25,6 +29,42 @@ def app_context(app):
     """Keep direct service calls inside the Flask app context."""
     with app.app_context():
         yield
+
+
+def _requester(
+    *,
+    user_id=1,
+    clinic_id=10,
+    role=Role.DOCTOR,
+    is_active=True,
+    staff_id=100,
+    staff_status=StaffStatus.ACTIVE,
+):
+    user = SimpleNamespace(
+        id=user_id,
+        clinic_id=clinic_id,
+        is_active=is_active,
+        role=role,
+    )
+
+    staff = SimpleNamespace(
+        id=staff_id,
+        clinic_id=clinic_id,
+        status=staff_status,
+        user=user,
+    )
+
+    user.staff = staff
+
+    return SimpleNamespace(
+        id=user_id,
+        clinic_id=clinic_id,
+        is_active=is_active,
+        role=role,
+        staff=staff,
+        user=user,
+        status=staff_status,
+    )
 
 
 def _make_report(
@@ -52,26 +92,6 @@ def _make_report(
     )
 
 
-def _requester(
-    *,
-    user_id=1,
-    clinic_id=10,
-    is_active=True,
-    staff_id=100,
-    staff_status=StaffStatus.ACTIVE,
-):
-    return SimpleNamespace(
-        id=user_id,
-        clinic_id=clinic_id,
-        is_active=is_active,
-        staff=SimpleNamespace(
-            id=staff_id,
-            clinic_id=clinic_id,
-            status=staff_status,
-        ),
-    )
-
-
 def _clinic(
     *,
     clinic_id=10,
@@ -80,6 +100,7 @@ def _clinic(
     return SimpleNamespace(
         id=clinic_id,
         is_active=is_active,
+        status="active" if is_active else "inactive",
     )
 
 
@@ -121,6 +142,23 @@ class TestReportTypeCoercion:
         with pytest.raises(ValidationError):
             service._coerce_report_type(None)
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            1,
+            1.0,
+            True,
+            [],
+            {},
+        ],
+    )
+    def test_rejects_non_enum_non_string_values(
+        self,
+        value,
+    ):
+        with pytest.raises(ValidationError):
+            service._coerce_report_type(value)
+
 
 class TestReportFormatCoercion:
     def test_accepts_enum(self):
@@ -146,6 +184,23 @@ class TestReportFormatCoercion:
     def test_rejects_none(self):
         with pytest.raises(ValidationError):
             service._coerce_report_format(None)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            1,
+            1.0,
+            True,
+            [],
+            {},
+        ],
+    )
+    def test_rejects_non_enum_non_string_values(
+        self,
+        value,
+    ):
+        with pytest.raises(ValidationError):
+            service._coerce_report_format(value)
 
 
 class TestNormalizeFilters:
@@ -207,7 +262,10 @@ class TestNormalizeFilters:
             {},
         ],
     )
-    def test_rejects_non_boolean_active_only(self, value):
+    def test_rejects_non_boolean_active_only(
+        self,
+        value,
+    ):
         with pytest.raises(ValidationError):
             service._normalize_filters(
                 {
@@ -233,8 +291,17 @@ class TestNormalizeFilters:
             }
         )
 
-        assert result["date_from"] == date(2026, 1, 1)
-        assert result["date_to"] == date(2026, 1, 31)
+        assert result["date_from"] == date(
+            2026,
+            1,
+            1,
+        )
+
+        assert result["date_to"] == date(
+            2026,
+            1,
+            31,
+        )
 
     def test_accepts_iso_dates(self):
         result = service._normalize_filters(
@@ -244,8 +311,17 @@ class TestNormalizeFilters:
             }
         )
 
-        assert result["date_from"] == date(2026, 1, 1)
-        assert result["date_to"] == date(2026, 1, 31)
+        assert result["date_from"] == date(
+            2026,
+            1,
+            1,
+        )
+
+        assert result["date_to"] == date(
+            2026,
+            1,
+            31,
+        )
 
     def test_rejects_invalid_date_from(self):
         with pytest.raises(ValidationError):
@@ -280,8 +356,17 @@ class TestNormalizeFilters:
             }
         )
 
-        assert result["date_from"] == date(2026, 1, 1)
-        assert result["date_to"] == date(2026, 1, 1)
+        assert result["date_from"] == date(
+            2026,
+            1,
+            1,
+        )
+
+        assert result["date_to"] == date(
+            2026,
+            1,
+            1,
+        )
 
     def test_normalizes_naive_datetime_values_to_utc(self):
         start = datetime(
@@ -291,6 +376,7 @@ class TestNormalizeFilters:
             10,
             30,
         )
+
         end = datetime(
             2026,
             1,
@@ -317,7 +403,9 @@ class TestNormalizeFilters:
         assert result["date_from"].tzinfo is timezone.utc
         assert result["date_to"].tzinfo is timezone.utc
 
-    def test_accepts_mixed_date_and_datetime_when_order_is_valid(self):
+    def test_accepts_mixed_date_and_datetime_when_order_is_valid(
+        self,
+    ):
         end = datetime(
             2026,
             1,
@@ -328,12 +416,20 @@ class TestNormalizeFilters:
 
         result = service._normalize_filters(
             {
-                "date_from": date(2026, 1, 1),
+                "date_from": date(
+                    2026,
+                    1,
+                    1,
+                ),
                 "date_to": end,
             }
         )
 
-        assert result["date_from"] == date(2026, 1, 1)
+        assert result["date_from"] == date(
+            2026,
+            1,
+            1,
+        )
 
         assert result["date_to"] == end.replace(
             tzinfo=timezone.utc
@@ -359,13 +455,17 @@ class TestNormalizeFilters:
         assert result["date_from"].tzinfo is timezone.utc
 
     def test_normalizes_non_utc_aware_datetime(self):
+        from datetime import timedelta
+
         value = datetime(
             2026,
             1,
             1,
             10,
             30,
-            tzinfo=timezone.utc,
+            tzinfo=timezone(
+                timedelta(hours=2)
+            ),
         )
 
         result = service._normalize_filters(
@@ -374,8 +474,16 @@ class TestNormalizeFilters:
             }
         )
 
-        assert result["date_from"] == value
         assert result["date_from"].tzinfo is timezone.utc
+
+        assert result["date_from"] == datetime(
+            2026,
+            1,
+            1,
+            8,
+            30,
+            tzinfo=timezone.utc,
+        )
 
 
 class TestSerializeFilters:
@@ -385,8 +493,16 @@ class TestSerializeFilters:
     def test_serializes_date_values(self):
         result = service._serialize_filters(
             {
-                "date_from": date(2026, 1, 1),
-                "date_to": date(2026, 1, 31),
+                "date_from": date(
+                    2026,
+                    1,
+                    1,
+                ),
+                "date_to": date(
+                    2026,
+                    1,
+                    31,
+                ),
                 "active_only": True,
             }
         )
@@ -417,6 +533,29 @@ class TestSerializeFilters:
 
         assert result["date_from"].startswith(
             "2026-01-01T10:30"
+        )
+
+    def test_serializes_decimal_values(self):
+        result = service._serialize_filters(
+            {
+                "amount": Decimal(
+                    "123.45"
+                ),
+            }
+        )
+
+        assert result["amount"] == "123.45"
+
+    def test_serializes_enum_values(self):
+        result = service._serialize_filters(
+            {
+                "report_type": ReportType.PATIENTS,
+            }
+        )
+
+        assert (
+            result["report_type"]
+            == ReportType.PATIENTS.value
         )
 
 
@@ -456,7 +595,11 @@ class TestApplyDatetimeRange:
         result = service._apply_datetime_range(
             query=query,
             column=FakeColumn(),
-            date_from=date(2026, 1, 1),
+            date_from=date(
+                2026,
+                1,
+                1,
+            ),
             date_to=None,
         )
 
@@ -478,15 +621,16 @@ class TestApplyDatetimeRange:
             query=query,
             column=FakeColumn(),
             date_from=None,
-            date_to=date(2026, 1, 31),
+            date_to=date(
+                2026,
+                1,
+                31,
+            ),
         )
 
         assert result is query
         assert len(query.filters) == 1
-        assert query.filters[0][0] in {
-            "lt",
-            "lte",
-        }
+        assert query.filters[0][0] == "lt"
 
     def test_both_dates_apply_range(self):
         class FakeColumn:
@@ -504,17 +648,22 @@ class TestApplyDatetimeRange:
         result = service._apply_datetime_range(
             query=query,
             column=FakeColumn(),
-            date_from=date(2026, 1, 1),
-            date_to=date(2026, 1, 31),
+            date_from=date(
+                2026,
+                1,
+                1,
+            ),
+            date_to=date(
+                2026,
+                1,
+                31,
+            ),
         )
 
         assert result is query
         assert len(query.filters) == 2
         assert query.filters[0][0] == "gte"
-        assert query.filters[1][0] in {
-            "lt",
-            "lte",
-        }
+        assert query.filters[1][0] == "lt"
 
 
 class TestGatherers:
@@ -536,7 +685,6 @@ class TestGatherers:
         report_type,
     ):
         assert report_type in service._GATHERERS
-
         assert callable(
             service._GATHERERS[report_type]
         )
@@ -657,7 +805,6 @@ class TestWriterRegistry:
         report_format,
     ):
         assert report_format in service._WRITERS
-
         assert callable(
             service._WRITERS[report_format]
         )
@@ -818,6 +965,98 @@ class TestAuthorization:
         with pytest.raises(ValidationError):
             service._get_requester(999999)
 
+    def test_get_requester_rejects_missing_staff(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=True,
+            staff=None,
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        with pytest.raises(ValidationError):
+            service._get_requester(1)
+
+    def test_get_requester_rejects_inactive_user(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=False,
+            staff=SimpleNamespace(
+                id=100,
+                clinic_id=10,
+                status=StaffStatus.ACTIVE,
+            ),
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        with pytest.raises(ValidationError):
+            service._get_requester(1)
+
+    def test_get_requester_rejects_inactive_staff(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=True,
+            staff=SimpleNamespace(
+                id=100,
+                clinic_id=10,
+                status=StaffStatus.SUSPENDED,
+            ),
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        with pytest.raises(ValidationError):
+            service._get_requester(1)
+
+    def test_get_requester_rejects_clinic_mismatch(
+        self,
+        monkeypatch,
+    ):
+        user = SimpleNamespace(
+            id=1,
+            clinic_id=10,
+            is_active=True,
+            staff=SimpleNamespace(
+                id=100,
+                clinic_id=20,
+                status=StaffStatus.ACTIVE,
+            ),
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda *args, **kwargs: user,
+        )
+
+        with pytest.raises(ValidationError):
+            service._get_requester(1)
+
     def test_get_clinic_rejects_missing_clinic(
         self,
         monkeypatch,
@@ -828,7 +1067,7 @@ class TestAuthorization:
             lambda *args, **kwargs: None,
         )
 
-        with pytest.raises(DomainError):
+        with pytest.raises(NotFoundError):
             service._get_clinic(999999)
 
     def test_get_requester_rejects_non_positive_id(self):
@@ -843,46 +1082,485 @@ class TestAuthorization:
         with pytest.raises(ValidationError):
             service._get_requester(True)
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "1",
+            1.0,
+            "001",
+        ],
+    )
+    def test_get_requester_rejects_coercible_non_int_id(
+        self,
+        value,
+    ):
+        with pytest.raises(ValidationError):
+            service._get_requester(value)
+
     def test_get_clinic_rejects_non_positive_id(self):
-        with pytest.raises(DomainError):
+        with pytest.raises(ValidationError):
             service._get_clinic(0)
 
     def test_get_clinic_rejects_negative_id(self):
-        with pytest.raises(DomainError):
+        with pytest.raises(ValidationError):
             service._get_clinic(-1)
+
+    def test_get_clinic_rejects_boolean_id(self):
+        with pytest.raises(ValidationError):
+            service._get_clinic(True)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "10",
+            10.0,
+            "0010",
+        ],
+    )
+    def test_get_clinic_rejects_coercible_non_int_id(
+        self,
+        value,
+    ):
+        with pytest.raises(ValidationError):
+            service._get_clinic(value)
+
+    def test_get_requester_clinic_id_returns_valid_int(self):
+        requester = _requester(
+            clinic_id=10
+        ).staff
+
+        result = service._get_requester_clinic_id(
+            requester
+        )
+
+        assert result == 10
+        assert isinstance(
+            result,
+            int,
+        )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            "10",
+            10.0,
+            True,
+            False,
+            0,
+            -1,
+        ],
+    )
+    def test_get_requester_clinic_id_rejects_non_strict_values(
+        self,
+        clinic_id,
+    ):
+        requester = _requester(
+            clinic_id=clinic_id
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._get_requester_clinic_id(
+                requester
+            )
+
+    def test_get_requester_clinic_id_returns_none_without_assignment(
+        self,
+    ):
+        requester = _requester(
+            clinic_id=None
+        ).staff
+
+        assert (
+            service._get_requester_clinic_id(
+                requester
+            )
+            is None
+        )
+
+
+class TestRoleResolution:
+    def test_doctor_is_not_admin(self):
+        requester = _requester(
+            role=Role.DOCTOR
+        ).staff
+
+        assert service._is_admin(
+            requester
+        ) is False
+
+        assert service._is_super_admin(
+            requester
+        ) is False
+
+    def test_admin_is_admin_but_not_super_admin(self):
+        requester = _requester(
+            role=Role.ADMIN
+        ).staff
+
+        assert service._is_admin(
+            requester
+        ) is True
+
+        assert service._is_super_admin(
+            requester
+        ) is False
+
+    def test_super_admin_is_admin_and_super_admin(self):
+        requester = _requester(
+            role=Role.SUPER_ADMIN
+        ).staff
+
+        assert service._is_admin(
+            requester
+        ) is True
+
+        assert service._is_super_admin(
+            requester
+        ) is True
+
+
+class TestClinicScope:
+    def test_regular_staff_defaults_to_own_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.DOCTOR,
+        ).staff
+
+        result = service._resolve_clinic_scope(
+            requester,
+            None,
+        )
+
+        assert result == 10
+
+    def test_regular_staff_can_explicitly_request_own_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.NURSE,
+        ).staff
+
+        result = service._resolve_clinic_scope(
+            requester,
+            10,
+        )
+
+        assert result == 10
+
+    def test_regular_staff_cannot_access_other_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.DOCTOR,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._resolve_clinic_scope(
+                requester,
+                20,
+            )
+
+    def test_admin_defaults_to_own_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.ADMIN,
+        ).staff
+
+        result = service._resolve_clinic_scope(
+            requester,
+            None,
+        )
+
+        assert result == 10
+
+    def test_admin_cannot_access_other_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.ADMIN,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._resolve_clinic_scope(
+                requester,
+                20,
+            )
+
+    def test_super_admin_without_requested_clinic_is_system_wide(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        ).staff
+
+        result = service._resolve_clinic_scope(
+            requester,
+            None,
+        )
+
+        assert result is None
+
+    def test_super_admin_can_select_other_clinic(
+        self,
+        monkeypatch,
+    ):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        ).staff
+
+        clinic = _clinic(
+            clinic_id=20
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_get_clinic",
+            lambda clinic_id: clinic,
+        )
+
+        result = service._resolve_clinic_scope(
+            requester,
+            20,
+        )
+
+        assert result == 20
 
     @pytest.mark.parametrize(
         "clinic_id",
         [
             0,
             -1,
+            True,
+            "20",
+            20.0,
         ],
     )
-    def test_list_reports_rejects_invalid_clinic_id(
+    def test_super_admin_still_requires_strict_clinic_id(
+        self,
+        monkeypatch,
+        clinic_id,
+    ):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        ).staff
+
+        monkeypatch.setattr(
+            service,
+            "_get_clinic",
+            lambda clinic_id: _clinic(
+                clinic_id=20
+            ),
+        )
+
+        with pytest.raises(ValidationError):
+            service._resolve_clinic_scope(
+                requester,
+                clinic_id,
+            )
+
+    def test_unassigned_staff_is_rejected(
+        self,
+    ):
+        requester = _requester(
+            clinic_id=None,
+            role=Role.DOCTOR,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._resolve_clinic_scope(
+                requester,
+                None,
+            )
+
+
+class TestReportGeneratorAuthorization:
+    def test_regular_staff_can_generate_for_own_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.DOCTOR,
+        ).staff
+
+        result = service._validate_report_generator(
+            requester,
+            10,
+        )
+
+        assert result is requester
+
+    def test_admin_can_generate_for_own_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.ADMIN,
+        ).staff
+
+        result = service._validate_report_generator(
+            requester,
+            10,
+        )
+
+        assert result is requester
+
+    def test_admin_cannot_generate_for_other_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.ADMIN,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._validate_report_generator(
+                requester,
+                20,
+            )
+
+    def test_super_admin_can_generate_for_other_clinic(self):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        ).staff
+
+        result = service._validate_report_generator(
+            requester,
+            20,
+        )
+
+        assert result is requester
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            0,
+            -1,
+            True,
+            "10",
+            10.0,
+        ],
+    )
+    def test_generator_rejects_non_strict_clinic_id(
+        self,
+        clinic_id,
+    ):
+        requester = _requester(
+            clinic_id=10,
+            role=Role.DOCTOR,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._validate_report_generator(
+                requester,
+                clinic_id,
+            )
+
+    def test_unassigned_staff_cannot_generate(
+        self,
+    ):
+        requester = _requester(
+            clinic_id=None,
+            role=Role.DOCTOR,
+        ).staff
+
+        with pytest.raises(ValidationError):
+            service._validate_report_generator(
+                requester,
+                10,
+            )
+
+
+class TestGeneratedByScope:
+    def test_valid_generator_scope(
+        self,
+        monkeypatch,
+    ):
+        staff = _generator(
+            staff_id=100,
+            clinic_id=10,
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda model, object_id: staff,
+        )
+
+        result = service._validate_generated_by_scope(
+            100,
+            10,
+        )
+
+        assert result is None
+
+    def test_missing_generator_raises_not_found(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda *args, **kwargs: None,
+        )
+
+        with pytest.raises(NotFoundError):
+            service._validate_generated_by_scope(
+                100,
+                10,
+            )
+
+    def test_generator_cross_clinic_is_rejected(
+        self,
+        monkeypatch,
+    ):
+        staff = _generator(
+            staff_id=100,
+            clinic_id=20,
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            lambda model, object_id: staff,
+        )
+
+        with pytest.raises(ValidationError):
+            service._validate_generated_by_scope(
+                100,
+                10,
+            )
+
+    @pytest.mark.parametrize(
+        "generated_by_id",
+        [
+            0,
+            -1,
+            True,
+            "100",
+            100.0,
+        ],
+    )
+    def test_rejects_non_strict_generator_id(
+        self,
+        generated_by_id,
+    ):
+        with pytest.raises(ValidationError):
+            service._validate_generated_by_scope(
+                generated_by_id,
+                10,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            0,
+            -1,
+            True,
+            "10",
+            10.0,
+        ],
+    )
+    def test_rejects_non_strict_clinic_id(
         self,
         clinic_id,
     ):
         with pytest.raises(ValidationError):
-            service.list_reports(
-                requester_user_id=1,
-                clinic_id=clinic_id,
-            )
-
-    @pytest.mark.parametrize(
-        "requester_user_id",
-        [
-            0,
-            -1,
-        ],
-    )
-    def test_list_reports_rejects_invalid_requester_id(
-        self,
-        requester_user_id,
-    ):
-        with pytest.raises(ValidationError):
-            service.list_reports(
-                requester_user_id=requester_user_id,
-                clinic_id=1,
+            service._validate_generated_by_scope(
+                100,
+                clinic_id,
             )
 
 
@@ -908,6 +1586,23 @@ class TestGetReport:
                 requester_user_id=1,
             )
 
+    @pytest.mark.parametrize(
+        "report_id",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_report_id(
+        self,
+        report_id,
+    ):
+        with pytest.raises(ValidationError):
+            service.get_report(
+                report_id=report_id,
+                requester_user_id=1,
+            )
+
     def test_rejects_invalid_requester_id(self):
         with pytest.raises(ValidationError):
             service.get_report(
@@ -929,11 +1624,31 @@ class TestGetReport:
                 requester_user_id=True,
             )
 
+    @pytest.mark.parametrize(
+        "requester_user_id",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_requester_id(
+        self,
+        requester_user_id,
+    ):
+        with pytest.raises(ValidationError):
+            service.get_report(
+                report_id=1,
+                requester_user_id=requester_user_id,
+            )
+
     def test_missing_report_raises_not_found_error(
         self,
         monkeypatch,
     ):
-        requester = _requester()
+        requester = _requester(
+            user_id=1,
+            clinic_id=10,
+        )
 
         def fake_get(model, object_id):
             if (
@@ -964,12 +1679,13 @@ class TestGetReport:
             user_id=1,
             clinic_id=10,
             staff_id=100,
+            role=Role.DOCTOR,
         )
 
         report = _make_report(
             report_id=1,
             clinic_id=10,
-            generated_by_id=1,
+            generated_by_id=100,
         )
 
         def fake_get(model, object_id):
@@ -1007,11 +1723,13 @@ class TestGetReport:
         requester = _requester(
             user_id=1,
             clinic_id=10,
+            role=Role.DOCTOR,
         )
 
         report = _make_report(
             report_id=1,
             clinic_id=20,
+            generated_by_id=200,
         )
 
         def fake_get(model, object_id):
@@ -1035,11 +1753,64 @@ class TestGetReport:
             fake_get,
         )
 
-        with pytest.raises(DomainError):
+        with pytest.raises(ValidationError):
             service.get_report(
                 report_id=report.id,
                 requester_user_id=requester.id,
             )
+
+    def test_super_admin_can_access_cross_clinic_report(
+        self,
+        monkeypatch,
+    ):
+        requester = _requester(
+            user_id=1,
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        )
+
+        report = _make_report(
+            report_id=1,
+            clinic_id=20,
+            generated_by_id=200,
+        )
+
+        def fake_get(model, object_id):
+            if (
+                model is service.User
+                and object_id == requester.id
+            ):
+                return requester
+
+            if (
+                model is service.GeneratedReport
+                and object_id == report.id
+            ):
+                return report
+
+            return None
+
+        monkeypatch.setattr(
+            service.db.session,
+            "get",
+            fake_get,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_get_clinic",
+            lambda clinic_id: _clinic(
+                clinic_id=clinic_id,
+                is_active=True,
+            ),
+        )
+
+        result = service.get_report(
+            report_id=report.id,
+            requester_user_id=requester.id,
+        )
+
+        assert result is report
 
 
 class TestListReportsValidation:
@@ -1070,6 +1841,25 @@ class TestListReportsValidation:
                 per_page=20,
             )
 
+    @pytest.mark.parametrize(
+        "page",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_page(
+        self,
+        page,
+    ):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                page=page,
+                per_page=20,
+            )
+
     def test_rejects_invalid_per_page(self):
         with pytest.raises(ValidationError):
             service.list_reports(
@@ -1097,10 +1887,46 @@ class TestListReportsValidation:
                 per_page=True,
             )
 
+    @pytest.mark.parametrize(
+        "per_page",
+        [
+            "20",
+            20.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_per_page(
+        self,
+        per_page,
+    ):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                page=1,
+                per_page=per_page,
+            )
+
     def test_rejects_invalid_requester(self):
         with pytest.raises(ValidationError):
             service.list_reports(
                 requester_user_id=0,
+                clinic_id=1,
+            )
+
+    @pytest.mark.parametrize(
+        "requester_user_id",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_requester(
+        self,
+        requester_user_id,
+    ):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=requester_user_id,
                 clinic_id=1,
             )
 
@@ -1116,6 +1942,24 @@ class TestListReportsValidation:
             service.list_reports(
                 requester_user_id=1,
                 clinic_id=-1,
+            )
+
+    @pytest.mark.parametrize(
+        "clinic_id",
+        [
+            "1",
+            1.0,
+            True,
+        ],
+    )
+    def test_rejects_coercible_non_int_clinic(
+        self,
+        clinic_id,
+    ):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=clinic_id,
             )
 
     def test_rejects_reversed_dates(self):
@@ -1159,6 +2003,24 @@ class TestListReportsValidation:
                 generated_by_id=True,
             )
 
+    @pytest.mark.parametrize(
+        "generated_by_id",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_rejects_coercible_non_int_generated_by_id(
+        self,
+        generated_by_id,
+    ):
+        with pytest.raises(ValidationError):
+            service.list_reports(
+                requester_user_id=1,
+                clinic_id=1,
+                generated_by_id=generated_by_id,
+            )
+
     def test_rejects_invalid_report_type(self):
         with pytest.raises(ValidationError):
             service.list_reports(
@@ -1182,7 +2044,7 @@ class TestListReportsValidation:
         requester = _requester(
             user_id=1,
             clinic_id=10,
-        )
+        ).staff
 
         monkeypatch.setattr(
             service,
@@ -1207,6 +2069,9 @@ class TestGenerateReportValidation:
         [
             0,
             -1,
+            True,
+            "1",
+            1.0,
         ],
     )
     def test_rejects_invalid_requester_id(
@@ -1221,20 +2086,14 @@ class TestGenerateReportValidation:
                 report_format=ReportFormat.CSV,
             )
 
-    def test_rejects_boolean_requester_id(self):
-        with pytest.raises(ValidationError):
-            service.generate_report(
-                requester_user_id=True,
-                clinic_id=1,
-                report_type=ReportType.PATIENTS,
-                report_format=ReportFormat.CSV,
-            )
-
     @pytest.mark.parametrize(
         "clinic_id",
         [
             0,
             -1,
+            True,
+            "1",
+            1.0,
         ],
     )
     def test_rejects_invalid_clinic_id(
@@ -1245,15 +2104,6 @@ class TestGenerateReportValidation:
             service.generate_report(
                 requester_user_id=1,
                 clinic_id=clinic_id,
-                report_type=ReportType.PATIENTS,
-                report_format=ReportFormat.CSV,
-            )
-
-    def test_rejects_boolean_clinic_id(self):
-        with pytest.raises(ValidationError):
-            service.generate_report(
-                requester_user_id=1,
-                clinic_id=True,
                 report_type=ReportType.PATIENTS,
                 report_format=ReportFormat.CSV,
             )
@@ -1283,7 +2133,7 @@ class TestGenerateReportValidation:
         requester = _requester(
             user_id=1,
             clinic_id=10,
-        )
+        ).staff
 
         clinic = _clinic(
             clinic_id=10,
@@ -1303,10 +2153,7 @@ class TestGenerateReportValidation:
         )
 
         with pytest.raises(
-            (
-                ValidationError,
-                DomainError,
-            )
+            ValidationError
         ):
             service.generate_report(
                 requester_user_id=1,
@@ -1314,6 +2161,114 @@ class TestGenerateReportValidation:
                 report_type=ReportType.INVENTORY,
                 report_format=ReportFormat.CSV,
             )
+
+
+class TestGenerateReportAuthorization:
+    def test_admin_cross_clinic_generation_is_rejected(
+        self,
+        monkeypatch,
+    ):
+        requester = _requester(
+            user_id=1,
+            clinic_id=10,
+            role=Role.ADMIN,
+        ).staff
+
+        monkeypatch.setattr(
+            service,
+            "_get_requester",
+            lambda user_id: requester,
+        )
+
+        with pytest.raises(ValidationError):
+            service.generate_report(
+                requester_user_id=1,
+                clinic_id=20,
+                report_type=ReportType.PATIENTS,
+                report_format=ReportFormat.CSV,
+            )
+
+    def test_super_admin_cross_clinic_generation_reaches_active_clinic_check(
+        self,
+        monkeypatch,
+    ):
+        requester = _requester(
+            user_id=1,
+            clinic_id=10,
+            role=Role.SUPER_ADMIN,
+        ).staff
+
+        clinic = _clinic(
+            clinic_id=20,
+            is_active=True,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_get_requester",
+            lambda user_id: requester,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_get_clinic",
+            lambda clinic_id: clinic,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_validate_report_generator",
+            lambda requester, clinic_id: requester,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_gather_patients",
+            lambda *args, **kwargs: [],
+        )
+
+        monkeypatch.setattr(
+            service,
+            "_save_report_file",
+            lambda *args, **kwargs:
+                "generated_reports/test.csv",
+        )
+
+        monkeypatch.setattr(
+            service,
+            "GeneratedReport",
+            lambda **kwargs: SimpleNamespace(
+                id=99,
+                **kwargs,
+            ),
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "add",
+            lambda obj: None,
+        )
+
+        monkeypatch.setattr(
+            service.db.session,
+            "flush",
+            lambda: None,
+        )
+
+        monkeypatch.setattr(
+            service,
+            "create_audit_log",
+            lambda *args, **kwargs: None,
+        )
+
+        result = service.generate_report(
+            requester_user_id=1,
+            clinic_id=20,
+            report_type=ReportType.PATIENTS,
+            report_format=ReportFormat.CSV,
+        )
+
+        assert result.clinic_id == 20
 
 
 class TestGenerateReportOrchestration:
@@ -1325,11 +2280,14 @@ class TestGenerateReportOrchestration:
         clinic=None,
         generator=None,
     ):
-        requester = requester or _requester()
+        requester = requester or _requester(
+            role=Role.DOCTOR
+        ).staff
+
         clinic = clinic or _clinic()
 
         generator = generator or _generator(
-            staff_id=requester.staff.id,
+            staff_id=requester.id,
             clinic_id=clinic.id,
         )
 
@@ -1432,7 +2390,7 @@ class TestGenerateReportOrchestration:
         )
 
         result = service.generate_report(
-            requester_user_id=requester.id,
+            requester_user_id=requester.user.id,
             clinic_id=clinic.id,
             report_type=ReportType.PATIENTS,
             report_format=ReportFormat.CSV,
@@ -1489,7 +2447,7 @@ class TestGenerateReportOrchestration:
         )
 
         service.generate_report(
-            requester_user_id=requester.id,
+            requester_user_id=requester.user.id,
             clinic_id=clinic.id,
             report_type=ReportType.PATIENTS,
             report_format=ReportFormat.CSV,
@@ -1517,7 +2475,7 @@ class TestGenerateReportOrchestration:
 
         with pytest.raises(ValidationError):
             service.generate_report(
-                requester_user_id=requester.id,
+                requester_user_id=requester.user.id,
                 clinic_id=clinic.id,
                 report_type=ReportType.PATIENTS,
                 report_format=ReportFormat.CSV,
@@ -1538,7 +2496,7 @@ class TestGenerateReportOrchestration:
 
         with pytest.raises(ValidationError):
             service.generate_report(
-                requester_user_id=requester.id,
+                requester_user_id=requester.user.id,
                 clinic_id=clinic.id,
                 report_type=ReportType.PATIENTS,
                 report_format=ReportFormat.CSV,
@@ -1559,7 +2517,7 @@ class TestGenerateReportOrchestration:
 
         with pytest.raises(ValidationError):
             service.generate_report(
-                requester_user_id=requester.id,
+                requester_user_id=requester.user.id,
                 clinic_id=clinic.id,
                 report_type=ReportType.PATIENTS,
                 report_format=ReportFormat.CSV,
@@ -1610,7 +2568,7 @@ class TestGenerateReportOrchestration:
         )
 
         service.generate_report(
-            requester_user_id=requester.id,
+            requester_user_id=requester.user.id,
             clinic_id=clinic.id,
             report_type=ReportType.PATIENTS,
             report_format=ReportFormat.CSV,
@@ -1659,7 +2617,7 @@ class TestGenerateReportOrchestration:
         )
 
         service.generate_report(
-            requester_user_id=requester.id,
+            requester_user_id=requester.user.id,
             clinic_id=clinic.id,
             report_type=ReportType.PATIENTS,
             report_format=ReportFormat.CSV,
@@ -1675,11 +2633,19 @@ class TestGenerateReportOrchestration:
         assert captured["filters"]["active_only"] is False
         assert (
             captured["filters"]["date_from"]
-            == date(2026, 1, 1)
+            == date(
+                2026,
+                1,
+                1,
+            )
         )
         assert (
             captured["filters"]["date_to"]
-            == date(2026, 1, 31)
+            == date(
+                2026,
+                1,
+                31,
+            )
         )
         assert captured["kwargs"] == {}
 
@@ -1791,7 +2757,11 @@ class TestValueHelpers:
 
     def test_iso_date(self):
         result = service._iso(
-            date(2026, 1, 1)
+            date(
+                2026,
+                1,
+                1,
+            )
         )
 
         assert result == "2026-01-01"
@@ -1997,7 +2967,11 @@ class TestDateSemantics:
 
         assert (
             value["date_from"]
-            == date(2026, 1, 1)
+            == date(
+                2026,
+                1,
+                1,
+            )
         )
 
     def test_date_to_is_preserved_as_inclusive_date(self):
@@ -2009,7 +2983,11 @@ class TestDateSemantics:
 
         assert (
             value["date_to"]
-            == date(2026, 1, 31)
+            == date(
+                2026,
+                1,
+                31,
+            )
         )
 
     def test_same_day_range_is_valid(self):
@@ -2046,7 +3024,11 @@ class TestDateSemantics:
 
         assert (
             result["date_from"]
-            == date(2026, 1, 1)
+            == date(
+                2026,
+                1,
+                1,
+            )
         )
 
         assert (
@@ -2067,7 +3049,11 @@ class TestDateSemantics:
 
         assert (
             result["date_to"]
-            == date(2026, 1, 31)
+            == date(
+                2026,
+                1,
+                31,
+            )
         )
 
         assert (
@@ -2223,6 +3209,40 @@ class TestPaginationContract:
             service._validate_pagination(
                 1,
                 True,
+            )
+
+    @pytest.mark.parametrize(
+        "page",
+        [
+            "1",
+            1.0,
+        ],
+    )
+    def test_non_strict_page_is_rejected(
+        self,
+        page,
+    ):
+        with pytest.raises(ValidationError):
+            service._validate_pagination(
+                page,
+                20,
+            )
+
+    @pytest.mark.parametrize(
+        "per_page",
+        [
+            "20",
+            20.0,
+        ],
+    )
+    def test_non_strict_per_page_is_rejected(
+        self,
+        per_page,
+    ):
+        with pytest.raises(ValidationError):
+            service._validate_pagination(
+                1,
+                per_page,
             )
 
 
