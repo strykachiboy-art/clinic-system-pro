@@ -366,7 +366,6 @@ def test_excuse_approval_is_admin_only(
     response = client.post(
         "/api/staff/excuses/1/approve",
         headers=doctor_headers,
-        json={},
     )
 
     assert response.status_code == 403
@@ -379,7 +378,6 @@ def test_excuse_rejection_is_admin_only(
     response = client.post(
         "/api/staff/excuses/1/reject",
         headers=doctor_headers,
-        json={},
     )
 
     assert response.status_code == 403
@@ -1365,6 +1363,86 @@ def test_create_excuse_success(
     assert "actor_user_id" not in kwargs
 
 
+def test_create_excuse_with_leave_request(
+    client,
+    doctor_headers,
+    doctor_staff,
+    monkeypatch,
+    staff_routes,
+):
+    excuse = make_excuse_object(
+        staff_id=doctor_staff.id,
+        leave_request_id=7,
+    )
+
+    service = Mock(return_value=excuse)
+
+    monkeypatch.setattr(
+        staff_routes,
+        "create_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses",
+        headers=doctor_headers,
+        json={
+            "leave_request_id": 7,
+            "excuse_type": ExcuseType.MEDICAL.value,
+            "description": "Medical appointment",
+        },
+    )
+
+    body = assert_success(response, 201)
+
+    assert body["data"]["leave_request_id"] == 7
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["leave_request_id"] == 7
+
+
+def test_create_excuse_with_document_url(
+    client,
+    doctor_headers,
+    doctor_staff,
+    monkeypatch,
+    staff_routes,
+):
+    document_url = "https://example.com/document.pdf"
+
+    excuse = make_excuse_object(
+        staff_id=doctor_staff.id,
+        document_url=document_url,
+    )
+
+    service = Mock(return_value=excuse)
+
+    monkeypatch.setattr(
+        staff_routes,
+        "create_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses",
+        headers=doctor_headers,
+        json={
+            "excuse_type": ExcuseType.MEDICAL.value,
+            "description": "Medical appointment",
+            "document_url": document_url,
+        },
+    )
+
+    body = assert_success(response, 201)
+
+    assert body["data"]["document_url"] == document_url
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["document_url"] == document_url
+
+
 def test_create_excuse_missing_description_returns_422(
     client,
     doctor_headers,
@@ -1422,6 +1500,40 @@ def test_create_excuse_invalid_type_returns_422(
         json={
             "excuse_type": "not-real",
             "description": "Valid description",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_excuse_invalid_leave_request_id_returns_422(
+    client,
+    doctor_headers,
+):
+    response = client.post(
+        "/api/staff/excuses",
+        headers=doctor_headers,
+        json={
+            "leave_request_id": 0,
+            "excuse_type": ExcuseType.MEDICAL.value,
+            "description": "Medical appointment",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_excuse_invalid_document_url_returns_422(
+    client,
+    doctor_headers,
+):
+    response = client.post(
+        "/api/staff/excuses",
+        headers=doctor_headers,
+        json={
+            "excuse_type": ExcuseType.MEDICAL.value,
+            "description": "Medical appointment",
+            "document_url": "",
         },
     )
 
@@ -1546,6 +1658,78 @@ def test_list_excuses_non_admin_is_forced_to_own_staff(
     )
 
 
+def test_list_excuses_invalid_staff_id_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?staff_id=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_excuses_invalid_leave_request_id_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?leave_request_id=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_excuses_invalid_type_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?excuse_type=invalid",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_excuses_invalid_status_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?status=invalid",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_excuses_invalid_page_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?page=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_excuses_invalid_per_page_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.get(
+        "/api/staff/excuses?per_page=0",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+
+
 def test_list_my_excuses_success(
     client,
     doctor_headers,
@@ -1630,6 +1814,8 @@ def test_list_my_excuses_forwards_pagination(
 
     kwargs = service.call_args.kwargs
 
+    assert kwargs["clinic_id"] == doctor_staff.clinic_id
+    assert kwargs["staff_id"] == doctor_staff.id
     assert kwargs["page"] == 2
     assert kwargs["per_page"] == 5
 
@@ -1646,10 +1832,12 @@ def test_get_own_excuse_success(
         staff_id=doctor_staff.id,
     )
 
+    service = Mock(return_value=excuse)
+
     monkeypatch.setattr(
         staff_routes,
         "get_excuse",
-        Mock(return_value=excuse),
+        service,
     )
 
     response = client.get(
@@ -1660,6 +1848,11 @@ def test_get_own_excuse_success(
     body = assert_success(response, 200)
 
     assert body["data"]["id"] == 7
+
+    kwargs = service.call_args.kwargs
+
+    assert kwargs["excuse_id"] == 7
+    assert kwargs["clinic_id"] == doctor_staff.clinic_id
 
 
 def test_get_foreign_excuse_is_hidden_from_non_admin(
@@ -1711,7 +1904,6 @@ def test_approve_excuse_success(
     response = client.post(
         "/api/staff/excuses/1/approve",
         headers=admin_headers,
-        json={},
     )
 
     body = assert_success(response, 200)
@@ -1726,6 +1918,36 @@ def test_approve_excuse_success(
     assert kwargs["excuse_id"] == 1
     assert kwargs["clinic_id"] == admin_staff.clinic_id
     assert kwargs["reviewer_user_id"] == admin_staff.user_id
+
+
+def test_approve_excuse_does_not_require_json_body(
+    client,
+    admin_headers,
+    admin_staff,
+    monkeypatch,
+    staff_routes,
+):
+    excuse = make_excuse_object(
+        status=ExcuseStatus.APPROVED,
+        reviewed_by_user_id=admin_staff.user_id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+
+    service = Mock(return_value=excuse)
+
+    monkeypatch.setattr(
+        staff_routes,
+        "approve_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses/1/approve",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+    assert service.called
 
 
 def test_reject_excuse_success(
@@ -1771,6 +1993,155 @@ def test_reject_excuse_success(
     assert kwargs["clinic_id"] == admin_staff.clinic_id
     assert kwargs["reviewer_user_id"] == admin_staff.user_id
     assert kwargs["reason"] == "Insufficient documentation"
+
+
+def test_reject_excuse_missing_json_returns_400(
+    client,
+    admin_headers,
+):
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 400
+
+
+def test_reject_excuse_blank_reason_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+        json={
+            "reason": "",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_reject_excuse_reason_too_long_returns_422(
+    client,
+    admin_headers,
+):
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+        json={
+            "reason": "x" * 2001,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_reject_excuse_reason_must_be_string(
+    client,
+    admin_headers,
+):
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+        json={
+            "reason": 123,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_reject_excuse_null_reason_is_accepted(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    service = Mock(
+        return_value=make_excuse_object(
+            status=ExcuseStatus.REJECTED,
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "reject_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+        json={
+            "reason": None,
+        },
+    )
+
+    assert response.status_code == 200
+    assert (
+        service.call_args.kwargs["reason"]
+        is None
+    )
+
+
+def test_approve_excuse_domain_error_is_returned(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    from app.core.exceptions import ConflictError
+
+    service = Mock(
+        side_effect=ConflictError(
+            "Excuse approval conflict"
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "approve_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses/1/approve",
+        headers=admin_headers,
+    )
+
+    assert_error(response, 409)
+
+
+def test_reject_excuse_domain_error_is_returned(
+    client,
+    admin_headers,
+    monkeypatch,
+    staff_routes,
+):
+    from app.core.exceptions import ConflictError
+
+    service = Mock(
+        side_effect=ConflictError(
+            "Excuse rejection conflict"
+        )
+    )
+
+    monkeypatch.setattr(
+        staff_routes,
+        "reject_excuse",
+        service,
+    )
+
+    response = client.post(
+        "/api/staff/excuses/1/reject",
+        headers=admin_headers,
+        json={
+            "reason": "Insufficient documentation",
+        },
+    )
+
+    assert_error(response, 409)
 
 
 def test_create_payroll_success(
@@ -2461,12 +2832,25 @@ def test_excuse_serializer_serializes_enum_and_dates(
 ):
     excuse = make_excuse_object()
 
-    result = staff_routes._serialize_excuse(excuse)
+    result = staff_routes._serialize_excuse(
+        excuse
+    )
 
     assert result["id"] == excuse.id
     assert result["staff_id"] == excuse.staff_id
+    assert (
+        result["excuse_type"]
+        == ExcuseType.MEDICAL.value
+    )
+    assert (
+        result["status"]
+        == ExcuseStatus.PENDING.value
+    )
     assert result["description"] == excuse.description
+    assert result["document_url"] is None
     assert result["rejection_reason"] is None
+    assert result["reviewed_by_user_id"] is None
+    assert result["reviewed_at"] is None
     assert result["created_at"] is not None
     assert result["updated_at"] is not None
 

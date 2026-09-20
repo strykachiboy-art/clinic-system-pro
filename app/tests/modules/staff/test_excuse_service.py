@@ -38,8 +38,15 @@ def _make_leave(
     reviewed_by_user_id: int | None = None,
     reviewed_at=None,
 ):
-    start_date = start_date or date.today() + timedelta(days=5)
-    end_date = end_date or start_date + timedelta(days=2)
+    start_date = (
+        start_date
+        or date.today() + timedelta(days=5)
+    )
+
+    end_date = (
+        end_date
+        or start_date + timedelta(days=2)
+    )
 
     leave = LeaveRequest(
         staff_id=staff_id,
@@ -120,7 +127,10 @@ def test_create_excuse_success(
     assert result.excuse_type == ExcuseType.MEDICAL
     assert result.status == ExcuseStatus.PENDING
     assert result.description == "Doctor's medical excuse"
-    assert result.document_url == "https://example.com/document.pdf"
+    assert (
+        result.document_url
+        == "https://example.com/document.pdf"
+    )
     assert result.rejection_reason is None
 
     audit.assert_called_once()
@@ -157,6 +167,27 @@ def test_create_excuse_without_linked_user_succeeds(
     assert result.leave_request_id is None
 
 
+def test_create_excuse_requires_active_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="is not active",
+    ):
+        excuse_service.create_excuse(
+            clinic_id=suspended_clinic.id,
+            staff_id=staff.id,
+            excuse_type=ExcuseType.MEDICAL,
+            description="Medical excuse",
+        )
+
+
 def test_create_excuse_links_valid_leave_request(
     clinic,
     make_staff,
@@ -167,7 +198,9 @@ def test_create_excuse_links_valid_leave_request(
         role=Role.DOCTOR,
     )
 
-    leave = _make_leave(staff.id)
+    leave = _make_leave(
+        staff.id
+    )
 
     audit = Mock()
 
@@ -190,7 +223,10 @@ def test_create_excuse_links_valid_leave_request(
 
     kwargs = audit.call_args.kwargs
 
-    assert kwargs["new_value"]["leave_request_id"] == leave.id
+    assert (
+        kwargs["new_value"]["leave_request_id"]
+        == leave.id
+    )
 
 
 def test_create_excuse_rejects_foreign_staff(
@@ -375,7 +411,9 @@ def test_create_excuse_rejects_foreign_leave_request(
         role=Role.DOCTOR,
     )
 
-    leave = _make_leave(foreign_staff.id)
+    leave = _make_leave(
+        foreign_staff.id
+    )
 
     with pytest.raises(NotFoundError):
         excuse_service.create_excuse(
@@ -401,7 +439,9 @@ def test_create_excuse_rejects_leave_request_for_different_staff(
         role=Role.NURSE,
     )
 
-    leave = _make_leave(staff_b.id)
+    leave = _make_leave(
+        staff_b.id
+    )
 
     with pytest.raises(
         ConflictError,
@@ -416,6 +456,56 @@ def test_create_excuse_rejects_leave_request_for_different_staff(
         )
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("clinic_id", "1"),
+        ("clinic_id", True),
+        ("staff_id", "1"),
+        ("staff_id", True),
+        ("leave_request_id", "1"),
+        ("leave_request_id", True),
+    ],
+)
+def test_create_excuse_rejects_non_strict_ids(
+    clinic,
+    make_staff,
+    field_name,
+    value,
+):
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    kwargs = {
+        "clinic_id": clinic.id,
+        "staff_id": staff.id,
+        "excuse_type": ExcuseType.MEDICAL,
+        "description": "Medical excuse",
+    }
+
+    if field_name == "clinic_id":
+        kwargs["clinic_id"] = value
+
+    elif field_name == "staff_id":
+        kwargs["staff_id"] = value
+
+    elif field_name == "leave_request_id":
+        leave = _make_leave(
+            staff.id
+        )
+        kwargs["leave_request_id"] = value
+
+    with pytest.raises(
+        ValidationError,
+        match="must be a positive integer",
+    ):
+        excuse_service.create_excuse(
+            **kwargs
+        )
+
+
 def test_get_excuse_returns_clinic_owned_excuse(
     clinic,
     make_staff,
@@ -425,11 +515,34 @@ def test_get_excuse_returns_clinic_owned_excuse(
         role=Role.DOCTOR,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     result = excuse_service.get_excuse(
         excuse_id=excuse.id,
         clinic_id=clinic.id,
+    )
+
+    assert result.id == excuse.id
+
+
+def test_get_excuse_allows_historical_read_from_inactive_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    result = excuse_service.get_excuse(
+        excuse_id=excuse.id,
+        clinic_id=suspended_clinic.id,
     )
 
     assert result.id == excuse.id
@@ -447,7 +560,9 @@ def test_get_excuse_enforces_clinic_isolation(
         role=Role.DOCTOR,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(NotFoundError):
         excuse_service.get_excuse(
@@ -463,6 +578,33 @@ def test_get_excuse_missing_raises_not_found(
         excuse_service.get_excuse(
             excuse_id=999999,
             clinic_id=clinic.id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("excuse_id", "clinic_id"),
+    [
+        ("1", 1),
+        (True, 1),
+        (1, "1"),
+        (1, True),
+        (0, 1),
+        (1, 0),
+        (-1, 1),
+        (1, -1),
+    ],
+)
+def test_get_excuse_rejects_invalid_ids(
+    clinic,
+    excuse_id,
+    clinic_id,
+):
+    with pytest.raises(
+        ValidationError
+    ):
+        excuse_service.get_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
         )
 
 
@@ -483,20 +625,57 @@ def test_list_excuses_returns_only_requested_clinic(
         role=Role.DOCTOR,
     )
 
-    local_excuse = _make_excuse(local_staff.id)
-    foreign_excuse = _make_excuse(foreign_staff.id)
+    local_excuse = _make_excuse(
+        local_staff.id
+    )
+
+    foreign_excuse = _make_excuse(
+        foreign_staff.id
+    )
 
     result = excuse_service.list_excuses(
         clinic_id=clinic.id,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert local_excuse.id in ids
     assert foreign_excuse.id not in ids
     assert result["total"] == 1
     assert result["page"] == 1
-    assert result["per_page"] == excuse_service.DEFAULT_PER_PAGE
+    assert (
+        result["per_page"]
+        == excuse_service.DEFAULT_PER_PAGE
+    )
+
+
+def test_list_excuses_allows_historical_read_from_inactive_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    result = excuse_service.list_excuses(
+        clinic_id=suspended_clinic.id,
+    )
+
+    ids = {
+        item.id
+        for item in result["items"]
+    }
+
+    assert excuse.id in ids
+    assert result["total"] == 1
 
 
 def test_list_excuses_filters_by_staff(
@@ -513,15 +692,23 @@ def test_list_excuses_filters_by_staff(
         role=Role.NURSE,
     )
 
-    matching = _make_excuse(staff_a.id)
-    _make_excuse(staff_b.id)
+    matching = _make_excuse(
+        staff_a.id
+    )
+
+    _make_excuse(
+        staff_b.id
+    )
 
     result = excuse_service.list_excuses(
         clinic_id=clinic.id,
         staff_id=staff_a.id,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert ids == {matching.id}
     assert result["total"] == 1
@@ -536,21 +723,28 @@ def test_list_excuses_filters_by_leave_request(
         role=Role.DOCTOR,
     )
 
-    leave = _make_leave(staff.id)
+    leave = _make_leave(
+        staff.id
+    )
 
     matching = _make_excuse(
         staff.id,
         leave_request_id=leave.id,
     )
 
-    _make_excuse(staff.id)
+    _make_excuse(
+        staff.id
+    )
 
     result = excuse_service.list_excuses(
         clinic_id=clinic.id,
         leave_request_id=leave.id,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert ids == {matching.id}
 
@@ -579,7 +773,10 @@ def test_list_excuses_filters_by_type(
         excuse_type=ExcuseType.MEDICAL,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert ids == {medical.id}
 
@@ -608,7 +805,10 @@ def test_list_excuses_filters_by_status(
         status=ExcuseStatus.PENDING,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert ids == {pending.id}
 
@@ -627,7 +827,9 @@ def test_list_excuses_supports_combined_filters(
         role=Role.NURSE,
     )
 
-    leave = _make_leave(staff_a.id)
+    leave = _make_leave(
+        staff_a.id
+    )
 
     matching = _make_excuse(
         staff_a.id,
@@ -657,7 +859,10 @@ def test_list_excuses_supports_combined_filters(
         status=ExcuseStatus.PENDING,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert ids == {matching.id}
     assert result["total"] == 1
@@ -715,11 +920,18 @@ def test_list_excuses_paginates(
 
     returned_ids = {
         excuse.id
-        for result in (page_one, page_two, page_three)
+        for result in (
+            page_one,
+            page_two,
+            page_three,
+        )
         for excuse in result["items"]
     }
 
-    assert returned_ids == {excuse.id for excuse in excuses}
+    assert returned_ids == {
+        excuse.id
+        for excuse in excuses
+    }
 
 
 def test_list_excuses_empty_last_page(
@@ -731,7 +943,9 @@ def test_list_excuses_empty_last_page(
         role=Role.DOCTOR,
     )
 
-    _make_excuse(staff.id)
+    _make_excuse(
+        staff.id
+    )
 
     result = excuse_service.list_excuses(
         clinic_id=clinic.id,
@@ -750,9 +964,16 @@ def test_list_excuses_empty_last_page(
     [
         (0, 50),
         (-1, 50),
+        (True, 50),
+        ("1", 50),
         (1, 0),
         (1, -1),
-        (1, excuse_service.MAX_PER_PAGE + 1),
+        (1, True),
+        (1, "2"),
+        (
+            1,
+            excuse_service.MAX_PER_PAGE + 1,
+        ),
     ],
 )
 def test_list_excuses_rejects_invalid_pagination(
@@ -760,7 +981,9 @@ def test_list_excuses_rejects_invalid_pagination(
     page,
     per_page,
 ):
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError
+    ):
         excuse_service.list_excuses(
             clinic_id=clinic.id,
             page=page,
@@ -777,7 +1000,9 @@ def test_list_staff_excuses_returns_staff_excuses(
         role=Role.DOCTOR,
     )
 
-    first = _make_excuse(staff.id)
+    first = _make_excuse(
+        staff.id
+    )
 
     second = _make_excuse(
         staff.id,
@@ -789,12 +1014,49 @@ def test_list_staff_excuses_returns_staff_excuses(
         staff_id=staff.id,
     )
 
-    ids = {excuse.id for excuse in result["items"]}
+    ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
-    assert ids == {first.id, second.id}
+    assert ids == {
+        first.id,
+        second.id,
+    }
+
     assert result["total"] == 2
     assert result["page"] == 1
-    assert result["per_page"] == excuse_service.DEFAULT_PER_PAGE
+    assert (
+        result["per_page"]
+        == excuse_service.DEFAULT_PER_PAGE
+    )
+
+
+def test_list_staff_excuses_allows_historical_read_from_inactive_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    result = excuse_service.list_staff_excuses(
+        clinic_id=suspended_clinic.id,
+        staff_id=staff.id,
+    )
+
+    ids = {
+        item.id
+        for item in result["items"]
+    }
+
+    assert excuse.id in ids
+    assert result["total"] == 1
 
 
 def test_list_staff_excuses_enforces_staff_clinic(
@@ -845,10 +1107,16 @@ def test_list_staff_excuses_paginates(
     assert result["per_page"] == 2
     assert len(result["items"]) == 2
 
-    first_page_ids = {excuse.id for excuse in result["items"]}
+    first_page_ids = {
+        excuse.id
+        for excuse in result["items"]
+    }
 
     assert first_page_ids.issubset(
-        {excuse.id for excuse in excuses}
+        {
+            excuse.id
+            for excuse in excuses
+        }
     )
 
 
@@ -933,7 +1201,10 @@ def test_approve_excuse_success(
 
     assert result.status == ExcuseStatus.APPROVED
     assert result.rejection_reason is None
-    assert result.reviewed_by_user_id == reviewer.user_id
+    assert (
+        result.reviewed_by_user_id
+        == reviewer.user_id
+    )
     assert result.reviewed_at is not None
 
     audit.assert_called_once()
@@ -944,8 +1215,45 @@ def test_approve_excuse_success(
     assert kwargs["entity_type"] == "Excuse"
     assert kwargs["entity_id"] == excuse.id
     assert kwargs["user_id"] == reviewer.user_id
-    assert kwargs["old_value"]["status"] == ExcuseStatus.PENDING.value
-    assert kwargs["new_value"]["status"] == ExcuseStatus.APPROVED.value
+
+    assert (
+        kwargs["old_value"]["status"]
+        == ExcuseStatus.PENDING.value
+    )
+
+    assert (
+        kwargs["new_value"]["status"]
+        == ExcuseStatus.APPROVED.value
+    )
+
+
+def test_approve_excuse_requires_active_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    reviewer = make_staff(
+        clinic=suspended_clinic,
+        role=Role.ADMIN,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="is not active",
+    ):
+        excuse_service.approve_excuse(
+            excuse_id=excuse.id,
+            clinic_id=suspended_clinic.id,
+            reviewer_user_id=reviewer.user_id,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1000,7 +1308,9 @@ def test_approve_excuse_requires_admin(
         role=Role.NURSE,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1028,7 +1338,9 @@ def test_approve_excuse_rejects_inactive_reviewer(
         user_is_active=False,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1058,7 +1370,9 @@ def test_approve_excuse_rejects_reviewer_from_other_clinic(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(NotFoundError):
         excuse_service.approve_excuse(
@@ -1085,13 +1399,42 @@ def test_approve_excuse_rejects_foreign_excuse(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(NotFoundError):
         excuse_service.approve_excuse(
             excuse_id=excuse.id,
             clinic_id=clinic.id,
             reviewer_user_id=reviewer.user_id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("excuse_id", "clinic_id", "reviewer_user_id"),
+    [
+        ("1", 1, 1),
+        (True, 1, 1),
+        (1, "1", 1),
+        (1, True, 1),
+        (1, 1, "1"),
+        (1, 1, True),
+    ],
+)
+def test_approve_excuse_rejects_non_strict_ids(
+    clinic,
+    excuse_id,
+    clinic_id,
+    reviewer_user_id,
+):
+    with pytest.raises(
+        ValidationError
+    ):
+        excuse_service.approve_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=reviewer_user_id,
         )
 
 
@@ -1110,7 +1453,9 @@ def test_reject_excuse_success_with_reason(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     audit = Mock()
 
@@ -1128,8 +1473,14 @@ def test_reject_excuse_success_with_reason(
     )
 
     assert result.status == ExcuseStatus.REJECTED
-    assert result.rejection_reason == "Documentation incomplete"
-    assert result.reviewed_by_user_id == reviewer.user_id
+    assert (
+        result.rejection_reason
+        == "Documentation incomplete"
+    )
+    assert (
+        result.reviewed_by_user_id
+        == reviewer.user_id
+    )
     assert result.reviewed_at is not None
 
     audit.assert_called_once()
@@ -1140,9 +1491,15 @@ def test_reject_excuse_success_with_reason(
     assert kwargs["entity_type"] == "Excuse"
     assert kwargs["entity_id"] == excuse.id
     assert kwargs["user_id"] == reviewer.user_id
-    assert kwargs["new_value"]["status"] == ExcuseStatus.REJECTED.value
-    assert kwargs["new_value"]["rejection_reason"] == (
-        "Documentation incomplete"
+
+    assert (
+        kwargs["new_value"]["status"]
+        == ExcuseStatus.REJECTED.value
+    )
+
+    assert (
+        kwargs["new_value"]["rejection_reason"]
+        == "Documentation incomplete"
     )
 
 
@@ -1160,7 +1517,9 @@ def test_reject_excuse_allows_no_reason(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     result = excuse_service.reject_excuse(
         excuse_id=excuse.id,
@@ -1171,6 +1530,36 @@ def test_reject_excuse_allows_no_reason(
 
     assert result.status == ExcuseStatus.REJECTED
     assert result.rejection_reason is None
+
+
+def test_reject_excuse_requires_active_clinic(
+    suspended_clinic,
+    make_staff,
+):
+    staff = make_staff(
+        clinic=suspended_clinic,
+        role=Role.DOCTOR,
+    )
+
+    reviewer = make_staff(
+        clinic=suspended_clinic,
+        role=Role.ADMIN,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="is not active",
+    ):
+        excuse_service.reject_excuse(
+            excuse_id=excuse.id,
+            clinic_id=suspended_clinic.id,
+            reviewer_user_id=reviewer.user_id,
+            reason="Documentation incomplete",
+        )
 
 
 def test_reject_excuse_rejects_blank_reason(
@@ -1187,7 +1576,9 @@ def test_reject_excuse_rejects_blank_reason(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1215,7 +1606,9 @@ def test_reject_excuse_rejects_long_reason(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1281,7 +1674,9 @@ def test_reject_excuse_requires_admin(
         role=Role.RECEPTIONIST,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1309,7 +1704,9 @@ def test_reject_excuse_rejects_inactive_reviewer(
         user_is_active=False,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(
         ValidationError,
@@ -1339,11 +1736,69 @@ def test_reject_excuse_rejects_foreign_excuse(
         role=Role.ADMIN,
     )
 
-    excuse = _make_excuse(staff.id)
+    excuse = _make_excuse(
+        staff.id
+    )
 
     with pytest.raises(NotFoundError):
         excuse_service.reject_excuse(
             excuse_id=excuse.id,
             clinic_id=clinic.id,
             reviewer_user_id=reviewer.user_id,
+        )
+
+
+def test_reject_excuse_rejects_reviewer_from_other_clinic(
+    clinic,
+    make_clinic,
+    make_staff,
+):
+    other_clinic = make_clinic()
+
+    staff = make_staff(
+        clinic=clinic,
+        role=Role.DOCTOR,
+    )
+
+    reviewer = make_staff(
+        clinic=other_clinic,
+        role=Role.ADMIN,
+    )
+
+    excuse = _make_excuse(
+        staff.id
+    )
+
+    with pytest.raises(NotFoundError):
+        excuse_service.reject_excuse(
+            excuse_id=excuse.id,
+            clinic_id=clinic.id,
+            reviewer_user_id=reviewer.user_id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("excuse_id", "clinic_id", "reviewer_user_id"),
+    [
+        ("1", 1, 1),
+        (True, 1, 1),
+        (1, "1", 1),
+        (1, True, 1),
+        (1, 1, "1"),
+        (1, 1, True),
+    ],
+)
+def test_reject_excuse_rejects_non_strict_ids(
+    clinic,
+    excuse_id,
+    clinic_id,
+    reviewer_user_id,
+):
+    with pytest.raises(
+        ValidationError
+    ):
+        excuse_service.reject_excuse(
+            excuse_id=excuse_id,
+            clinic_id=clinic_id,
+            reviewer_user_id=reviewer_user_id,
         )

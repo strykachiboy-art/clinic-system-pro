@@ -34,6 +34,10 @@ DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 50
 MAX_PER_PAGE = 500
 
+MAX_DESCRIPTION_LENGTH = 2000
+MAX_DOCUMENT_URL_LENGTH = 500
+MAX_REJECTION_REASON_LENGTH = 2000
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -47,17 +51,10 @@ def _validate_positive_id(
     value,
     field_name: str,
 ) -> int:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ValidationError(
             f"{field_name} must be a positive integer"
         )
-
-    try:
-        value = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(
-            f"{field_name} must be a positive integer"
-        ) from exc
 
     if value <= 0:
         raise ValidationError(
@@ -120,6 +117,38 @@ def _paginate(
         "page": page,
         "per_page": per_page,
     }
+
+
+def _ensure_active_clinic(
+    clinic_id: int,
+) -> None:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    from app.modules.clinic.models.clinic_model import Clinic
+
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
+
+    if clinic is None:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
+
+    status = getattr(
+        clinic.status,
+        "value",
+        clinic.status,
+    )
+
+    if status != "active":
+        raise ConflictError(
+            f"Clinic {clinic_id} is not active"
+        )
 
 
 def _get_staff(
@@ -324,9 +353,10 @@ def _validate_description(
             "Excuse description is required"
         )
 
-    if len(description) > 2000:
+    if len(description) > MAX_DESCRIPTION_LENGTH:
         raise ValidationError(
-            "Excuse description cannot exceed 2000 characters"
+            "Excuse description cannot exceed "
+            f"{MAX_DESCRIPTION_LENGTH} characters"
         )
 
     return description
@@ -351,9 +381,10 @@ def _validate_document_url(
     if not document_url:
         return None
 
-    if len(document_url) > 500:
+    if len(document_url) > MAX_DOCUMENT_URL_LENGTH:
         raise ValidationError(
-            "Document URL cannot exceed 500 characters"
+            "Document URL cannot exceed "
+            f"{MAX_DOCUMENT_URL_LENGTH} characters"
         )
 
     return document_url
@@ -380,9 +411,10 @@ def _validate_rejection_reason(
             "Rejection reason cannot be empty"
         )
 
-    if len(reason) > 2000:
+    if len(reason) > MAX_REJECTION_REASON_LENGTH:
         raise ValidationError(
-            "Rejection reason cannot exceed 2000 characters"
+            "Rejection reason cannot exceed "
+            f"{MAX_REJECTION_REASON_LENGTH} characters"
         )
 
     return reason
@@ -392,6 +424,16 @@ def _validate_reviewer(
     reviewer_user_id: int,
     clinic_id: int,
 ) -> User:
+    reviewer_user_id = _validate_positive_id(
+        reviewer_user_id,
+        "reviewer_user_id",
+    )
+
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
     reviewer = _get_user(
         reviewer_user_id,
         clinic_id=clinic_id,
@@ -402,7 +444,13 @@ def _validate_reviewer(
             "Inactive users cannot review excuses"
         )
 
-    if reviewer.role != Role.ADMIN:
+    role = getattr(
+        reviewer.role,
+        "value",
+        reviewer.role,
+    )
+
+    if role != Role.ADMIN.value:
         raise ValidationError(
             "Only administrators can review excuses"
         )
@@ -430,6 +478,15 @@ def create_excuse(
     leave_request_id: Optional[int] = None,
     document_url: Optional[str] = None,
 ) -> Excuse:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    _ensure_active_clinic(
+        clinic_id
+    )
+
     staff = _get_staff(
         staff_id,
         clinic_id=clinic_id,
@@ -455,6 +512,11 @@ def create_excuse(
     leave_request = None
 
     if leave_request_id is not None:
+        leave_request_id = _validate_positive_id(
+            leave_request_id,
+            "leave_request_id",
+        )
+
         leave_request = _get_leave_request(
             leave_request_id,
             clinic_id=clinic_id,
@@ -588,13 +650,11 @@ def list_excuses(
         )
 
         statement = statement.where(
-            Excuse.leave_request_id
-            == leave_request_id,
+            Excuse.leave_request_id == leave_request_id,
         )
 
         count_statement = count_statement.where(
-            Excuse.leave_request_id
-            == leave_request_id,
+            Excuse.leave_request_id == leave_request_id,
         )
 
     if excuse_type is not None:
@@ -716,15 +776,29 @@ def approve_excuse(
     clinic_id: int,
     reviewer_user_id: int,
 ) -> Excuse:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    _ensure_active_clinic(
+        clinic_id
+    )
+
+    excuse_id = _validate_positive_id(
+        excuse_id,
+        "excuse_id",
+    )
+
+    reviewer_user_id = _validate_positive_id(
+        reviewer_user_id,
+        "reviewer_user_id",
+    )
+
     excuse = _get_excuse(
         excuse_id,
         clinic_id=clinic_id,
         lock=True,
-    )
-
-    reviewer = _validate_reviewer(
-        reviewer_user_id,
-        clinic_id,
     )
 
     if excuse.status != ExcuseStatus.PENDING:
@@ -732,6 +806,11 @@ def approve_excuse(
             f"Excuse {excuse.id} is already "
             f"'{excuse.status.value}' and cannot be approved"
         )
+
+    reviewer = _validate_reviewer(
+        reviewer_user_id,
+        clinic_id,
+    )
 
     now = _db_now()
     old_status = excuse.status
@@ -774,15 +853,29 @@ def reject_excuse(
     reviewer_user_id: int,
     reason: Optional[str] = None,
 ) -> Excuse:
+    clinic_id = _validate_positive_id(
+        clinic_id,
+        "clinic_id",
+    )
+
+    _ensure_active_clinic(
+        clinic_id
+    )
+
+    excuse_id = _validate_positive_id(
+        excuse_id,
+        "excuse_id",
+    )
+
+    reviewer_user_id = _validate_positive_id(
+        reviewer_user_id,
+        "reviewer_user_id",
+    )
+
     excuse = _get_excuse(
         excuse_id,
         clinic_id=clinic_id,
         lock=True,
-    )
-
-    reviewer = _validate_reviewer(
-        reviewer_user_id,
-        clinic_id,
     )
 
     if excuse.status != ExcuseStatus.PENDING:
@@ -790,6 +883,11 @@ def reject_excuse(
             f"Excuse {excuse.id} is already "
             f"'{excuse.status.value}' and cannot be rejected"
         )
+
+    reviewer = _validate_reviewer(
+        reviewer_user_id,
+        clinic_id,
+    )
 
     reason = _validate_rejection_reason(
         reason

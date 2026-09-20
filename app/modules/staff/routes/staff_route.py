@@ -34,7 +34,6 @@ from app.modules.staff.schemas.excuse_schema import (
     ExcuseListQuerySchema,
     ExcuseListResponseSchema,
     ExcuseRejectSchema,
-    ExcuseReviewSchema,
 )
 
 from app.modules.staff.services.staff_service import (
@@ -900,7 +899,7 @@ def approve_leave_route(
 
     try:
         user = _current_user()
-        clinic_id = _current_clinic_id(user)
+        clinic_id = _current_clinic_id()
 
         leave = approve_leave_request(
             leave_id=leave_id,
@@ -940,7 +939,7 @@ def reject_leave_route(
 
     try:
         user = _current_user()
-        clinic_id = _current_clinic_id(user)
+        clinic_id = _current_clinic_id()
 
         leave = reject_leave_request(
             leave_id=leave_id,
@@ -1132,16 +1131,9 @@ def get_excuse_route(
 def approve_excuse_route(
     excuse_id: int,
 ):
-    payload, error = _validate_json(
-        ExcuseReviewSchema
-    )
-
-    if error:
-        return error
-
     try:
         user = _current_user()
-        clinic_id = _current_clinic_id(user)
+        clinic_id = _current_clinic_id()
 
         excuse = approve_excuse(
             excuse_id=excuse_id,
@@ -1181,7 +1173,7 @@ def reject_excuse_route(
 
     try:
         user = _current_user()
-        clinic_id = _current_clinic_id(user)
+        clinic_id = _current_clinic_id()
 
         excuse = reject_excuse(
             excuse_id=excuse_id,
