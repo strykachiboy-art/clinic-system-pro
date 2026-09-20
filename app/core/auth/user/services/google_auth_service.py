@@ -10,6 +10,7 @@ from flask_jwt_extended import (
     create_refresh_token,
 )
 from redis.exceptions import ConnectionError, TimeoutError
+from sqlalchemy import select
 
 from app import extensions
 from app.extensions import db
@@ -388,14 +389,17 @@ def _get_user_by_google_identity(
     if not provider_user_id:
         return None
 
-    identity = (
-        UserAuthIdentity.query
-        .filter_by(
-            provider=GOOGLE_PROVIDER,
-            provider_user_id=provider_user_id,
-        )
-        .first()
+    statement = select(
+        UserAuthIdentity
+    ).where(
+        UserAuthIdentity.provider == GOOGLE_PROVIDER,
+        UserAuthIdentity.provider_user_id
+        == provider_user_id,
     )
+
+    identity = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if identity is None:
         return None
@@ -449,18 +453,30 @@ def _get_or_create_google_user(
     # Existing local account by email
     # ------------------------------------------------------------------------
 
-    existing_user = User.query.filter_by(
-        email=email
-    ).first()
+    user_statement = select(
+        User
+    ).where(
+        User.email == email
+    )
+
+    existing_user = db.session.execute(
+        user_statement
+    ).scalar_one_or_none()
 
     if existing_user is not None:
+        identity_statement = select(
+            UserAuthIdentity
+        ).where(
+            UserAuthIdentity.provider
+            == GOOGLE_PROVIDER,
+            UserAuthIdentity.user_id
+            == existing_user.id,
+        )
+
         existing_identity = (
-            UserAuthIdentity.query
-            .filter_by(
-                provider=GOOGLE_PROVIDER,
-                user_id=existing_user.id,
-            )
-            .first()
+            db.session.execute(
+                identity_statement
+            ).scalar_one_or_none()
         )
 
         # Existing user already has a Google identity.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func, select
+
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.auth.user.models.user_model import User
 from app.core.enums.audit_enums import AuditAction
@@ -250,34 +252,58 @@ def list_access_control_users(
             "Only a super administrator can list access-control users"
         )
 
-    base_query = User.query
+    filters = []
 
     if query.role is not None:
-        base_query = base_query.filter(
+        filters.append(
             User.role == query.role
         )
 
     if query.is_active is not None:
-        base_query = base_query.filter(
+        filters.append(
             User.is_active == query.is_active
         )
 
-    pagination = (
-        base_query
-        .order_by(User.id.asc())
-        .paginate(
-            page=query.page,
-            per_page=query.per_page,
-            error_out=False,
-        )
+    count_statement = select(
+        func.count(User.id)
     )
 
-    users = [
+    user_statement = select(User)
+
+    if filters:
+        count_statement = count_statement.where(
+            *filters
+        )
+        user_statement = user_statement.where(
+            *filters
+        )
+
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
+
+    offset = (
+        (query.page - 1)
+        * query.per_page
+    )
+
+    users = list(
+        db.session.execute(
+            user_statement
+            .order_by(
+                User.id.asc()
+            )
+            .offset(offset)
+            .limit(query.per_page)
+        ).scalars()
+    )
+
+    serialized_users = [
         _serialize_user(user)
-        for user in pagination.items
+        for user in users
     ]
 
-    return users, pagination.total
+    return serialized_users, total
 
 
 @transactional

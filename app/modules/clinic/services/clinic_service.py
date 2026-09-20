@@ -4,6 +4,8 @@ import secrets
 from datetime import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy import select
+
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.clinic_enums import (
@@ -213,10 +215,10 @@ def _check_name_conflict(
     parent_clinic_id: int | None,
     exclude_clinic_id: int | None = None,
 ):
-    query = Clinic.query.filter(
+    conditions = [
         Clinic.name == name,
         Clinic.parent_clinic_id == parent_clinic_id,
-    )
+    ]
 
     if exclude_clinic_id is not None:
         exclude_clinic_id = _validate_positive_id(
@@ -224,11 +226,19 @@ def _check_name_conflict(
             "clinic ID",
         )
 
-        query = query.filter(
+        conditions.append(
             Clinic.id != exclude_clinic_id
         )
 
-    existing = query.first()
+    statement = (
+        select(Clinic)
+        .where(*conditions)
+        .limit(1)
+    )
+
+    existing = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if existing is not None:
         raise ConflictError(
@@ -314,17 +324,23 @@ def list_clinics(
             "clinic status",
         )
 
-    query = Clinic.query
+    statement = select(Clinic)
 
     if status is not None:
-        query = query.filter(
+        statement = statement.where(
             Clinic.status == status
         )
 
-    return query.order_by(
+    statement = statement.order_by(
         Clinic.name.asc(),
         Clinic.id.asc(),
-    ).all()
+    )
+
+    return list(
+        db.session.execute(
+            statement
+        ).scalars()
+    )
 
 
 # =====================================================================
@@ -342,16 +358,21 @@ def list_branches(
 
     get_clinic(clinic_id)
 
-    return (
-        Clinic.query
-        .filter(
+    statement = (
+        select(Clinic)
+        .where(
             Clinic.parent_clinic_id == clinic_id
         )
         .order_by(
             Clinic.name.asc(),
             Clinic.id.asc(),
         )
-        .all()
+    )
+
+    return list(
+        db.session.execute(
+            statement
+        ).scalars()
     )
 
 

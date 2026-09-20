@@ -3,6 +3,8 @@ from flask_jwt_extended import (
     create_refresh_token,
 )
 
+from sqlalchemy import select
+
 from app.extensions import db
 from app.core.utils.decorators import transactional
 from app.core.exceptions import (
@@ -54,9 +56,13 @@ def get_user_by_email(
     if not email:
         return None
 
-    return User.query.filter_by(
-        email=email.lower().strip()
-    ).first()
+    statement = select(User).where(
+        User.email == email.lower().strip()
+    )
+
+    return db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
 
 @transactional

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import (
@@ -36,7 +37,10 @@ def _utcnow() -> datetime:
 
 
 def _get_clinic(clinic_id: int) -> Clinic:
-    clinic = db.session.get(Clinic, clinic_id)
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
 
     if clinic is None:
         raise NotFoundError("Clinic not found")
@@ -55,14 +59,16 @@ def _get_integration_config(
     clinic_id: int,
     provider: str,
 ) -> IntegrationConfig:
-    integration = (
-        db.session.query(IntegrationConfig)
-        .filter(
-            IntegrationConfig.clinic_id == clinic_id,
-            IntegrationConfig.provider == provider,
-        )
-        .first()
+    statement = select(
+        IntegrationConfig
+    ).where(
+        IntegrationConfig.clinic_id == clinic_id,
+        IntegrationConfig.provider == provider,
     )
+
+    integration = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if integration is None:
         raise NotFoundError(
@@ -145,14 +151,16 @@ def create_integration_config(
     clinic = _get_clinic(clinic_id)
     _ensure_active_clinic(clinic)
 
-    existing = (
-        db.session.query(IntegrationConfig)
-        .filter(
-            IntegrationConfig.clinic_id == clinic_id,
-            IntegrationConfig.provider == payload.provider,
-        )
-        .first()
+    statement = select(
+        IntegrationConfig
+    ).where(
+        IntegrationConfig.clinic_id == clinic_id,
+        IntegrationConfig.provider == payload.provider,
     )
+
+    existing = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if existing is not None:
         raise ConflictError(
@@ -245,15 +253,12 @@ def list_integration_configs(
         per_page,
     )
 
-    query = (
-        db.session.query(IntegrationConfig)
-        .filter(
-            IntegrationConfig.clinic_id == clinic_id
-        )
-    )
+    filters = [
+        IntegrationConfig.clinic_id == clinic_id
+    ]
 
     if not include_disabled:
-        query = query.filter(
+        filters.append(
             IntegrationConfig.is_enabled.is_(True)
         )
 
@@ -265,23 +270,40 @@ def list_integration_configs(
                 "Provider cannot be empty"
             )
 
-        query = query.filter(
+        filters.append(
             IntegrationConfig.provider == provider
         )
 
-    total = query.count()
+    count_statement = select(
+        func.count(IntegrationConfig.id)
+    ).where(
+        *filters
+    )
 
-    offset = (page - 1) * per_page
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
 
-    items = (
-        query
+    offset = (
+        (page - 1)
+        * per_page
+    )
+
+    items_statement = (
+        select(IntegrationConfig)
+        .where(*filters)
         .order_by(
             IntegrationConfig.provider.asc(),
             IntegrationConfig.id.asc(),
         )
         .offset(offset)
         .limit(per_page)
-        .all()
+    )
+
+    items = list(
+        db.session.execute(
+            items_statement
+        ).scalars()
     )
 
     return items, total

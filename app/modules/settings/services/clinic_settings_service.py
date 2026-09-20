@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -12,11 +13,18 @@ from app.modules.settings.schemas.clinic_settings import (
     ClinicSettingsUpdateSchema,
 )
 from app.core.utils.decorators import transactional
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 
 
 def _get_clinic(clinic_id: int) -> Clinic:
-    clinic = db.session.get(Clinic, clinic_id)
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
 
     if clinic is None:
         raise NotFoundError("Clinic not found")
@@ -32,11 +40,15 @@ def _ensure_active_clinic(clinic: Clinic) -> None:
 
 
 def _get_settings(clinic_id: int) -> ClinicSettings:
-    settings = (
-        db.session.query(ClinicSettings)
-        .filter(ClinicSettings.clinic_id == clinic_id)
-        .first()
+    statement = select(
+        ClinicSettings
+    ).where(
+        ClinicSettings.clinic_id == clinic_id
     )
+
+    settings = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if settings is None:
         raise NotFoundError("Clinic settings not found")
@@ -60,11 +72,15 @@ def create_clinic_settings(
     clinic = _get_clinic(clinic_id)
     _ensure_active_clinic(clinic)
 
-    existing = (
-        db.session.query(ClinicSettings)
-        .filter(ClinicSettings.clinic_id == clinic_id)
-        .first()
+    statement = select(
+        ClinicSettings
+    ).where(
+        ClinicSettings.clinic_id == clinic_id
     )
+
+    existing = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if existing is not None:
         raise ConflictError(
@@ -131,7 +147,11 @@ def update_clinic_settings(
         )
 
     for field, value in changes.items():
-        setattr(settings, field, value)
+        setattr(
+            settings,
+            field,
+            value,
+        )
 
     settings.version += 1
 
@@ -190,11 +210,15 @@ def ensure_clinic_settings(
 
     clinic = _get_clinic(clinic_id)
 
-    settings = (
-        db.session.query(ClinicSettings)
-        .filter(ClinicSettings.clinic_id == clinic_id)
-        .first()
+    statement = select(
+        ClinicSettings
+    ).where(
+        ClinicSettings.clinic_id == clinic_id
     )
+
+    settings = db.session.execute(
+        statement
+    ).scalar_one_or_none()
 
     if settings is not None:
         return settings
@@ -212,11 +236,15 @@ def ensure_clinic_settings(
     except IntegrityError as exc:
         db.session.rollback()
 
-        settings = (
-            db.session.query(ClinicSettings)
-            .filter(ClinicSettings.clinic_id == clinic_id)
-            .first()
+        statement = select(
+            ClinicSettings
+        ).where(
+            ClinicSettings.clinic_id == clinic_id
         )
+
+        settings = db.session.execute(
+            statement
+        ).scalar_one_or_none()
 
         if settings is None:
             raise ConflictError(
