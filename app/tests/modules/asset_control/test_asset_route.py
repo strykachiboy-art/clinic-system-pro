@@ -165,7 +165,7 @@ def _patch_schema_validator(
     [
         (
             "post",
-            "/api/assets",
+            "/api/v1/assets",
             {
                 "asset_tag": "AST-AUTH-001",
                 "name": "Auth Asset",
@@ -174,87 +174,87 @@ def _patch_schema_validator(
         ),
         (
             "get",
-            "/api/assets",
+            "/api/v1/assets",
             None,
         ),
         (
             "get",
-            "/api/assets/1",
+            "/api/v1/assets/1",
             None,
         ),
         (
             "patch",
-            "/api/assets/1",
+            "/api/v1/assets/1",
             {"name": "Updated"},
         ),
         (
             "post",
-            "/api/assets/1/retire",
+            "/api/v1/assets/1/retire",
             {},
         ),
         (
             "post",
-            "/api/assets/1/dispose",
+            "/api/v1/assets/1/dispose",
             {"disposal_reason": "Disposed"},
         ),
         (
             "post",
-            "/api/assets/1/assign",
+            "/api/v1/assets/1/assign",
             {},
         ),
         (
             "post",
-            "/api/assets/1/return",
+            "/api/v1/assets/1/return",
             {},
         ),
         (
             "get",
-            "/api/assets/1/assignments",
+            "/api/v1/assets/1/assignments",
             None,
         ),
         (
             "get",
-            "/api/assets/assignments/1",
+            "/api/v1/assets/assignments/1",
             None,
         ),
         (
             "get",
-            "/api/assets/1/history",
+            "/api/v1/assets/1/history",
             None,
         ),
         (
             "get",
-            "/api/assets/history/1",
+            "/api/v1/assets/history/1",
             None,
         ),
         (
             "post",
-            "/api/assets/1/maintenance",
+            "/api/v1/assets/1/maintenance",
             {},
         ),
         (
             "get",
-            "/api/assets/1/maintenance",
+            "/api/v1/assets/1/maintenance",
             None,
         ),
         (
             "get",
-            "/api/assets/maintenance/1",
+            "/api/v1/assets/maintenance/1",
             None,
         ),
         (
             "post",
-            "/api/assets/maintenance/1/start",
+            "/api/v1/assets/maintenance/1/start",
             {},
         ),
         (
             "post",
-            "/api/assets/maintenance/1/complete",
+            "/api/v1/assets/maintenance/1/complete",
             {},
         ),
         (
             "post",
-            "/api/assets/maintenance/1/cancel",
+            "/api/v1/assets/maintenance/1/cancel",
             {},
         ),
     ],
@@ -278,7 +278,7 @@ def test_all_asset_routes_require_authentication(
     [
         (
             "post",
-            "/api/assets",
+            "/api/v1/assets",
             {
                 "asset_tag": "AST-FORBIDDEN",
                 "name": "Forbidden",
@@ -287,47 +287,47 @@ def test_all_asset_routes_require_authentication(
         ),
         (
             "patch",
-            "/api/assets/1",
+            "/api/v1/assets/1",
             {"name": "Forbidden"},
         ),
         (
             "post",
-            "/api/assets/1/retire",
+            "/api/v1/assets/1/retire",
             {},
         ),
         (
             "post",
-            "/api/assets/1/dispose",
+            "/api/v1/assets/1/dispose",
             {"disposal_reason": "Forbidden"},
         ),
         (
             "post",
-            "/api/assets/1/assign",
+            "/api/v1/assets/1/assign",
             {},
         ),
         (
             "post",
-            "/api/assets/1/return",
+            "/api/v1/assets/1/return",
             {},
         ),
         (
             "post",
-            "/api/assets/1/maintenance",
+            "/api/v1/assets/1/maintenance",
             {},
         ),
         (
             "post",
-            "/api/assets/maintenance/1/start",
+            "/api/v1/assets/maintenance/1/start",
             {},
         ),
         (
             "post",
-            "/api/assets/maintenance/1/complete",
+            "/api/v1/assets/maintenance/1/complete",
             {},
         ),
         (
             "post",
-            "/api/assets/maintenance/1/cancel",
+            "/api/v1/assets/maintenance/1/cancel",
             {},
         ),
     ],
@@ -361,14 +361,14 @@ def test_management_routes_forbidden_for_doctor(
 @pytest.mark.parametrize(
     "url",
     [
-        "/api/assets",
-        "/api/assets/1",
-        "/api/assets/1/assignments",
-        "/api/assets/assignments/1",
-        "/api/assets/1/history",
-        "/api/assets/history/1",
-        "/api/assets/1/maintenance",
-        "/api/assets/maintenance/1",
+        "/api/v1/assets",
+        "/api/v1/assets/1",
+        "/api/v1/assets/1/assignments",
+        "/api/v1/assets/assignments/1",
+        "/api/v1/assets/1/history",
+        "/api/v1/assets/history/1",
+        "/api/v1/assets/1/maintenance",
+        "/api/v1/assets/maintenance/1",
     ],
 )
 def test_view_routes_forbidden_for_doctor(
@@ -411,7 +411,7 @@ def test_create_asset_allows_admin(
     )
 
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -447,7 +447,7 @@ def test_create_asset_allows_accountant(
     )
 
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             accountant,
             role=Role.ACCOUNTANT,
@@ -478,7 +478,7 @@ def test_list_assets_allows_admin(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -510,7 +510,7 @@ def test_list_assets_allows_accountant(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             accountant,
             role=Role.ACCOUNTANT,
@@ -539,7 +539,7 @@ def test_current_user_rejects_invalid_identity(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -570,7 +570,7 @@ def test_current_user_rejects_missing_user(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -605,7 +605,7 @@ def test_current_user_rejects_inactive_user(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -639,7 +639,7 @@ def test_current_clinic_rejects_invalid_clinic_context(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -681,7 +681,7 @@ def test_create_asset_forwards_authenticated_context(
     )
 
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -748,7 +748,7 @@ def test_create_asset_serializes_response(
     )
 
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -787,7 +787,7 @@ def test_create_asset_rejects_missing_json(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -805,7 +805,7 @@ def test_create_asset_rejects_non_object_json(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -822,7 +822,7 @@ def test_create_asset_rejects_unknown_field(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -844,7 +844,7 @@ def test_create_asset_rejects_missing_required_field(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -864,7 +864,7 @@ def test_create_asset_rejects_blank_required_field(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -903,7 +903,7 @@ def test_list_assets_forwards_authenticated_clinic(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -948,7 +948,7 @@ def test_list_assets_forwards_pagination(
     )
 
     response = client.get(
-        "/api/assets?page=3&per_page=25",
+        "/api/v1/assets?page=3&per_page=25",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -986,7 +986,7 @@ def test_list_assets_forwards_filters(
     )
 
     response = client.get(
-        "/api/assets"
+        "/api/v1/assets"
         "?search=ultrasound"
         "&category=medical_equipment"
         "&status=active"
@@ -1044,7 +1044,7 @@ def test_list_assets_serializes_items_and_pagination(
     )
 
     response = client.get(
-        "/api/assets?page=2&per_page=10",
+        "/api/v1/assets?page=2&per_page=10",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1082,7 +1082,7 @@ def test_list_assets_returns_empty_result(
     )
 
     response = client.get(
-        "/api/assets",
+        "/api/v1/assets",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1116,7 +1116,7 @@ def test_list_assets_rejects_invalid_query(
     query_string,
 ):
     response = client.get(
-        f"/api/assets?{query_string}",
+        f"/api/v1/assets?{query_string}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1150,7 +1150,7 @@ def test_get_asset_success(
     )
 
     response = client.get(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1185,7 +1185,7 @@ def test_get_asset_serializes_asset(
     )
 
     response = client.get(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1232,7 +1232,7 @@ def test_get_asset_maps_not_found(
     )
 
     response = client.get(
-        "/api/assets/999",
+        "/api/v1/assets/999",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1267,7 +1267,7 @@ def test_get_asset_maps_conflict(
     )
 
     response = client.get(
-        "/api/assets/1",
+        "/api/v1/assets/1",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1306,7 +1306,7 @@ def test_update_asset_success(
     )
 
     response = client.patch(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1365,7 +1365,7 @@ def test_update_asset_allows_partial_fields(
     )
 
     response = client.patch(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1404,7 +1404,7 @@ def test_update_asset_serializes_response(
     )
 
     response = client.patch(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1426,7 +1426,7 @@ def test_update_asset_rejects_missing_json(
     auth_headers_for,
 ):
     response = client.patch(
-        "/api/assets/1",
+        "/api/v1/assets/1",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1461,7 +1461,7 @@ def test_update_asset_rejects_forbidden_or_unknown_fields(
     payload,
 ):
     response = client.patch(
-        "/api/assets/1",
+        "/api/v1/assets/1",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1490,7 +1490,7 @@ def test_update_asset_maps_not_found(
     )
 
     response = client.patch(
-        "/api/assets/999",
+        "/api/v1/assets/999",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1523,7 +1523,7 @@ def test_update_asset_maps_conflict(
     )
 
     response = client.patch(
-        "/api/assets/1",
+        "/api/v1/assets/1",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1573,7 +1573,7 @@ def test_retire_asset_success(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/retire",
+        f"/api/v1/assets/{asset.id}/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1619,7 +1619,7 @@ def test_retire_asset_allows_empty_json_body(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/retire",
+        f"/api/v1/assets/{asset.id}/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1651,7 +1651,7 @@ def test_retire_asset_allows_missing_body(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/retire",
+        f"/api/v1/assets/{asset.id}/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1706,7 +1706,7 @@ def test_retire_asset_passes_schema(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/retire",
+        f"/api/v1/assets/{asset.id}/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1734,7 +1734,7 @@ def test_retire_asset_rejects_invalid_date(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/retire",
+        "/api/v1/assets/1/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1753,7 +1753,7 @@ def test_retire_asset_rejects_unknown_field(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/retire",
+        "/api/v1/assets/1/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1785,7 +1785,7 @@ def test_retire_asset_maps_not_found(
     )
 
     response = client.post(
-        "/api/assets/999/retire",
+        "/api/v1/assets/999/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1818,7 +1818,7 @@ def test_retire_asset_maps_conflict(
     )
 
     response = client.post(
-        "/api/assets/1/retire",
+        "/api/v1/assets/1/retire",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1874,7 +1874,7 @@ def test_dispose_asset_success(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/dispose",
+        f"/api/v1/assets/{asset.id}/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1928,7 +1928,7 @@ def test_dispose_asset_accepts_reason_only(
     )
 
     response = client.post(
-        f"/api/assets/{asset.id}/dispose",
+        f"/api/v1/assets/{asset.id}/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1955,7 +1955,7 @@ def test_dispose_asset_rejects_missing_json(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1973,7 +1973,7 @@ def test_dispose_asset_rejects_non_object_json(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -1990,7 +1990,7 @@ def test_dispose_asset_rejects_missing_reason(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2007,7 +2007,7 @@ def test_dispose_asset_rejects_invalid_disposal_date(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2027,7 +2027,7 @@ def test_dispose_asset_rejects_unknown_field(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2059,7 +2059,7 @@ def test_dispose_asset_maps_not_found(
     )
 
     response = client.post(
-        "/api/assets/999/dispose",
+        "/api/v1/assets/999/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2094,7 +2094,7 @@ def test_dispose_asset_maps_validation_error(
     )
 
     response = client.post(
-        "/api/assets/1/dispose",
+        "/api/v1/assets/1/dispose",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2156,7 +2156,7 @@ def test_assign_asset_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/10/assign",
+        "/api/v1/assets/10/assign",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2211,7 +2211,7 @@ def test_assign_asset_serializes_response(
     )
 
     response = client.post(
-        "/api/assets/10/assign",
+        "/api/v1/assets/10/assign",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2256,7 +2256,7 @@ def test_assign_asset_maps_conflict(
     )
 
     response = client.post(
-        "/api/assets/10/assign",
+        "/api/v1/assets/10/assign",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2314,7 +2314,7 @@ def test_return_asset_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/10/return",
+        "/api/v1/assets/10/return",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2368,7 +2368,7 @@ def test_return_asset_allows_missing_body(
     )
 
     response = client.post(
-        "/api/assets/10/return",
+        "/api/v1/assets/10/return",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2411,7 +2411,7 @@ def test_return_asset_maps_not_found(
     )
 
     response = client.post(
-        "/api/assets/10/return",
+        "/api/v1/assets/10/return",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2489,7 +2489,7 @@ def test_list_asset_assignments_verifies_asset_and_forwards_query(
     )
 
     response = client.get(
-        "/api/assets/10/assignments"
+        "/api/v1/assets/10/assignments"
         "?page=2&per_page=10",
         headers=auth_headers_for(
             user,
@@ -2572,7 +2572,7 @@ def test_list_asset_assignments_serializes_pagination(
     )
 
     response = client.get(
-        "/api/assets/10/assignments",
+        "/api/v1/assets/10/assignments",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2617,7 +2617,7 @@ def test_get_asset_assignment_forwards_context(
     )
 
     response = client.get(
-        "/api/assets/assignments/77",
+        "/api/v1/assets/assignments/77",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2655,7 +2655,7 @@ def test_get_asset_assignment_maps_not_found(
     )
 
     response = client.get(
-        "/api/assets/assignments/77",
+        "/api/v1/assets/assignments/77",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2734,7 +2734,7 @@ def test_list_asset_history_verifies_asset_and_forwards_query(
     )
 
     response = client.get(
-        "/api/assets/12/history?page=1&per_page=20",
+        "/api/v1/assets/12/history?page=1&per_page=20",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2800,7 +2800,7 @@ def test_get_asset_history_forwards_context(
     )
 
     response = client.get(
-        "/api/assets/history/88",
+        "/api/v1/assets/history/88",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2838,7 +2838,7 @@ def test_get_asset_history_maps_not_found(
     )
 
     response = client.get(
-        "/api/assets/history/88",
+        "/api/v1/assets/history/88",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2893,7 +2893,7 @@ def test_schedule_maintenance_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/25/maintenance",
+        "/api/v1/assets/25/maintenance",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -2944,7 +2944,7 @@ def test_schedule_maintenance_maps_conflict(
     )
 
     response = client.post(
-        "/api/assets/25/maintenance",
+        "/api/v1/assets/25/maintenance",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3015,7 +3015,7 @@ def test_list_asset_maintenance_verifies_asset_and_forwards_query(
     )
 
     response = client.get(
-        "/api/assets/25/maintenance"
+        "/api/v1/assets/25/maintenance"
         "?page=1&per_page=10",
         headers=auth_headers_for(
             user,
@@ -3076,7 +3076,7 @@ def test_get_asset_maintenance_forwards_context(
     )
 
     response = client.get(
-        "/api/assets/maintenance/401",
+        "/api/v1/assets/maintenance/401",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3120,7 +3120,7 @@ def test_get_asset_maintenance_maps_not_found(
     )
 
     response = client.get(
-        "/api/assets/maintenance/401",
+        "/api/v1/assets/maintenance/401",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3170,7 +3170,7 @@ def test_start_maintenance_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/maintenance/501/start",
+        "/api/v1/assets/maintenance/501/start",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3223,7 +3223,7 @@ def test_start_maintenance_allows_missing_body(
     )
 
     response = client.post(
-        "/api/assets/maintenance/501/start",
+        "/api/v1/assets/maintenance/501/start",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3266,7 +3266,7 @@ def test_start_maintenance_maps_conflict(
     )
 
     response = client.post(
-        "/api/assets/maintenance/501/start",
+        "/api/v1/assets/maintenance/501/start",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3317,7 +3317,7 @@ def test_complete_maintenance_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/maintenance/601/complete",
+        "/api/v1/assets/maintenance/601/complete",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3370,7 +3370,7 @@ def test_complete_maintenance_allows_missing_body(
     )
 
     response = client.post(
-        "/api/assets/maintenance/601/complete",
+        "/api/v1/assets/maintenance/601/complete",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3413,7 +3413,7 @@ def test_complete_maintenance_maps_not_found(
     )
 
     response = client.post(
-        "/api/assets/maintenance/601/complete",
+        "/api/v1/assets/maintenance/601/complete",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3464,7 +3464,7 @@ def test_cancel_maintenance_forwards_context(
     )
 
     response = client.post(
-        "/api/assets/maintenance/701/cancel",
+        "/api/v1/assets/maintenance/701/cancel",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3490,7 +3490,7 @@ def test_cancel_maintenance_rejects_missing_json(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/assets/maintenance/701/cancel",
+        "/api/v1/assets/maintenance/701/cancel",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3530,7 +3530,7 @@ def test_cancel_maintenance_maps_conflict(
     )
 
     response = client.post(
-        "/api/assets/maintenance/701/cancel",
+        "/api/v1/assets/maintenance/701/cancel",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3575,7 +3575,7 @@ def test_response_serializes_asset_enum_values(
     )
 
     response = client.get(
-        f"/api/assets/{asset.id}",
+        f"/api/v1/assets/{asset.id}",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,
@@ -3618,7 +3618,7 @@ def test_unexpected_exception_is_not_exposed(
     )
 
     response = client.get(
-        "/api/assets/1",
+        "/api/v1/assets/1",
         headers=auth_headers_for(
             user,
             role=Role.ADMIN,

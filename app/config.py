@@ -52,7 +52,7 @@ class Config:
 
     GOOGLE_REDIRECT_URI = os.environ.get(
         "GOOGLE_REDIRECT_URI",
-        "http://localhost:5000/api/auth/google/callback",
+        "http://localhost:5000/api/v1/auth/google/callback",
     )
 
     # ------------------------------------------------------------------

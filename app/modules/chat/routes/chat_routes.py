@@ -73,7 +73,7 @@ from app.modules.chat.services.message_service import (
 chat_bp = Blueprint(
     "internal_clinical_chat",
     __name__,
-    url_prefix="/api/v1/chat",
+    url_prefix="/chat",
 )
 
 

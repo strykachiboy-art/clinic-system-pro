@@ -32,7 +32,7 @@ from app.modules.billing.services.billing_service import (
 billing_bp = Blueprint(
     "billing",
     __name__,
-    url_prefix="/api/billing",
+    url_prefix="/billing",
 )
 
 

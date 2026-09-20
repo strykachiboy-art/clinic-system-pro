@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from flask import Flask, jsonify
@@ -10,11 +12,14 @@ from app.core.exceptions import DomainError
 logger = logging.getLogger(__name__)
 
 
-def _error_response(message, status_code, details=None):
+def _error_response(message, status_code, details=None, code=None):
     body = {
         "success": False,
         "error": message,
     }
+
+    if code is not None:
+        body["code"] = code
 
     if details is not None:
         body["details"] = details
@@ -46,6 +51,7 @@ def register_error_handlers(app: Flask) -> None:
         return _error_response(
             str(error),
             error.status_code,
+            code=getattr(error, "code", None),
         )
 
     @app.errorhandler(PydanticValidationError)

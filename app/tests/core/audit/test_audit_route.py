@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from app.core.audit.models.audit_model import AuditLog
 from app.core.enums.audit_enums import AuditAction
@@ -15,7 +15,7 @@ def test_get_audit_logs_requires_authentication(
     assert_unauthorized,
 ):
     response = client.get(
-        "/api/audit-logs"
+        "/api/v1/audit-logs"
     )
 
     assert_unauthorized(response)
@@ -32,7 +32,7 @@ def test_get_audit_logs_requires_admin_role(
     )
 
     response = client.get(
-        "/api/audit-logs",
+        "/api/v1/audit-logs",
         headers=headers,
     )
 
@@ -54,7 +54,7 @@ def test_get_audit_logs_allows_admin(
     )
 
     response = client.get(
-        "/api/audit-logs",
+        "/api/v1/audit-logs",
         headers=headers,
     )
 
@@ -72,7 +72,7 @@ def test_get_audit_logs_returns_empty_list_for_no_records(
     )
 
     response = client.get(
-        "/api/audit-logs",
+        "/api/v1/audit-logs",
         headers=headers,
     )
 
@@ -114,7 +114,7 @@ def test_get_audit_logs_returns_records(
     )
 
     response = client.get(
-        "/api/audit-logs",
+        "/api/v1/audit-logs",
         headers=headers,
     )
 
@@ -167,7 +167,7 @@ def test_get_audit_logs_filters_by_user_id(
     )
 
     response = client.get(
-        f"/api/audit-logs?user_id={user.id}",
+        f"/api/v1/audit-logs?user_id={user.id}",
         headers=headers,
     )
 
@@ -205,7 +205,7 @@ def test_get_audit_logs_filters_by_action(
     )
 
     response = client.get(
-        "/api/audit-logs?action=update",
+        "/api/v1/audit-logs?action=update",
         headers=headers,
     )
 
@@ -244,7 +244,7 @@ def test_get_audit_logs_filters_by_entity_type(
     )
 
     response = client.get(
-        "/api/audit-logs?entity_type=Patient",
+        "/api/v1/audit-logs?entity_type=Patient",
         headers=headers,
     )
 
@@ -283,7 +283,7 @@ def test_get_audit_logs_filters_by_entity_id(
     )
 
     response = client.get(
-        "/api/audit-logs?entity_id=100",
+        "/api/v1/audit-logs?entity_id=100",
         headers=headers,
     )
 
@@ -331,7 +331,7 @@ def test_get_audit_logs_combines_filters(
     )
 
     response = client.get(
-        "/api/audit-logs"
+        "/api/v1/audit-logs"
         f"?user_id={user.id}"
         "&action=update"
         "&entity_type=Patient"
@@ -376,7 +376,7 @@ def test_get_audit_logs_supports_pagination(
     )
 
     response = client.get(
-        "/api/audit-logs?page=1&per_page=2",
+        "/api/v1/audit-logs?page=1&per_page=2",
         headers=headers,
     )
 
@@ -411,7 +411,7 @@ def test_get_audit_logs_returns_second_page(
     )
 
     response = client.get(
-        "/api/audit-logs?page=2&per_page=2",
+        "/api/v1/audit-logs?page=2&per_page=2",
         headers=headers,
     )
 
@@ -444,7 +444,7 @@ def test_get_audit_logs_returns_last_page(
     )
 
     response = client.get(
-        "/api/audit-logs?page=3&per_page=2",
+        "/api/v1/audit-logs?page=3&per_page=2",
         headers=headers,
     )
 
@@ -476,7 +476,7 @@ def test_get_audit_logs_returns_empty_page(
     )
 
     response = client.get(
-        "/api/audit-logs?page=2&per_page=1",
+        "/api/v1/audit-logs?page=2&per_page=1",
         headers=headers,
     )
 
@@ -510,7 +510,7 @@ def test_get_audit_logs_rejects_invalid_action(
     )
 
     response = client.get(
-        "/api/audit-logs?action=not-a-real-action",
+        "/api/v1/audit-logs?action=not-a-real-action",
         headers=headers,
     )
 
@@ -534,7 +534,7 @@ def test_get_audit_logs_rejects_empty_action(
     )
 
     response = client.get(
-        "/api/audit-logs?action=",
+        "/api/v1/audit-logs?action=",
         headers=headers,
     )
 
@@ -558,7 +558,7 @@ def test_get_audit_logs_rejects_invalid_user_id(
     )
 
     response = client.get(
-        "/api/audit-logs?user_id=abc",
+        "/api/v1/audit-logs?user_id=abc",
         headers=headers,
     )
 
@@ -582,7 +582,7 @@ def test_get_audit_logs_rejects_invalid_entity_id(
     )
 
     response = client.get(
-        "/api/audit-logs?entity_id=abc",
+        "/api/v1/audit-logs?entity_id=abc",
         headers=headers,
     )
 
@@ -606,7 +606,7 @@ def test_get_audit_logs_rejects_invalid_page(
     )
 
     response = client.get(
-        "/api/audit-logs?page=abc",
+        "/api/v1/audit-logs?page=abc",
         headers=headers,
     )
 
@@ -630,7 +630,7 @@ def test_get_audit_logs_rejects_invalid_per_page(
     )
 
     response = client.get(
-        "/api/audit-logs?per_page=abc",
+        "/api/v1/audit-logs?per_page=abc",
         headers=headers,
     )
 
@@ -663,7 +663,7 @@ def test_get_audit_logs_rejects_invalid_page_values(
     )
 
     response = client.get(
-        f"/api/audit-logs{query}",
+        f"/api/v1/audit-logs{query}",
         headers=headers,
     )
 
@@ -694,7 +694,7 @@ def test_get_audit_logs_rejects_invalid_per_page_values(
     )
 
     response = client.get(
-        f"/api/audit-logs{query}",
+        f"/api/v1/audit-logs{query}",
         headers=headers,
     )
 
@@ -716,7 +716,7 @@ def test_get_audit_logs_rejects_empty_integer_parameter(
     )
 
     response = client.get(
-        "/api/audit-logs?user_id=",
+        "/api/v1/audit-logs?user_id=",
         headers=headers,
     )
 
@@ -738,7 +738,7 @@ def test_get_audit_log_requires_authentication(
     assert_unauthorized,
 ):
     response = client.get(
-        "/api/audit-logs/1"
+        "/api/v1/audit-logs/1"
     )
 
     assert_unauthorized(response)
@@ -761,7 +761,7 @@ def test_get_audit_log_requires_admin_role(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log.id}",
+        f"/api/v1/audit-logs/{log.id}",
         headers=headers,
     )
 
@@ -799,7 +799,7 @@ def test_get_audit_log_returns_record(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log.id}",
+        f"/api/v1/audit-logs/{log.id}",
         headers=headers,
     )
 
@@ -842,7 +842,7 @@ def test_get_audit_log_returns_json_values(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log.id}",
+        f"/api/v1/audit-logs/{log.id}",
         headers=headers,
     )
 
@@ -871,7 +871,7 @@ def test_get_audit_log_returns_not_found(
     )
 
     response = client.get(
-        "/api/audit-logs/999999",
+        "/api/v1/audit-logs/999999",
         headers=headers,
     )
 
@@ -905,7 +905,7 @@ def test_get_audit_log_rejects_invalid_positive_id(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log_id}",
+        f"/api/v1/audit-logs/{log_id}",
         headers=headers,
     )
 
@@ -948,7 +948,7 @@ def test_get_audit_logs_response_has_expected_structure(
     )
 
     response = client.get(
-        "/api/audit-logs",
+        "/api/v1/audit-logs",
         headers=headers,
     )
 
@@ -992,7 +992,7 @@ def test_get_audit_log_response_has_expected_structure(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log.id}",
+        f"/api/v1/audit-logs/{log.id}",
         headers=headers,
     )
 
@@ -1031,7 +1031,7 @@ def test_get_audit_log_response_includes_ip_address(
     )
 
     response = client.get(
-        f"/api/audit-logs/{log.id}",
+        f"/api/v1/audit-logs/{log.id}",
         headers=headers,
     )
 
@@ -1064,7 +1064,7 @@ def test_get_audit_logs_accepts_valid_integer_parameters(
     )
 
     response = client.get(
-        "/api/audit-logs"
+        "/api/v1/audit-logs"
         "?user_id=1"
         "&entity_id=100"
         "&page=1"
@@ -1094,7 +1094,7 @@ def test_get_audit_logs_accepts_action_enum_values(
     )
 
     response = client.get(
-        "/api/audit-logs?action=login",
+        "/api/v1/audit-logs?action=login",
         headers=headers,
     )
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -212,7 +212,7 @@ def pagination(
 
 def test_endpoints_require_auth(client):
     response = client.get(
-        "/api/inventory/items"
+        "/api/v1/inventory/items"
     )
 
     assert response.status_code in (
@@ -262,7 +262,7 @@ def test_list_items_success(
     )
 
     response = client.get(
-        "/api/inventory/items",
+        "/api/v1/inventory/items",
         headers=inventory_admin_headers,
     )
 
@@ -299,7 +299,7 @@ def test_list_items_forwards_filters_and_pagination(
     )
 
     response = client.get(
-        "/api/inventory/items"
+        "/api/v1/inventory/items"
         "?category=medical_supply"
         "&low_stock_only=true"
         "&include_inactive=true"
@@ -324,7 +324,7 @@ def test_list_items_rejects_unknown_query_parameter(
     inventory_admin_headers,
 ):
     response = client.get(
-        "/api/inventory/items?unknown=x",
+        "/api/v1/inventory/items?unknown=x",
         headers=inventory_admin_headers,
     )
 
@@ -346,7 +346,7 @@ def test_list_items_rejects_invalid_pagination(
     query_string,
 ):
     response = client.get(
-        f"/api/inventory/items?{query_string}",
+        f"/api/v1/inventory/items?{query_string}",
         headers=inventory_admin_headers,
     )
 
@@ -366,7 +366,7 @@ def test_get_item_success(
     )
 
     response = client.get(
-        "/api/inventory/items/1",
+        "/api/v1/inventory/items/1",
         headers=inventory_admin_headers,
     )
 
@@ -396,7 +396,7 @@ def test_get_item_not_found(
     )
 
     response = client.get(
-        "/api/inventory/items/1",
+        "/api/v1/inventory/items/1",
         headers=inventory_admin_headers,
     )
 
@@ -408,7 +408,7 @@ def test_create_item_ignores_client_clinic_and_actor_fields(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/items",
+        "/api/v1/inventory/items",
         headers=inventory_admin_headers,
         json={
             "clinic_id": 999,
@@ -426,7 +426,7 @@ def test_create_item_validation_error(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/items",
+        "/api/v1/inventory/items",
         headers=inventory_admin_headers,
         json={
             "name": "",
@@ -454,7 +454,7 @@ def test_create_item_uses_authenticated_clinic_and_staff(
     )
 
     response = client.post(
-        "/api/inventory/items",
+        "/api/v1/inventory/items",
         headers=inventory_admin_headers,
         json={
             "name": "Gloves",
@@ -494,7 +494,7 @@ def test_update_item_success(
     )
 
     response = client.patch(
-        "/api/inventory/items/1",
+        "/api/v1/inventory/items/1",
         headers=inventory_admin_headers,
         json={
             "name": "New"
@@ -511,8 +511,8 @@ def test_update_item_success(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/inventory/items/1/deactivate",
-        "/api/inventory/items/1/reactivate",
+        "/api/v1/inventory/items/1/deactivate",
+        "/api/v1/inventory/items/1/reactivate",
     ],
 )
 def test_item_status_is_admin_only(
@@ -552,7 +552,7 @@ def test_list_batches_success(
     )
 
     response = client.get(
-        "/api/inventory/items/1/batches",
+        "/api/v1/inventory/items/1/batches",
         headers=inventory_admin_headers,
     )
 
@@ -589,7 +589,7 @@ def test_list_batches_forwards_pagination(
     )
 
     response = client.get(
-        "/api/inventory/items/1/batches"
+        "/api/v1/inventory/items/1/batches"
         "?page=3&per_page=10",
         headers=inventory_admin_headers,
     )
@@ -612,7 +612,7 @@ def test_list_batches_rejects_invalid_pagination(
     inventory_admin_headers,
 ):
     response = client.get(
-        "/api/inventory/items/1/batches"
+        "/api/v1/inventory/items/1/batches"
         "?per_page=501",
         headers=inventory_admin_headers,
     )
@@ -633,7 +633,7 @@ def test_get_batch_success(
     )
 
     response = client.get(
-        "/api/inventory/batches/1",
+        "/api/v1/inventory/batches/1",
         headers=inventory_admin_headers,
     )
 
@@ -645,7 +645,7 @@ def test_create_batch_ignores_client_clinic(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/batches",
+        "/api/v1/inventory/batches",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -675,7 +675,7 @@ def test_create_batch_uses_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/inventory/batches",
+        "/api/v1/inventory/batches",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -696,7 +696,7 @@ def test_create_batch_rejects_past_expiry(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/batches",
+        "/api/v1/inventory/batches",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -730,7 +730,7 @@ def test_expiring_batches_forwards_days_and_pagination(
     )
 
     response = client.get(
-        "/api/inventory/batches/expiring"
+        "/api/v1/inventory/batches/expiring"
         "?days=15&page=2&per_page=20",
         headers=inventory_admin_headers,
     )
@@ -777,7 +777,7 @@ def test_list_movements_success(
     )
 
     response = client.get(
-        "/api/inventory/items/1/movements",
+        "/api/v1/inventory/items/1/movements",
         headers=inventory_admin_headers,
     )
 
@@ -813,7 +813,7 @@ def test_list_movements_forwards_pagination(
     )
 
     response = client.get(
-        "/api/inventory/items/1/movements"
+        "/api/v1/inventory/items/1/movements"
         "?page=2&per_page=25",
         headers=inventory_admin_headers,
     )
@@ -836,7 +836,7 @@ def test_list_movements_rejects_invalid_pagination(
     inventory_admin_headers,
 ):
     response = client.get(
-        "/api/inventory/items/1/movements"
+        "/api/v1/inventory/items/1/movements"
         "?page=0",
         headers=inventory_admin_headers,
     )
@@ -862,7 +862,7 @@ def test_create_movement_uses_jwt_actor(
     )
 
     response = client.post(
-        "/api/inventory/movements",
+        "/api/v1/inventory/movements",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -895,7 +895,7 @@ def test_create_movement_uses_authenticated_actor(
     )
 
     response = client.post(
-        "/api/inventory/movements",
+        "/api/v1/inventory/movements",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -922,7 +922,7 @@ def test_movement_rejects_zero_for_normal_movement(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/movements",
+        "/api/v1/inventory/movements",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -958,7 +958,7 @@ def test_list_suppliers_success(
     )
 
     response = client.get(
-        "/api/inventory/suppliers",
+        "/api/v1/inventory/suppliers",
         headers=inventory_admin_headers,
     )
 
@@ -996,7 +996,7 @@ def test_list_suppliers_forwards_pagination(
     )
 
     response = client.get(
-        "/api/inventory/suppliers"
+        "/api/v1/inventory/suppliers"
         "?page=2&per_page=25",
         headers=inventory_admin_headers,
     )
@@ -1019,7 +1019,7 @@ def test_list_suppliers_rejects_invalid_pagination(
     inventory_admin_headers,
 ):
     response = client.get(
-        "/api/inventory/suppliers"
+        "/api/v1/inventory/suppliers"
         "?per_page=501",
         headers=inventory_admin_headers,
     )
@@ -1045,7 +1045,7 @@ def test_create_supplier_defaults_to_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/inventory/suppliers",
+        "/api/v1/inventory/suppliers",
         headers=inventory_admin_headers,
         json={
             "name": "Supplier One"
@@ -1065,7 +1065,7 @@ def test_create_global_supplier_is_not_exposed_by_route(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/suppliers",
+        "/api/v1/inventory/suppliers",
         headers=inventory_admin_headers,
         json={
             "name": "Global Supplier",
@@ -1081,7 +1081,7 @@ def test_create_supplier_rejects_client_clinic_override(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/suppliers",
+        "/api/v1/inventory/suppliers",
         headers=inventory_admin_headers,
         json={
             "name": "Supplier One",
@@ -1097,7 +1097,7 @@ def test_create_global_supplier_rejected_for_pharmacist(
     pharmacist_headers,
 ):
     response = client.post(
-        "/api/inventory/suppliers",
+        "/api/v1/inventory/suppliers",
         headers=pharmacist_headers,
         json={
             "name": "Global Supplier",
@@ -1113,7 +1113,7 @@ def test_supplier_update_is_admin_only(
     pharmacist_headers,
 ):
     response = client.patch(
-        "/api/inventory/suppliers/1",
+        "/api/v1/inventory/suppliers/1",
         headers=pharmacist_headers,
         json={
             "name": "New"
@@ -1147,7 +1147,7 @@ def test_list_transfers_success(
     )
 
     response = client.get(
-        "/api/inventory/transfers",
+        "/api/v1/inventory/transfers",
         headers=inventory_admin_headers,
     )
 
@@ -1185,7 +1185,7 @@ def test_list_transfers_forwards_status_and_pagination(
     )
 
     response = client.get(
-        "/api/inventory/transfers"
+        "/api/v1/inventory/transfers"
         "?status=pending&page=3&per_page=10",
         headers=inventory_admin_headers,
     )
@@ -1213,7 +1213,7 @@ def test_list_transfers_rejects_invalid_pagination(
     inventory_admin_headers,
 ):
     response = client.get(
-        "/api/inventory/transfers"
+        "/api/v1/inventory/transfers"
         "?page=0",
         headers=inventory_admin_headers,
     )
@@ -1226,7 +1226,7 @@ def test_create_transfer_rejects_client_source_clinic_override(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/transfers",
+        "/api/v1/inventory/transfers",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -1258,7 +1258,7 @@ def test_create_transfer_uses_jwt_source_and_requester(
     )
 
     response = client.post(
-        "/api/inventory/transfers",
+        "/api/v1/inventory/transfers",
         headers=inventory_admin_headers,
         json={
             "item_id": 1,
@@ -1287,7 +1287,7 @@ def test_approve_transfer_rejects_body_actor(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/transfers/1/approve",
+        "/api/v1/inventory/transfers/1/approve",
         headers=inventory_admin_headers,
         json={
             "approved_by_id": 999999
@@ -1318,7 +1318,7 @@ def test_approve_transfer_uses_jwt_actor(
     )
 
     response = client.post(
-        "/api/inventory/transfers/1/approve",
+        "/api/v1/inventory/transfers/1/approve",
         headers=inventory_admin_headers,
         json={},
     )
@@ -1336,7 +1336,7 @@ def test_complete_transfer_rejects_body_actor(
     inventory_admin_headers,
 ):
     response = client.post(
-        "/api/inventory/transfers/1/complete",
+        "/api/v1/inventory/transfers/1/complete",
         headers=inventory_admin_headers,
         json={
             "performed_by_id": 999999
@@ -1366,7 +1366,7 @@ def test_complete_transfer_uses_jwt_actor(
     )
 
     response = client.post(
-        "/api/inventory/transfers/1/complete",
+        "/api/v1/inventory/transfers/1/complete",
         headers=inventory_admin_headers,
         json={},
     )
@@ -1399,7 +1399,7 @@ def test_cancel_transfer_uses_jwt_actor(
     )
 
     response = client.post(
-        "/api/inventory/transfers/1/cancel",
+        "/api/v1/inventory/transfers/1/cancel",
         headers=inventory_admin_headers,
         json={
             "cancelled_by_id": 999999,
@@ -1430,7 +1430,7 @@ def test_cancel_transfer_uses_jwt_actor_and_reason(
     )
 
     response = client.post(
-        "/api/inventory/transfers/1/cancel",
+        "/api/v1/inventory/transfers/1/cancel",
         headers=inventory_admin_headers,
         json={
             "reason": "Not needed"
@@ -1493,7 +1493,7 @@ def test_service_errors_are_mapped(
     )
 
     response = client.get(
-        "/api/inventory/items/1",
+        "/api/v1/inventory/items/1",
         headers=inventory_admin_headers,
     )
 

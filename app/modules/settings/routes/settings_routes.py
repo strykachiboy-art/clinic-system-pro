@@ -45,7 +45,7 @@ from app.modules.settings.services.integration_config_service import (
 settings_bp = Blueprint(
     "settings",
     __name__,
-    url_prefix="/api/settings",
+    url_prefix="/settings",
 )
 
 

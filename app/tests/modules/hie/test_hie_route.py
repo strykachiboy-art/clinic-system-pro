@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -124,7 +124,7 @@ def test_create_integration_success(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "MALAFFI",
             "endpoint_url": "https://hie.example.com",
@@ -187,7 +187,7 @@ def test_create_integration_uses_authenticated_clinic(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "malaffi",
         },
@@ -209,7 +209,7 @@ def test_create_integration_rejects_client_clinic_id(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "malaffi",
             "clinic_id": 999999,
@@ -250,7 +250,7 @@ def test_create_integration_defaults_provider_to_malaffi(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={},
         headers=headers,
     )
@@ -270,7 +270,7 @@ def test_create_integration_rejects_unknown_field(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "malaffi",
             "unknown_field": "bad",
@@ -292,7 +292,7 @@ def test_create_integration_rejects_invalid_provider(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "   ",
         },
@@ -313,7 +313,7 @@ def test_create_integration_rejects_invalid_endpoint(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "endpoint_url": "not-a-url",
         },
@@ -334,7 +334,7 @@ def test_create_integration_rejects_empty_identifier(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "organization_id": "   ",
         },
@@ -355,7 +355,7 @@ def test_create_integration_forbidden_for_doctor(
     )
 
     response = app.test_client().post(
-        "/api/hie/integrations",
+        "/api/v1/hie/integrations",
         json={
             "provider": "malaffi",
         },
@@ -396,7 +396,7 @@ def test_get_integration_success(
     )
 
     response = app.test_client().get(
-        "/api/hie/integrations/7",
+        "/api/v1/hie/integrations/7",
         headers=headers,
     )
 
@@ -446,7 +446,7 @@ def test_get_integration_uses_authenticated_clinic(
     )
 
     response = app.test_client().get(
-        "/api/hie/integrations/15",
+        "/api/v1/hie/integrations/15",
         headers=headers,
     )
 
@@ -490,7 +490,7 @@ def test_update_integration_success(
     )
 
     response = app.test_client().patch(
-        "/api/hie/integrations/5",
+        "/api/v1/hie/integrations/5",
         json={
             "provider": "MALAFFI",
             "status": HIEIntegrationStatus.ACTIVE.value,
@@ -534,7 +534,7 @@ def test_update_integration_forbidden_for_nurse(
     )
 
     response = app.test_client().patch(
-        "/api/hie/integrations/1",
+        "/api/v1/hie/integrations/1",
         json={
             "status": HIEIntegrationStatus.ACTIVE.value,
         },
@@ -574,7 +574,7 @@ def test_update_integration_normalizes_provider(
     )
 
     response = app.test_client().patch(
-        "/api/hie/integrations/1",
+        "/api/v1/hie/integrations/1",
         json={
             "provider": "  MALAFFI  ",
         },
@@ -596,7 +596,7 @@ def test_update_integration_rejects_unknown_field(
     )
 
     response = app.test_client().patch(
-        "/api/hie/integrations/1",
+        "/api/v1/hie/integrations/1",
         json={
             "unknown_field": "bad",
         },
@@ -653,7 +653,7 @@ def test_get_submissions_success(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions",
+        "/api/v1/hie/submissions",
         headers=headers,
     )
 
@@ -707,7 +707,7 @@ def test_get_submissions_passes_filters(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions"
+        "/api/v1/hie/submissions"
         "?integration_id=5"
         "&patient_id=8"
         f"&operation={HIEOperation.PATIENT_QUERY.value}"
@@ -753,7 +753,7 @@ def test_get_submissions_uses_authenticated_clinic(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions",
+        "/api/v1/hie/submissions",
         headers=headers,
     )
 
@@ -772,7 +772,7 @@ def test_get_submissions_rejects_invalid_integration_id(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?integration_id=0",
+        "/api/v1/hie/submissions?integration_id=0",
         headers=headers,
     )
 
@@ -790,7 +790,7 @@ def test_get_submissions_rejects_invalid_patient_id(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?patient_id=0",
+        "/api/v1/hie/submissions?patient_id=0",
         headers=headers,
     )
 
@@ -813,7 +813,7 @@ def test_get_submissions_rejects_invalid_page(
     )
 
     response = app.test_client().get(
-        f"/api/hie/submissions?page={page}",
+        f"/api/v1/hie/submissions?page={page}",
         headers=headers,
     )
 
@@ -836,7 +836,7 @@ def test_get_submissions_rejects_invalid_per_page(
     )
 
     response = app.test_client().get(
-        f"/api/hie/submissions?per_page={per_page}",
+        f"/api/v1/hie/submissions?per_page={per_page}",
         headers=headers,
     )
 
@@ -873,7 +873,7 @@ def test_get_submissions_accepts_maximum_per_page(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?per_page=100",
+        "/api/v1/hie/submissions?per_page=100",
         headers=headers,
     )
 
@@ -892,7 +892,7 @@ def test_get_submissions_rejects_invalid_operation(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?operation=invalid",
+        "/api/v1/hie/submissions?operation=invalid",
         headers=headers,
     )
 
@@ -910,7 +910,7 @@ def test_get_submissions_rejects_invalid_status(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?status=invalid",
+        "/api/v1/hie/submissions?status=invalid",
         headers=headers,
     )
 
@@ -928,7 +928,7 @@ def test_get_submissions_rejects_unknown_field(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions?unknown_field=bad",
+        "/api/v1/hie/submissions?unknown_field=bad",
         headers=headers,
     )
 
@@ -980,7 +980,7 @@ def test_get_submissions_serializes_submission_fields(
     )
 
     response = app.test_client().get(
-        "/api/hie/submissions",
+        "/api/v1/hie/submissions",
         headers=headers,
     )
 
@@ -1013,10 +1013,10 @@ def test_get_submissions_serializes_submission_fields(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("post", "/api/hie/integrations"),
-        ("get", "/api/hie/integrations/1"),
-        ("patch", "/api/hie/integrations/1"),
-        ("get", "/api/hie/submissions"),
+        ("post", "/api/v1/hie/integrations"),
+        ("get", "/api/v1/hie/integrations/1"),
+        ("patch", "/api/v1/hie/integrations/1"),
+        ("get", "/api/v1/hie/submissions"),
     ],
 )
 def test_hie_routes_require_authentication(
@@ -1072,7 +1072,7 @@ def test_get_integration_allowed_for_hie_view_roles(
     )
 
     response = app.test_client().get(
-        "/api/hie/integrations/3",
+        "/api/v1/hie/integrations/3",
         headers=headers,
     )
 
@@ -1096,7 +1096,7 @@ def test_get_integration_forbidden_for_patient(
     )
 
     response = app.test_client().get(
-        "/api/hie/integrations/1",
+        "/api/v1/hie/integrations/1",
         headers=headers,
     )
 
@@ -1127,7 +1127,7 @@ def test_domain_validation_error_is_handled(
     )
 
     response = app.test_client().get(
-        "/api/hie/integrations/999",
+        "/api/v1/hie/integrations/999",
         headers=headers,
     )
 

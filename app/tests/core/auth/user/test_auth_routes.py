@@ -97,7 +97,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json=valid_register_payload(),
         )
 
@@ -149,7 +149,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={
                 "email": "clinicuser@test.com",
                 "password": "StrongPassword123!",
@@ -195,7 +195,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={
                 "email": "attacker@test.com",
                 "password": "StrongPassword123!",
@@ -226,7 +226,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={},
         )
 
@@ -254,7 +254,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={
                 "email": "not-an-email",
                 "password": "StrongPassword123!",
@@ -284,7 +284,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={
                 "email": "valid@test.com",
                 "password": "short",
@@ -314,7 +314,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json={
                 "email": "valid@test.com",
                 "password": "StrongPassword123!",
@@ -350,7 +350,7 @@ class TestRegisterRoute:
         )
 
         response = client.post(
-            "/api/auth/register",
+            "/api/v1/auth/register",
             json=valid_register_payload(),
         )
 
@@ -391,7 +391,7 @@ class TestLoginRoute:
         )
 
         response = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json=valid_login_payload(),
         )
 
@@ -421,7 +421,7 @@ class TestLoginRoute:
         )
 
         response = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={},
         )
 
@@ -448,7 +448,7 @@ class TestLoginRoute:
         )
 
         response = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "email": "invalid-email",
                 "password": "StrongPassword123!",
@@ -478,7 +478,7 @@ class TestLoginRoute:
         )
 
         response = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "email": "admin@test.com",
                 "password": "",
@@ -513,7 +513,7 @@ class TestLoginRoute:
         )
 
         response = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json=valid_login_payload(),
         )
 
@@ -558,7 +558,7 @@ class TestGoogleLoginRoute:
         )
 
         response = client.get(
-            "/api/auth/google",
+            "/api/v1/auth/google",
         )
 
         assert response.status_code == 200
@@ -596,7 +596,7 @@ class TestGoogleLoginRoute:
         )
 
         response = client.get(
-            "/api/auth/google",
+            "/api/v1/auth/google",
         )
 
         assert response.status_code == 503
@@ -644,7 +644,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?code=test-code"
             "&state=test-state",
         )
@@ -690,7 +690,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?error=access_denied"
             "&error_description=User%20denied%20access",
         )
@@ -714,7 +714,7 @@ class TestGoogleCallbackRoute:
         client,
     ):
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?error=access_denied",
         )
 
@@ -747,7 +747,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?state=test-state",
         )
 
@@ -782,7 +782,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?code=test-code",
         )
 
@@ -817,7 +817,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?code="
             "&state=test-state",
         )
@@ -859,7 +859,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?code=test-code"
             "&state=bad-state",
         )
@@ -906,7 +906,7 @@ class TestGoogleCallbackRoute:
         )
 
         response = client.get(
-            "/api/auth/google/callback"
+            "/api/v1/auth/google/callback"
             "?code=test-code"
             "&state=test-state",
         )
@@ -940,7 +940,7 @@ class TestRefreshRoute:
         client,
     ):
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
         )
 
         assert response.status_code == 401
@@ -952,7 +952,7 @@ class TestRefreshRoute:
         auth_headers_for,
     ):
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers=auth_headers_for(user),
         )
 
@@ -1001,7 +1001,7 @@ class TestRefreshRoute:
         )
 
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
@@ -1053,7 +1053,7 @@ class TestRefreshRoute:
         the route body executes.
         """
         with app.test_request_context(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             method="POST",
         ):
             monkeypatch.setattr(
@@ -1109,7 +1109,7 @@ class TestRefreshRoute:
         )
 
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
@@ -1137,7 +1137,7 @@ class TestRefreshRoute:
         )
 
         with app.test_request_context(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             method="POST",
         ):
             monkeypatch.setattr(
@@ -1180,7 +1180,7 @@ class TestRefreshRoute:
         )
 
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
@@ -1223,7 +1223,7 @@ class TestRefreshRoute:
         )
 
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
@@ -1281,7 +1281,7 @@ class TestRefreshRoute:
         )
 
         response = client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             headers={
                 "Authorization": (
                     f"Bearer {refresh_token}"
@@ -1306,7 +1306,7 @@ class TestLogoutRoute:
         client,
     ):
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             json={
                 "refresh_token": "something",
             },
@@ -1321,7 +1321,7 @@ class TestLogoutRoute:
         auth_headers_for,
     ):
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={},
         )
@@ -1342,7 +1342,7 @@ class TestLogoutRoute:
         auth_headers_for,
     ):
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": "not-a-real-jwt",
@@ -1369,7 +1369,7 @@ class TestLogoutRoute:
         )
 
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": access_token,
@@ -1406,7 +1406,7 @@ class TestLogoutRoute:
         )
 
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": other_refresh_token,
@@ -1452,7 +1452,7 @@ class TestLogoutRoute:
         )
 
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": refresh_token,
@@ -1515,7 +1515,7 @@ class TestLogoutRoute:
         )
 
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": refresh_token,
@@ -1566,7 +1566,7 @@ class TestLogoutRoute:
         )
 
         response = client.post(
-            "/api/auth/logout",
+            "/api/v1/auth/logout",
             headers=auth_headers_for(user),
             json={
                 "refresh_token": refresh_token,
@@ -1593,38 +1593,38 @@ class TestAuthRouteRegistration:
             for rule in app.url_map.iter_rules()
         }
 
-        assert "/api/auth/register" in routes
-        assert "/api/auth/login" in routes
-        assert "/api/auth/google" in routes
-        assert "/api/auth/google/callback" in routes
-        assert "/api/auth/refresh" in routes
-        assert "/api/auth/logout" in routes
+        assert "/api/v1/auth/register" in routes
+        assert "/api/v1/auth/login" in routes
+        assert "/api/v1/auth/google" in routes
+        assert "/api/v1/auth/google/callback" in routes
+        assert "/api/v1/auth/refresh" in routes
+        assert "/api/v1/auth/logout" in routes
 
     @pytest.mark.parametrize(
         "route,method",
         [
             (
-                "/api/auth/register",
+                "/api/v1/auth/register",
                 "POST",
             ),
             (
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 "POST",
             ),
             (
-                "/api/auth/google",
+                "/api/v1/auth/google",
                 "GET",
             ),
             (
-                "/api/auth/google/callback",
+                "/api/v1/auth/google/callback",
                 "GET",
             ),
             (
-                "/api/auth/refresh",
+                "/api/v1/auth/refresh",
                 "POST",
             ),
             (
-                "/api/auth/logout",
+                "/api/v1/auth/logout",
                 "POST",
             ),
         ],

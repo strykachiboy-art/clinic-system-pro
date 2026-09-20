@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
@@ -168,28 +168,28 @@ def _create_admission(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("POST", "/api/wards"),
-        ("GET", "/api/wards"),
-        ("PATCH", "/api/wards/1"),
-        ("GET", "/api/wards/1"),
-        ("GET", "/api/wards/1/occupancy"),
-        ("POST", "/api/wards/1/beds"),
-        ("GET", "/api/wards/1/beds"),
-        ("GET", "/api/wards/beds/1"),
-        ("PATCH", "/api/wards/beds/1/maintenance"),
-        ("POST", "/api/wards/reservations"),
-        ("GET", "/api/wards/reservations"),
-        ("GET", "/api/wards/reservations/1"),
-        ("GET", "/api/wards/patients/1/reservation"),
-        ("GET", "/api/wards/beds/1/reservation"),
-        ("POST", "/api/wards/reservations/1/cancel"),
-        ("POST", "/api/wards/reservations/1/admit"),
-        ("POST", "/api/wards/admissions"),
-        ("GET", "/api/wards/admissions/1"),
-        ("GET", "/api/wards/patients/1/admissions"),
-        ("GET", "/api/wards/patients/1/current-admission"),
-        ("POST", "/api/wards/admissions/1/transfer"),
-        ("POST", "/api/wards/admissions/1/discharge"),
+        ("POST", "/api/v1/wards"),
+        ("GET", "/api/v1/wards"),
+        ("PATCH", "/api/v1/wards/1"),
+        ("GET", "/api/v1/wards/1"),
+        ("GET", "/api/v1/wards/1/occupancy"),
+        ("POST", "/api/v1/wards/1/beds"),
+        ("GET", "/api/v1/wards/1/beds"),
+        ("GET", "/api/v1/wards/beds/1"),
+        ("PATCH", "/api/v1/wards/beds/1/maintenance"),
+        ("POST", "/api/v1/wards/reservations"),
+        ("GET", "/api/v1/wards/reservations"),
+        ("GET", "/api/v1/wards/reservations/1"),
+        ("GET", "/api/v1/wards/patients/1/reservation"),
+        ("GET", "/api/v1/wards/beds/1/reservation"),
+        ("POST", "/api/v1/wards/reservations/1/cancel"),
+        ("POST", "/api/v1/wards/reservations/1/admit"),
+        ("POST", "/api/v1/wards/admissions"),
+        ("GET", "/api/v1/wards/admissions/1"),
+        ("GET", "/api/v1/wards/patients/1/admissions"),
+        ("GET", "/api/v1/wards/patients/1/current-admission"),
+        ("POST", "/api/v1/wards/admissions/1/transfer"),
+        ("POST", "/api/v1/wards/admissions/1/discharge"),
     ],
 )
 def test_all_ward_routes_require_authentication(
@@ -222,7 +222,7 @@ def test_receptionist_can_view_wards(
     _create_ward(clinic)
 
     response = client.get(
-        "/api/wards",
+        "/api/v1/wards",
         headers=_headers(
             auth_headers_for,
             user,
@@ -237,7 +237,7 @@ def test_receptionist_can_view_wards(
     [
         (
             "POST",
-            "/api/wards",
+            "/api/v1/wards",
             {
                 "name": "Restricted Ward",
                 "capacity": 5,
@@ -245,28 +245,28 @@ def test_receptionist_can_view_wards(
         ),
         (
             "PATCH",
-            "/api/wards/1",
+            "/api/v1/wards/1",
             {
                 "name": "Restricted Update",
             },
         ),
         (
             "POST",
-            "/api/wards/1/beds",
+            "/api/v1/wards/1/beds",
             {
                 "bed_number": "B-001",
             },
         ),
         (
             "PATCH",
-            "/api/wards/beds/1/maintenance",
+            "/api/v1/wards/beds/1/maintenance",
             {
                 "under_maintenance": True,
             },
         ),
         (
             "POST",
-            "/api/wards/reservations",
+            "/api/v1/wards/reservations",
             {
                 "patient_id": 1,
                 "bed_id": 1,
@@ -274,7 +274,7 @@ def test_receptionist_can_view_wards(
         ),
         (
             "POST",
-            "/api/wards/admissions",
+            "/api/v1/wards/admissions",
             {
                 "patient_id": 1,
                 "bed_id": 1,
@@ -282,14 +282,14 @@ def test_receptionist_can_view_wards(
         ),
         (
             "POST",
-            "/api/wards/admissions/1/transfer",
+            "/api/v1/wards/admissions/1/transfer",
             {
                 "to_bed_id": 2,
             },
         ),
         (
             "POST",
-            "/api/wards/admissions/1/discharge",
+            "/api/v1/wards/admissions/1/discharge",
             {},
         ),
     ],
@@ -331,7 +331,7 @@ def test_create_ward_route_success(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards",
+        "/api/v1/wards",
         json={
             "name": "  Surgical Ward  ",
             "ward_type": WardType.GENERAL.value,
@@ -370,7 +370,7 @@ def test_create_ward_route_rejects_client_clinic_override(
     foreign_clinic = make_clinic()
 
     response = client.post(
-        "/api/wards",
+        "/api/v1/wards",
         json={
             "name": "Ward",
             "capacity": 5,
@@ -396,7 +396,7 @@ def test_create_ward_route_rejects_invalid_payload(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards",
+        "/api/v1/wards",
         json={
             "name": "",
             "capacity": -1,
@@ -421,7 +421,7 @@ def test_create_ward_route_rejects_unknown_fields(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards",
+        "/api/v1/wards",
         json={
             "name": "Ward",
             "capacity": 5,
@@ -454,7 +454,7 @@ def test_create_ward_route_maps_domain_error(
     )
 
     response = client.post(
-        "/api/wards",
+        "/api/v1/wards",
         json={
             "name": "Duplicate Ward",
             "capacity": 5,
@@ -491,7 +491,7 @@ def test_list_wards_route_success(
     )
 
     response = client.get(
-        "/api/wards",
+        "/api/v1/wards",
         headers=_headers(
             auth_headers_for,
             user,
@@ -531,7 +531,7 @@ def test_list_wards_route_filters_by_type(
 
     response = client.get(
         (
-            "/api/wards"
+            "/api/v1/wards"
             f"?ward_type={WardType.GENERAL.value}"
         ),
         headers=_headers(
@@ -560,7 +560,7 @@ def test_list_wards_route_rejects_invalid_type(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards?ward_type=NOT_REAL",
+        "/api/v1/wards?ward_type=NOT_REAL",
         headers=_headers(
             auth_headers_for,
             user,
@@ -592,7 +592,7 @@ def test_list_wards_route_supports_pagination(
         )
 
     response = client.get(
-        "/api/wards?page=2&per_page=2",
+        "/api/v1/wards?page=2&per_page=2",
         headers=_headers(
             auth_headers_for,
             user,
@@ -627,7 +627,7 @@ def test_list_wards_route_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/wards?{query}",
+        f"/api/v1/wards?{query}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -653,7 +653,7 @@ def test_update_ward_route_success(
     )
 
     response = client.patch(
-        f"/api/wards/{ward.id}",
+        f"/api/v1/wards/{ward.id}",
         json={
             "name": "Updated Ward",
             "capacity": 10,
@@ -686,7 +686,7 @@ def test_update_ward_route_rejects_unknown_fields(
     ward = _create_ward(clinic)
 
     response = client.patch(
-        f"/api/wards/{ward.id}",
+        f"/api/v1/wards/{ward.id}",
         json={
             "unexpected": "blocked",
         },
@@ -708,7 +708,7 @@ def test_update_ward_route_rejects_empty_payload(
     ward = _create_ward(clinic)
 
     response = client.patch(
-        f"/api/wards/{ward.id}",
+        f"/api/v1/wards/{ward.id}",
         json={},
         headers=_headers(
             auth_headers_for,
@@ -736,7 +736,7 @@ def test_update_ward_route_rejects_duplicate_name(
     )
 
     response = client.patch(
-        f"/api/wards/{second.id}",
+        f"/api/v1/wards/{second.id}",
         json={
             "name": first.name,
         },
@@ -755,7 +755,7 @@ def test_update_ward_route_missing(
     auth_headers_for,
 ):
     response = client.patch(
-        "/api/wards/999999",
+        "/api/v1/wards/999999",
         json={
             "name": "Updated Ward",
         },
@@ -786,7 +786,7 @@ def test_update_ward_route_maps_domain_error(
     )
 
     response = client.patch(
-        "/api/wards/1",
+        "/api/v1/wards/1",
         json={
             "name": "Updated Ward",
         },
@@ -818,7 +818,7 @@ def test_get_ward_route_success(
     )
 
     response = client.get(
-        f"/api/wards/{ward.id}",
+        f"/api/v1/wards/{ward.id}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -844,7 +844,7 @@ def test_get_ward_route_missing(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/999999",
+        "/api/v1/wards/999999",
         headers=_headers(
             auth_headers_for,
             user,
@@ -878,7 +878,7 @@ def test_get_ward_route_enforces_clinic_isolation(
     )
 
     response = client.get(
-        f"/api/wards/{foreign_ward.id}",
+        f"/api/v1/wards/{foreign_ward.id}",
         headers=_headers(
             auth_headers_for,
             local_user,
@@ -906,7 +906,7 @@ def test_get_ward_route_maps_not_found_error(
     )
 
     response = client.get(
-        "/api/wards/123",
+        "/api/v1/wards/123",
         headers=_headers(
             auth_headers_for,
             user,
@@ -937,7 +937,7 @@ def test_get_ward_route_maps_validation_error(
     )
 
     response = client.get(
-        "/api/wards/1",
+        "/api/v1/wards/1",
         headers=_headers(
             auth_headers_for,
             user,
@@ -966,7 +966,7 @@ def test_get_ward_occupancy_route_success(
     )
 
     response = client.get(
-        f"/api/wards/{ward.id}/occupancy",
+        f"/api/v1/wards/{ward.id}/occupancy",
         headers=_headers(
             auth_headers_for,
             user,
@@ -990,7 +990,7 @@ def test_get_ward_occupancy_route_missing_ward(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/999999/occupancy",
+        "/api/v1/wards/999999/occupancy",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1015,7 +1015,7 @@ def test_add_bed_route_success(
     )
 
     response = client.post(
-        f"/api/wards/{ward.id}/beds",
+        f"/api/v1/wards/{ward.id}/beds",
         json={
             "bed_number": "  B-101  ",
         },
@@ -1050,7 +1050,7 @@ def test_add_bed_route_rejects_invalid_payload(
     ward = _create_ward(clinic)
 
     response = client.post(
-        f"/api/wards/{ward.id}/beds",
+        f"/api/v1/wards/{ward.id}/beds",
         json={
             "bed_number": "",
         },
@@ -1072,7 +1072,7 @@ def test_add_bed_route_rejects_unknown_fields(
     ward = _create_ward(clinic)
 
     response = client.post(
-        f"/api/wards/{ward.id}/beds",
+        f"/api/v1/wards/{ward.id}/beds",
         json={
             "bed_number": "B-001",
             "clinic_id": 999,
@@ -1092,7 +1092,7 @@ def test_add_bed_route_missing_ward(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/999999/beds",
+        "/api/v1/wards/999999/beds",
         json={
             "bed_number": "B-001",
         },
@@ -1123,7 +1123,7 @@ def test_add_bed_route_maps_conflict_error(
     )
 
     response = client.post(
-        "/api/wards/1/beds",
+        "/api/v1/wards/1/beds",
         json={
             "bed_number": "B-001",
         },
@@ -1164,7 +1164,7 @@ def test_list_beds_route_success(
     )
 
     response = client.get(
-        f"/api/wards/{ward.id}/beds",
+        f"/api/v1/wards/{ward.id}/beds",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1219,7 +1219,7 @@ def test_list_beds_route_filters_status(
 
     response = client.get(
         (
-            f"/api/wards/{ward.id}/beds"
+            f"/api/v1/wards/{ward.id}/beds"
             f"?status={BedStatus.MAINTENANCE.value}"
         ),
         headers=_headers(
@@ -1263,7 +1263,7 @@ def test_list_beds_route_supports_pagination(
 
     response = client.get(
         (
-            f"/api/wards/{ward.id}/beds"
+            f"/api/v1/wards/{ward.id}/beds"
             "?page=2&per_page=2"
         ),
         headers=_headers(
@@ -1306,7 +1306,7 @@ def test_list_beds_route_rejects_invalid_pagination(
     )
 
     response = client.get(
-        f"/api/wards/{ward.id}/beds?{query}",
+        f"/api/v1/wards/{ward.id}/beds?{query}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1326,7 +1326,7 @@ def test_list_beds_route_rejects_invalid_status(
 
     response = client.get(
         (
-            f"/api/wards/{ward.id}/beds"
+            f"/api/v1/wards/{ward.id}/beds"
             "?status=INVALID"
         ),
         headers=_headers(
@@ -1353,7 +1353,7 @@ def test_list_beds_route_missing_ward(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/999999/beds",
+        "/api/v1/wards/999999/beds",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1375,7 +1375,7 @@ def test_get_bed_route_success(
     )
 
     response = client.get(
-        f"/api/wards/beds/{bed.id}",
+        f"/api/v1/wards/beds/{bed.id}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1400,7 +1400,7 @@ def test_get_bed_route_missing(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/beds/999999",
+        "/api/v1/wards/beds/999999",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1430,7 +1430,7 @@ def test_get_bed_route_rejects_foreign_bed(
     )
 
     response = client.get(
-        f"/api/wards/beds/{foreign_bed.id}",
+        f"/api/v1/wards/beds/{foreign_bed.id}",
         headers=_headers(
             auth_headers_for,
             local_user,
@@ -1449,7 +1449,7 @@ def test_set_bed_maintenance_route_success(
     _, bed = _create_bed(clinic)
 
     response = client.patch(
-        f"/api/wards/beds/{bed.id}/maintenance",
+        f"/api/v1/wards/beds/{bed.id}/maintenance",
         json={
             "under_maintenance": True,
         },
@@ -1487,7 +1487,7 @@ def test_set_bed_maintenance_route_restores_bed(
     )
 
     response = client.patch(
-        f"/api/wards/beds/{bed.id}/maintenance",
+        f"/api/v1/wards/beds/{bed.id}/maintenance",
         json={
             "under_maintenance": False,
         },
@@ -1514,7 +1514,7 @@ def test_set_bed_maintenance_route_rejects_invalid_payload(
     _, bed = _create_bed(clinic)
 
     response = client.patch(
-        f"/api/wards/beds/{bed.id}/maintenance",
+        f"/api/v1/wards/beds/{bed.id}/maintenance",
         json={
             "under_maintenance": "invalid",
         },
@@ -1554,7 +1554,7 @@ def test_reserve_bed_route_success(
     )
 
     response = client.post(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         json={
             "patient_id": patient.id,
             "bed_id": bed.id,
@@ -1591,7 +1591,7 @@ def test_reserve_bed_route_rejects_invalid_payload(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         json={
             "patient_id": 0,
             "bed_id": 0,
@@ -1629,7 +1629,7 @@ def test_reserve_bed_route_rejects_unknown_fields(
     )
 
     response = client.post(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         json={
             "patient_id": patient.id,
             "bed_id": bed.id,
@@ -1680,7 +1680,7 @@ def test_reserve_bed_route_maps_service_conflict(
     )
 
     response = client.post(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         json={
             "patient_id": patient.id,
             "bed_id": bed.id,
@@ -1719,7 +1719,7 @@ def test_list_reservations_route_success(
     )
 
     response = client.get(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         headers=_headers(
             auth_headers_for,
             user,
@@ -1764,7 +1764,7 @@ def test_list_reservations_route_filters_status(
 
     response = client.get(
         (
-            "/api/wards/reservations"
+            "/api/v1/wards/reservations"
             f"?status={ReservationStatus.PENDING.value}"
         ),
         headers=_headers(
@@ -1840,7 +1840,7 @@ def test_list_reservations_route_filters_patient(
 
     response = client.get(
         (
-            "/api/wards/reservations"
+            "/api/v1/wards/reservations"
             f"?patient_id={patient_a.id}"
         ),
         headers=_headers(
@@ -1919,7 +1919,7 @@ def test_list_reservations_route_filters_bed(
 
     response = client.get(
         (
-            "/api/wards/reservations"
+            "/api/v1/wards/reservations"
             f"?bed_id={bed_a.id}"
         ),
         headers=_headers(
@@ -1980,7 +1980,7 @@ def test_list_reservations_route_supports_pagination(
         )
 
     response = client.get(
-        "/api/wards/reservations?page=2&per_page=2",
+        "/api/v1/wards/reservations?page=2&per_page=2",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2015,7 +2015,7 @@ def test_list_reservations_route_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/wards/reservations?{query}",
+        f"/api/v1/wards/reservations?{query}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2031,7 +2031,7 @@ def test_list_reservations_route_rejects_invalid_status(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/reservations?status=INVALID",
+        "/api/v1/wards/reservations?status=INVALID",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2056,7 +2056,7 @@ def test_list_reservations_route_rejects_invalid_patient_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/reservations?patient_id=0",
+        "/api/v1/wards/reservations?patient_id=0",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2072,7 +2072,7 @@ def test_list_reservations_route_rejects_invalid_bed_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/reservations?bed_id=0",
+        "/api/v1/wards/reservations?bed_id=0",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2103,7 +2103,7 @@ def test_get_reservation_route_success(
     )
 
     response = client.get(
-        f"/api/wards/reservations/{reservation.id}",
+        f"/api/v1/wards/reservations/{reservation.id}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2123,7 +2123,7 @@ def test_get_reservation_route_missing(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/reservations/999999",
+        "/api/v1/wards/reservations/999999",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2158,7 +2158,7 @@ def test_get_patient_active_reservation_route_success(
 
     response = client.get(
         (
-            f"/api/wards/patients/"
+            f"/api/v1/wards/patients/"
             f"{patient.id}/reservation"
         ),
         headers=_headers(
@@ -2187,7 +2187,7 @@ def test_get_patient_active_reservation_route_returns_404_when_missing(
 
     response = client.get(
         (
-            f"/api/wards/patients/"
+            f"/api/v1/wards/patients/"
             f"{patient.id}/reservation"
         ),
         headers=_headers(
@@ -2208,7 +2208,7 @@ def test_get_patient_active_reservation_route_rejects_invalid_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/patients/0/reservation",
+        "/api/v1/wards/patients/0/reservation",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2240,7 +2240,7 @@ def test_get_bed_active_reservation_route_success(
 
     response = client.get(
         (
-            f"/api/wards/beds/"
+            f"/api/v1/wards/beds/"
             f"{bed.id}/reservation"
         ),
         headers=_headers(
@@ -2266,7 +2266,7 @@ def test_get_bed_active_reservation_route_returns_404_when_missing(
 
     response = client.get(
         (
-            f"/api/wards/beds/"
+            f"/api/v1/wards/beds/"
             f"{bed.id}/reservation"
         ),
         headers=_headers(
@@ -2284,7 +2284,7 @@ def test_get_bed_active_reservation_route_rejects_invalid_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/beds/0/reservation",
+        "/api/v1/wards/beds/0/reservation",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2319,7 +2319,7 @@ def test_cancel_reservation_route_success(
 
     response = client.post(
         (
-            f"/api/wards/reservations/"
+            f"/api/v1/wards/reservations/"
             f"{reservation.id}/cancel"
         ),
         json={
@@ -2367,7 +2367,7 @@ def test_cancel_reservation_route_rejects_invalid_payload(
 
     response = client.post(
         (
-            f"/api/wards/reservations/"
+            f"/api/v1/wards/reservations/"
             f"{reservation.id}/cancel"
         ),
         json={
@@ -2388,7 +2388,7 @@ def test_cancel_reservation_route_missing(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/reservations/999999/cancel",
+        "/api/v1/wards/reservations/999999/cancel",
         json={},
         headers=_headers(
             auth_headers_for,
@@ -2426,7 +2426,7 @@ def test_admit_patient_route_success(
     )
 
     response = client.post(
-        "/api/wards/admissions",
+        "/api/v1/wards/admissions",
         json={
             "patient_id": patient.id,
             "bed_id": bed.id,
@@ -2463,7 +2463,7 @@ def test_admit_patient_route_rejects_invalid_payload(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/admissions",
+        "/api/v1/wards/admissions",
         json={
             "patient_id": 0,
             "bed_id": 0,
@@ -2501,7 +2501,7 @@ def test_admit_patient_route_rejects_client_staff_override(
     )
 
     response = client.post(
-        "/api/wards/admissions",
+        "/api/v1/wards/admissions",
         json={
             "patient_id": patient.id,
             "bed_id": bed.id,
@@ -2537,7 +2537,7 @@ def test_get_admission_route_success(
     )
 
     response = client.get(
-        f"/api/wards/admissions/{admission.id}",
+        f"/api/v1/wards/admissions/{admission.id}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2563,7 +2563,7 @@ def test_get_admission_route_missing(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/admissions/999999",
+        "/api/v1/wards/admissions/999999",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2598,7 +2598,7 @@ def test_get_admission_route_rejects_foreign_admission(
     )
 
     response = client.get(
-        f"/api/wards/admissions/{foreign_admission.id}",
+        f"/api/v1/wards/admissions/{foreign_admission.id}",
         headers=_headers(
             auth_headers_for,
             local_user,
@@ -2654,7 +2654,7 @@ def test_list_patient_admissions_route_success(
     )
 
     response = client.get(
-        f"/api/wards/patients/{patient.id}/admissions",
+        f"/api/v1/wards/patients/{patient.id}/admissions",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2723,7 +2723,7 @@ def test_list_patient_admissions_route_supports_pagination(
 
     response = client.get(
         (
-            f"/api/wards/patients/{patient.id}/admissions"
+            f"/api/v1/wards/patients/{patient.id}/admissions"
             "?page=2&per_page=2"
         ),
         headers=_headers(
@@ -2767,7 +2767,7 @@ def test_list_patient_admissions_route_rejects_invalid_pagination(
 
     response = client.get(
         (
-            f"/api/wards/patients/{patient.id}/admissions"
+            f"/api/v1/wards/patients/{patient.id}/admissions"
             f"?{query}"
         ),
         headers=_headers(
@@ -2785,7 +2785,7 @@ def test_list_patient_admissions_route_rejects_invalid_patient_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/patients/0/admissions",
+        "/api/v1/wards/patients/0/admissions",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2817,7 +2817,7 @@ def test_current_patient_admission_route_success(
 
     response = client.get(
         (
-            f"/api/wards/patients/"
+            f"/api/v1/wards/patients/"
             f"{patient.id}/current-admission"
         ),
         headers=_headers(
@@ -2850,7 +2850,7 @@ def test_current_patient_admission_route_returns_404_when_missing(
 
     response = client.get(
         (
-            f"/api/wards/patients/"
+            f"/api/v1/wards/patients/"
             f"{patient.id}/current-admission"
         ),
         headers=_headers(
@@ -2872,7 +2872,7 @@ def test_current_patient_admission_route_rejects_invalid_patient_id(
     auth_headers_for,
 ):
     response = client.get(
-        "/api/wards/patients/0/current-admission",
+        "/api/v1/wards/patients/0/current-admission",
         headers=_headers(
             auth_headers_for,
             user,
@@ -2909,7 +2909,7 @@ def test_admit_from_reservation_route_success(
 
     response = client.post(
         (
-            f"/api/wards/reservations/"
+            f"/api/v1/wards/reservations/"
             f"{reservation.id}/admit"
         ),
         json={
@@ -2959,7 +2959,7 @@ def test_admit_from_reservation_route_missing_reservation(
     )
 
     response = client.post(
-        "/api/wards/reservations/999999/admit",
+        "/api/v1/wards/reservations/999999/admit",
         json={
             "reason": "Admission",
         },
@@ -2995,7 +2995,7 @@ def test_admit_from_reservation_route_rejects_invalid_payload(
 
     response = client.post(
         (
-            f"/api/wards/reservations/"
+            f"/api/v1/wards/reservations/"
             f"{reservation.id}/admit"
         ),
         json={
@@ -3041,7 +3041,7 @@ def test_transfer_bed_route_success(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/transfer"
         ),
         json={
@@ -3096,7 +3096,7 @@ def test_transfer_bed_route_rejects_invalid_payload(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/transfer"
         ),
         json={
@@ -3131,7 +3131,7 @@ def test_transfer_bed_route_rejects_unknown_fields(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/transfer"
         ),
         json={
@@ -3153,7 +3153,7 @@ def test_transfer_bed_route_missing_admission(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/admissions/999999/transfer",
+        "/api/v1/wards/admissions/999999/transfer",
         json={
             "to_bed_id": 1,
         },
@@ -3192,7 +3192,7 @@ def test_discharge_patient_route_success(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/discharge"
         ),
         json={
@@ -3242,7 +3242,7 @@ def test_discharge_patient_route_allows_no_reason(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/discharge"
         ),
         json={},
@@ -3266,7 +3266,7 @@ def test_discharge_patient_route_missing_admission(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/wards/admissions/999999/discharge",
+        "/api/v1/wards/admissions/999999/discharge",
         json={},
         headers=_headers(
             auth_headers_for,
@@ -3297,7 +3297,7 @@ def test_discharge_patient_route_rejects_invalid_payload(
 
     response = client.post(
         (
-            f"/api/wards/admissions/"
+            f"/api/v1/wards/admissions/"
             f"{admission.id}/discharge"
         ),
         json={
@@ -3352,7 +3352,7 @@ def test_list_reservations_uses_authenticated_clinic(
     )
 
     response = client.get(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         headers=_headers(
             auth_headers_for,
             user,
@@ -3398,7 +3398,7 @@ def test_list_wards_uses_authenticated_clinic(
     )
 
     response = client.get(
-        "/api/wards",
+        "/api/v1/wards",
         headers=_headers(
             auth_headers_for,
             local_user,
@@ -3433,7 +3433,7 @@ def test_route_rejects_inactive_authenticated_user(
     )
 
     response = client.get(
-        "/api/wards",
+        "/api/v1/wards",
         headers=_headers(
             auth_headers_for,
             inactive_user,
@@ -3455,7 +3455,7 @@ def test_reservation_route_requires_linked_staff(
     )
 
     response = client.post(
-        "/api/wards/reservations",
+        "/api/v1/wards/reservations",
         json={
             "patient_id": 1,
             "bed_id": 1,
@@ -3498,7 +3498,7 @@ def test_reservation_response_contains_expected_fields(
     )
 
     response = client.get(
-        f"/api/wards/reservations/{reservation.id}",
+        f"/api/v1/wards/reservations/{reservation.id}",
         headers=_headers(
             auth_headers_for,
             user,
@@ -3540,7 +3540,7 @@ def test_admission_response_contains_expected_fields(
     )
 
     response = client.get(
-        f"/api/wards/admissions/{admission.id}",
+        f"/api/v1/wards/admissions/{admission.id}",
         headers=_headers(
             auth_headers_for,
             user,

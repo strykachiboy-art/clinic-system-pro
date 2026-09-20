@@ -16,7 +16,7 @@ from app.modules.dashboard.services.dashboard_service import (
 dashboard_bp = Blueprint(
     "dashboard",
     __name__,
-    url_prefix="/api/dashboard",
+    url_prefix="/dashboard",
 )
 
 

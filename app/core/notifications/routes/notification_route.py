@@ -29,7 +29,7 @@ from app.extensions import db
 notification_bp = Blueprint(
     "notification",
     __name__,
-    url_prefix="/api/notifications",
+    url_prefix="/notifications",
 )
 
 

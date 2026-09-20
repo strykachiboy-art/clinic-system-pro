@@ -11,12 +11,12 @@ from app.modules.settings.models.clinic_settings import ClinicSettings
 from app.modules.settings.models.integration_config import IntegrationConfig
 
 
-SETTINGS_URL = "/api/settings/clinic"
-ENABLE_URL = "/api/settings/clinic/enable"
-DISABLE_URL = "/api/settings/clinic/disable"
-INITIALIZE_URL = "/api/settings/clinic/initialize"
+SETTINGS_URL = "/api/v1/settings/clinic"
+ENABLE_URL = "/api/v1/settings/clinic/enable"
+DISABLE_URL = "/api/v1/settings/clinic/disable"
+INITIALIZE_URL = "/api/v1/settings/clinic/initialize"
 
-INTEGRATIONS_URL = "/api/settings/integrations"
+INTEGRATIONS_URL = "/api/v1/settings/integrations"
 
 
 class TestClinicSettingsRoutes:

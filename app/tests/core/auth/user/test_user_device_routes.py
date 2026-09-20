@@ -42,7 +42,7 @@ def make_device(
 
 def test_device_endpoints_require_auth(client):
     response = client.get(
-        "/api/users/devices/"
+        "/api/v1/users/devices/"
     )
 
     assert response.status_code in (
@@ -102,7 +102,7 @@ def test_device_route_allows_patient(
     )
 
     response = client.get(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
     )
 
@@ -120,7 +120,7 @@ def test_device_route_allows_admin(
     )
 
     response = client.get(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
     )
 
@@ -164,7 +164,7 @@ def test_device_route_allows_supported_roles(
     )
 
     response = client.get(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
     )
 
@@ -184,7 +184,7 @@ def test_register_device_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json={
             "device_token": "android-token-001",
@@ -216,7 +216,7 @@ def test_register_device_rejects_unknown_fields(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json={
             "device_token": "android-token-002",
@@ -236,7 +236,7 @@ def test_register_device_rejects_invalid_platform(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json={
             "device_token": "android-token-003",
@@ -261,7 +261,7 @@ def test_register_device_requires_device_token(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json={
             "platform": "android",
@@ -279,7 +279,7 @@ def test_register_device_rejects_short_token(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json={
             "device_token": "short",
@@ -321,7 +321,7 @@ def test_list_devices_only_returns_authenticated_users_devices(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
     )
 
@@ -354,7 +354,7 @@ def test_list_devices_supports_pagination(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/?page=1&per_page=2",
+        "/api/v1/users/devices/?page=1&per_page=2",
         headers=headers,
     )
 
@@ -386,7 +386,7 @@ def test_list_devices_returns_empty_last_page(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/?page=2&per_page=20",
+        "/api/v1/users/devices/?page=2&per_page=20",
         headers=headers,
     )
 
@@ -425,7 +425,7 @@ def test_list_devices_filters_active_only(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/?active_only=true",
+        "/api/v1/users/devices/?active_only=true",
         headers=headers,
     )
 
@@ -462,7 +462,7 @@ def test_list_devices_filters_platform(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/?platform=IOS",
+        "/api/v1/users/devices/?platform=IOS",
         headers=headers,
     )
 
@@ -494,7 +494,7 @@ def test_get_device_success(
     headers = auth_headers_for(user)
 
     response = client.get(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
     )
 
@@ -527,7 +527,7 @@ def test_get_device_prevents_idor(
     headers = auth_headers_for(user)
 
     response = client.get(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
     )
 
@@ -556,7 +556,7 @@ def test_update_device_metadata(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
         json={
             "device_name": "New Phone",
@@ -587,7 +587,7 @@ def test_update_device_cannot_change_token(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/users/devices/1",
+        "/api/v1/users/devices/1",
         headers=headers,
         json={
             "device_token": "new-token",
@@ -613,7 +613,7 @@ def test_patch_can_deactivate_device(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
         json={
             "is_active": False,
@@ -644,7 +644,7 @@ def test_patch_can_activate_device(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
         json={
             "is_active": True,
@@ -680,7 +680,7 @@ def test_activate_device(
     headers = auth_headers_for(user)
 
     response = client.post(
-        f"/api/users/devices/{device.id}/activate",
+        f"/api/v1/users/devices/{device.id}/activate",
         headers=headers,
     )
 
@@ -708,7 +708,7 @@ def test_deactivate_device(
     headers = auth_headers_for(user)
 
     response = client.post(
-        f"/api/users/devices/{device.id}/deactivate",
+        f"/api/v1/users/devices/{device.id}/deactivate",
         headers=headers,
     )
 
@@ -737,7 +737,7 @@ def test_touch_device_updates_last_seen(
     headers = auth_headers_for(user)
 
     response = client.post(
-        f"/api/users/devices/{device.id}/touch",
+        f"/api/v1/users/devices/{device.id}/touch",
         headers=headers,
     )
 
@@ -785,7 +785,7 @@ def test_delete_device(
     headers = auth_headers_for(user)
 
     response = client.delete(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
     )
 
@@ -830,7 +830,7 @@ def test_invalid_device_list_query_is_rejected(
     headers = auth_headers_for(user)
 
     response = client.get(
-        f"/api/users/devices/{query}",
+        f"/api/v1/users/devices/{query}",
         headers=headers,
     )
 
@@ -850,7 +850,7 @@ def test_get_device_invalid_id(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/users/devices/0",
+        "/api/v1/users/devices/0",
         headers=headers,
     )
 
@@ -875,7 +875,7 @@ def test_update_device_rejects_unknown_field(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        f"/api/users/devices/{device.id}",
+        f"/api/v1/users/devices/{device.id}",
         headers=headers,
         json={
             "something_not_allowed": "x",
@@ -893,7 +893,7 @@ def test_register_device_rejects_non_object_body(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/users/devices/",
+        "/api/v1/users/devices/",
         headers=headers,
         json=[
             "not",

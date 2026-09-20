@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from decimal import Decimal
 
@@ -139,7 +139,7 @@ def test_billing_endpoints_require_authentication(
     endpoints = [
         (
             "post",
-            "/api/billing/invoices",
+            "/api/v1/billing/invoices",
             {
                 "patient_id": 1,
                 "items": [
@@ -153,12 +153,12 @@ def test_billing_endpoints_require_authentication(
         ),
         (
             "get",
-            "/api/billing/invoices/outstanding",
+            "/api/v1/billing/invoices/outstanding",
             None,
         ),
         (
             "post",
-            "/api/billing/payments",
+            "/api/v1/billing/payments",
             {
                 "invoice_id": 1,
                 "amount": "50.00",
@@ -167,7 +167,7 @@ def test_billing_endpoints_require_authentication(
         ),
         (
             "post",
-            "/api/billing/invoices/mark-overdue",
+            "/api/v1/billing/invoices/mark-overdue",
             None,
         ),
     ]
@@ -186,7 +186,7 @@ def test_billing_endpoints_require_authentication(
     [
         (
             "post",
-            "/api/billing/invoices",
+            "/api/v1/billing/invoices",
             {
                 "patient_id": 20,
                 "items": [
@@ -200,12 +200,12 @@ def test_billing_endpoints_require_authentication(
         ),
         (
             "get",
-            "/api/billing/invoices/outstanding",
+            "/api/v1/billing/invoices/outstanding",
             None,
         ),
         (
             "post",
-            "/api/billing/payments",
+            "/api/v1/billing/payments",
             {
                 "invoice_id": 100,
                 "amount": "50.00",
@@ -214,7 +214,7 @@ def test_billing_endpoints_require_authentication(
         ),
         (
             "post",
-            "/api/billing/invoices/mark-overdue",
+            "/api/v1/billing/invoices/mark-overdue",
             None,
         ),
     ],
@@ -258,7 +258,7 @@ def test_authenticated_user_without_clinic_is_rejected(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/billing/invoices/outstanding",
+        "/api/v1/billing/invoices/outstanding",
         headers=headers,
     )
 
@@ -314,7 +314,7 @@ def test_create_invoice_success(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -394,7 +394,7 @@ def test_create_invoice_uses_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -427,7 +427,7 @@ def test_create_invoice_rejects_invalid_payload(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": -1,
@@ -458,7 +458,7 @@ def test_create_invoice_rejects_missing_items(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -487,7 +487,7 @@ def test_create_invoice_rejects_invalid_item_quantity(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -519,7 +519,7 @@ def test_create_invoice_rejects_negative_unit_price(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -551,7 +551,7 @@ def test_create_invoice_rejects_unknown_field(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -584,7 +584,7 @@ def test_create_invoice_rejects_non_object_json(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json=[],
     )
@@ -623,7 +623,7 @@ def test_create_invoice_returns_domain_error(
     )
 
     response = client.post(
-        "/api/billing/invoices",
+        "/api/v1/billing/invoices",
         headers=headers,
         json={
             "patient_id": 20,
@@ -708,7 +708,7 @@ def test_get_outstanding_invoices_success(
     )
 
     response = client.get(
-        "/api/billing/invoices/outstanding",
+        "/api/v1/billing/invoices/outstanding",
         headers=headers,
     )
 
@@ -768,7 +768,7 @@ def test_get_outstanding_invoices_passes_pagination(
     )
 
     response = client.get(
-        "/api/billing/invoices/outstanding?page=2&per_page=10",
+        "/api/v1/billing/invoices/outstanding?page=2&per_page=10",
         headers=headers,
     )
 
@@ -818,7 +818,7 @@ def test_get_outstanding_invoices_rejects_invalid_query(
     )
 
     response = client.get(
-        f"/api/billing/invoices/outstanding?{query_string}",
+        f"/api/v1/billing/invoices/outstanding?{query_string}",
         headers=headers,
     )
 
@@ -859,7 +859,7 @@ def test_get_outstanding_invoices_returns_empty_page(
     )
 
     response = client.get(
-        "/api/billing/invoices/outstanding",
+        "/api/v1/billing/invoices/outstanding",
         headers=headers,
     )
 
@@ -913,7 +913,7 @@ def test_get_outstanding_invoices_returns_last_page(
     )
 
     response = client.get(
-        "/api/billing/invoices/outstanding?page=3&per_page=1",
+        "/api/v1/billing/invoices/outstanding?page=3&per_page=1",
         headers=headers,
     )
 
@@ -957,7 +957,7 @@ def test_get_outstanding_invoices_returns_domain_error(
     )
 
     response = client.get(
-        "/api/billing/invoices/outstanding",
+        "/api/v1/billing/invoices/outstanding",
         headers=headers,
     )
 
@@ -1009,7 +1009,7 @@ def test_record_payment_success(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1073,7 +1073,7 @@ def test_record_payment_with_gateway_success(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1130,7 +1130,7 @@ def test_record_payment_uses_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1158,7 +1158,7 @@ def test_record_payment_rejects_invalid_payload(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": -1,
@@ -1189,7 +1189,7 @@ def test_record_payment_rejects_negative_amount(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1216,7 +1216,7 @@ def test_record_payment_rejects_missing_required_fields(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={},
     )
@@ -1244,7 +1244,7 @@ def test_record_payment_rejects_unknown_field(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1272,7 +1272,7 @@ def test_record_payment_rejects_non_object_json(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json=[],
     )
@@ -1311,7 +1311,7 @@ def test_record_payment_returns_domain_error(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1356,7 +1356,7 @@ def test_record_payment_returns_not_found_error(
     )
 
     response = client.post(
-        "/api/billing/payments",
+        "/api/v1/billing/payments",
         headers=headers,
         json={
             "invoice_id": 100,
@@ -1405,7 +1405,7 @@ def test_mark_overdue_invoices_success(
     )
 
     response = client.post(
-        "/api/billing/invoices/mark-overdue",
+        "/api/v1/billing/invoices/mark-overdue",
         headers=headers,
     )
 
@@ -1439,7 +1439,7 @@ def test_mark_overdue_invoices_returns_zero(
     )
 
     response = client.post(
-        "/api/billing/invoices/mark-overdue",
+        "/api/v1/billing/invoices/mark-overdue",
         headers=headers,
     )
 
@@ -1477,7 +1477,7 @@ def test_mark_overdue_invoices_returns_domain_error(
     )
 
     response = client.post(
-        "/api/billing/invoices/mark-overdue",
+        "/api/v1/billing/invoices/mark-overdue",
         headers=headers,
     )
 

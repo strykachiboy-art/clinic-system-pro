@@ -26,7 +26,7 @@ from app.modules.reports.services.reports_service import (
 reports_bp = Blueprint(
     "reports",
     __name__,
-    url_prefix="/api/reports",
+    url_prefix="/reports",
 )
 
 

@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from app.core.enums.role_enums import Role
 
@@ -61,7 +61,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "A",
                 "last_name": "B",
@@ -84,7 +84,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "Jane",
                 "last_name": "Doe",
@@ -114,7 +114,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "A",
                 "last_name": "B",
@@ -138,7 +138,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "Jane",
             },
@@ -160,7 +160,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "Jane",
                 "last_name": "Doe",
@@ -176,7 +176,7 @@ class TestPatientRoutes:
         client,
     ):
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "Jane",
                 "last_name": "Doe",
@@ -198,7 +198,7 @@ class TestPatientRoutes:
         )
 
         response = client.post(
-            "/api/patients",
+            "/api/v1/patients",
             json={
                 "first_name": "Jane",
                 "last_name": "Doe",
@@ -240,7 +240,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients",
+            "/api/v1/patients",
             headers=headers,
         )
 
@@ -287,7 +287,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            f"/api/patients?clinic_id={other_clinic.id}",
+            f"/api/v1/patients?clinic_id={other_clinic.id}",
             headers=headers,
         )
 
@@ -317,7 +317,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?search=alice",
+            "/api/v1/patients?search=alice",
             headers=headers,
         )
 
@@ -361,7 +361,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?active_only=true",
+            "/api/v1/patients?active_only=true",
             headers=headers,
         )
 
@@ -401,7 +401,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?page=2&per_page=2",
+            "/api/v1/patients?page=2&per_page=2",
             headers=headers,
         )
 
@@ -433,7 +433,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?page=99&per_page=50",
+            "/api/v1/patients?page=99&per_page=50",
             headers=headers,
         )
 
@@ -459,7 +459,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?page=0",
+            "/api/v1/patients?page=0",
             headers=headers,
         )
 
@@ -478,7 +478,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?per_page=501",
+            "/api/v1/patients?per_page=501",
             headers=headers,
         )
 
@@ -497,7 +497,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients?unknown=value",
+            "/api/v1/patients?unknown=value",
             headers=headers,
         )
 
@@ -517,7 +517,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients/999999",
+            "/api/v1/patients/999999",
             headers=headers,
         )
 
@@ -532,7 +532,7 @@ class TestPatientRoutes:
         patient,
     ):
         response = client.get(
-            f"/api/patients/{patient.id}",
+            f"/api/v1/patients/{patient.id}",
         )
 
         assert response.status_code == 401
@@ -561,7 +561,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{other_patient.id}",
+            f"/api/v1/patients/{other_patient.id}",
             headers=headers,
         )
 
@@ -580,7 +580,7 @@ class TestPatientRoutes:
         )
 
         response = client.get(
-            "/api/patients/0",
+            "/api/v1/patients/0",
             headers=headers,
         )
 
@@ -600,7 +600,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            f"/api/patients/{patient.id}",
+            f"/api/v1/patients/{patient.id}",
             json={
                 "first_name": "New",
             },
@@ -624,7 +624,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            f"/api/patients/{patient.id}",
+            f"/api/v1/patients/{patient.id}",
             json={
                 "unknown_field": "bad",
             },
@@ -657,7 +657,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            f"/api/patients/{other_patient.id}",
+            f"/api/v1/patients/{other_patient.id}",
             json={
                 "first_name": "Hacked",
             },
@@ -679,7 +679,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            "/api/patients/0",
+            "/api/v1/patients/0",
             json={
                 "first_name": "Hacked",
             },
@@ -702,7 +702,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            f"/api/patients/{patient.id}/status",
+            f"/api/v1/patients/{patient.id}/status",
             json={
                 "is_active": False,
             },
@@ -736,7 +736,7 @@ class TestPatientRoutes:
         )
 
         response = client.patch(
-            f"/api/patients/{other_patient.id}/status",
+            f"/api/v1/patients/{other_patient.id}/status",
             json={
                 "is_active": False,
             },
@@ -762,7 +762,7 @@ class TestFamilyMemberRoutes:
         )
 
         add_response = client.post(
-            f"/api/patients/{patient.id}/family",
+            f"/api/v1/patients/{patient.id}/family",
             json={
                 "full_name": "John Doe",
                 "relation": "spouse",
@@ -773,7 +773,7 @@ class TestFamilyMemberRoutes:
         assert add_response.status_code == 201
 
         list_response = client.get(
-            f"/api/patients/{patient.id}/family",
+            f"/api/v1/patients/{patient.id}/family",
             headers=headers,
         )
 
@@ -802,7 +802,7 @@ class TestFamilyMemberRoutes:
 
         for index in range(5):
             response = client.post(
-                f"/api/patients/{patient.id}/family",
+                f"/api/v1/patients/{patient.id}/family",
                 json={
                     "full_name": f"Member {index}",
                     "relation": "child",
@@ -813,7 +813,7 @@ class TestFamilyMemberRoutes:
             assert response.status_code == 201
 
         response = client.get(
-            f"/api/patients/{patient.id}/family?page=2&per_page=2",
+            f"/api/v1/patients/{patient.id}/family?page=2&per_page=2",
             headers=headers,
         )
 
@@ -840,7 +840,7 @@ class TestFamilyMemberRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/family?page=0",
+            f"/api/v1/patients/{patient.id}/family?page=0",
             headers=headers,
         )
 
@@ -860,7 +860,7 @@ class TestFamilyMemberRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/family?unknown=value",
+            f"/api/v1/patients/{patient.id}/family?unknown=value",
             headers=headers,
         )
 
@@ -880,7 +880,7 @@ class TestFamilyMemberRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/family",
+            f"/api/v1/patients/{patient.id}/family",
             json={
                 "full_name": "John Doe",
             },
@@ -913,7 +913,7 @@ class TestFamilyMemberRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{other_patient.id}/family",
+            f"/api/v1/patients/{other_patient.id}/family",
             headers=headers,
         )
 
@@ -933,7 +933,7 @@ class TestFamilyMemberRoutes:
         )
 
         add_response = client.post(
-            f"/api/patients/{patient.id}/family",
+            f"/api/v1/patients/{patient.id}/family",
             json={
                 "full_name": "Old",
                 "relation": "child",
@@ -946,7 +946,7 @@ class TestFamilyMemberRoutes:
         member_id = add_response.get_json()["data"]["id"]
 
         update_response = client.patch(
-            f"/api/patients/{patient.id}/family/{member_id}",
+            f"/api/v1/patients/{patient.id}/family/{member_id}",
             json={
                 "full_name": "New",
             },
@@ -960,7 +960,7 @@ class TestFamilyMemberRoutes:
         )
 
         delete_response = client.delete(
-            f"/api/patients/{patient.id}/family/{member_id}",
+            f"/api/v1/patients/{patient.id}/family/{member_id}",
             headers=headers,
         )
 
@@ -980,7 +980,7 @@ class TestFamilyMemberRoutes:
         )
 
         add_response = client.post(
-            f"/api/patients/{patient.id}/family",
+            f"/api/v1/patients/{patient.id}/family",
             json={
                 "full_name": "Old",
                 "relation": "child",
@@ -993,7 +993,7 @@ class TestFamilyMemberRoutes:
         member_id = add_response.get_json()["data"]["id"]
 
         response = client.patch(
-            f"/api/patients/{patient.id}/family/{member_id}",
+            f"/api/v1/patients/{patient.id}/family/{member_id}",
             json={
                 "unknown_field": "bad",
             },
@@ -1019,7 +1019,7 @@ class TestInsuranceRoutes:
         )
 
         add_response = client.post(
-            f"/api/patients/{patient.id}/insurance",
+            f"/api/v1/patients/{patient.id}/insurance",
             json={
                 "provider_name": "Acme",
                 "policy_number": "P1",
@@ -1036,7 +1036,7 @@ class TestInsuranceRoutes:
         )
 
         list_response = client.get(
-            f"/api/patients/{patient.id}/insurance",
+            f"/api/v1/patients/{patient.id}/insurance",
             headers=view_headers,
         )
 
@@ -1065,7 +1065,7 @@ class TestInsuranceRoutes:
 
         for index in range(5):
             response = client.post(
-                f"/api/patients/{patient.id}/insurance",
+                f"/api/v1/patients/{patient.id}/insurance",
                 json={
                     "provider_name": f"Provider {index}",
                     "policy_number": f"POL-{index}",
@@ -1076,7 +1076,7 @@ class TestInsuranceRoutes:
             assert response.status_code == 201
 
         response = client.get(
-            f"/api/patients/{patient.id}/insurance?page=2&per_page=2",
+            f"/api/v1/patients/{patient.id}/insurance?page=2&per_page=2",
             headers=headers,
         )
 
@@ -1103,7 +1103,7 @@ class TestInsuranceRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/insurance?per_page=501",
+            f"/api/v1/patients/{patient.id}/insurance?per_page=501",
             headers=headers,
         )
 
@@ -1123,7 +1123,7 @@ class TestInsuranceRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/insurance?unknown=value",
+            f"/api/v1/patients/{patient.id}/insurance?unknown=value",
             headers=headers,
         )
 
@@ -1143,7 +1143,7 @@ class TestInsuranceRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/insurance",
+            f"/api/v1/patients/{patient.id}/insurance",
             json={
                 "provider_name": "Acme",
                 "policy_number": "",
@@ -1167,7 +1167,7 @@ class TestInsuranceRoutes:
         )
 
         add_response = client.post(
-            f"/api/patients/{patient.id}/insurance",
+            f"/api/v1/patients/{patient.id}/insurance",
             json={
                 "provider_name": "Acme",
                 "policy_number": "P1",
@@ -1180,7 +1180,7 @@ class TestInsuranceRoutes:
         insurance_id = add_response.get_json()["data"]["id"]
 
         update_response = client.patch(
-            f"/api/patients/{patient.id}/insurance/{insurance_id}",
+            f"/api/v1/patients/{patient.id}/insurance/{insurance_id}",
             json={
                 "is_active": False,
             },
@@ -1217,7 +1217,7 @@ class TestInsuranceRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{other_patient.id}/insurance",
+            f"/api/v1/patients/{other_patient.id}/insurance",
             headers=headers,
         )
 
@@ -1240,7 +1240,7 @@ class TestVitalsRoutes:
         )
 
         record_response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 75,
             },
@@ -1250,7 +1250,7 @@ class TestVitalsRoutes:
         assert record_response.status_code == 201
 
         latest_response = client.get(
-            f"/api/patients/{patient.id}/vitals/latest",
+            f"/api/v1/patients/{patient.id}/vitals/latest",
             headers=headers,
         )
 
@@ -1274,7 +1274,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 72,
             },
@@ -1301,7 +1301,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={},
             headers=headers,
         )
@@ -1322,7 +1322,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "made_up_vital": 123,
             },
@@ -1345,7 +1345,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 75,
                 "recorded_at": "2020-01-01T00:00:00",
@@ -1369,7 +1369,7 @@ class TestVitalsRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals/latest",
+            f"/api/v1/patients/{patient.id}/vitals/latest",
             headers=headers,
         )
 
@@ -1390,7 +1390,7 @@ class TestVitalsRoutes:
         )
 
         first_response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 60,
             },
@@ -1398,7 +1398,7 @@ class TestVitalsRoutes:
         )
 
         second_response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 90,
             },
@@ -1409,7 +1409,7 @@ class TestVitalsRoutes:
         assert second_response.status_code == 201
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             headers=headers,
         )
 
@@ -1437,7 +1437,7 @@ class TestVitalsRoutes:
 
         for heart_rate in range(70, 75):
             response = client.post(
-                f"/api/patients/{patient.id}/vitals",
+                f"/api/v1/patients/{patient.id}/vitals",
                 json={
                     "heart_rate": heart_rate,
                 },
@@ -1447,7 +1447,7 @@ class TestVitalsRoutes:
             assert response.status_code == 201
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals?page=2&per_page=2",
+            f"/api/v1/patients/{patient.id}/vitals?page=2&per_page=2",
             headers=headers,
         )
 
@@ -1474,7 +1474,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 75,
             },
@@ -1484,7 +1484,7 @@ class TestVitalsRoutes:
         assert response.status_code == 201
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals?page=99&per_page=50",
+            f"/api/v1/patients/{patient.id}/vitals?page=99&per_page=50",
             headers=headers,
         )
 
@@ -1510,7 +1510,7 @@ class TestVitalsRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals?page=0",
+            f"/api/v1/patients/{patient.id}/vitals?page=0",
             headers=headers,
         )
 
@@ -1530,7 +1530,7 @@ class TestVitalsRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{patient.id}/vitals?unknown=value",
+            f"/api/v1/patients/{patient.id}/vitals?unknown=value",
             headers=headers,
         )
 
@@ -1551,7 +1551,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{patient.id}/vitals",
+            f"/api/v1/patients/{patient.id}/vitals",
             json={
                 "heart_rate": 75,
             },
@@ -1584,7 +1584,7 @@ class TestVitalsRoutes:
         )
 
         response = client.post(
-            f"/api/patients/{other_patient.id}/vitals",
+            f"/api/v1/patients/{other_patient.id}/vitals",
             json={
                 "heart_rate": 75,
             },
@@ -1617,7 +1617,7 @@ class TestVitalsRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{other_patient.id}/vitals",
+            f"/api/v1/patients/{other_patient.id}/vitals",
             headers=headers,
         )
 
@@ -1647,7 +1647,7 @@ class TestVitalsRoutes:
         )
 
         response = client.get(
-            f"/api/patients/{other_patient.id}/vitals/latest",
+            f"/api/v1/patients/{other_patient.id}/vitals/latest",
             headers=headers,
         )
 

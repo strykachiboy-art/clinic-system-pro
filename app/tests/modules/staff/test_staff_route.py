@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -233,7 +233,7 @@ def assert_error(response, status_code):
 
 
 def test_staff_routes_require_auth(client):
-    response = client.get("/api/staff")
+    response = client.get("/api/v1/staff")
 
     assert response.status_code in (401, 422)
 
@@ -243,7 +243,7 @@ def test_create_staff_is_admin_only(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=doctor_headers,
         json={
             "first_name": "New",
@@ -259,7 +259,7 @@ def test_update_staff_is_admin_only(
     doctor_headers,
 ):
     response = client.patch(
-        "/api/staff/1",
+        "/api/v1/staff/1",
         headers=doctor_headers,
         json={
             "first_name": "Updated",
@@ -274,7 +274,7 @@ def test_change_staff_status_is_admin_only(
     doctor_headers,
 ):
     response = client.patch(
-        "/api/staff/1/status",
+        "/api/v1/staff/1/status",
         headers=doctor_headers,
         json={
             "status": StaffStatus.SUSPENDED.value,
@@ -289,7 +289,7 @@ def test_payroll_create_is_admin_or_accountant(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=doctor_headers,
         json={
             "staff_id": 1,
@@ -307,7 +307,7 @@ def test_payroll_generate_is_admin_or_accountant(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/payroll/generate",
+        "/api/v1/staff/payroll/generate",
         headers=doctor_headers,
         json={
             "pay_period_start": "2026-09-01",
@@ -326,7 +326,7 @@ def test_payroll_list_is_admin_or_accountant(
     doctor_headers,
 ):
     response = client.get(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=doctor_headers,
     )
 
@@ -338,7 +338,7 @@ def test_leave_approval_is_admin_only(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/leave/1/approve",
+        "/api/v1/staff/leave/1/approve",
         headers=doctor_headers,
         json={},
     )
@@ -351,7 +351,7 @@ def test_leave_rejection_is_admin_only(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/leave/1/reject",
+        "/api/v1/staff/leave/1/reject",
         headers=doctor_headers,
         json={},
     )
@@ -364,7 +364,7 @@ def test_excuse_approval_is_admin_only(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/approve",
+        "/api/v1/staff/excuses/1/approve",
         headers=doctor_headers,
     )
 
@@ -376,7 +376,7 @@ def test_excuse_rejection_is_admin_only(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=doctor_headers,
     )
 
@@ -409,7 +409,7 @@ def test_create_staff_success(
     )
 
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "first_name": "Jane",
@@ -465,7 +465,7 @@ def test_create_staff_forwards_user_id(
     )
 
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "user_id": linked_user.id,
@@ -486,7 +486,7 @@ def test_create_staff_missing_first_name_returns_422(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "last_name": "Smith",
@@ -501,7 +501,7 @@ def test_create_staff_missing_last_name_returns_422(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "first_name": "Jane",
@@ -516,7 +516,7 @@ def test_create_staff_invalid_user_id_returns_422(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "user_id": 0,
@@ -533,7 +533,7 @@ def test_create_staff_invalid_json_returns_400(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         data="not-json",
         content_type="application/json",
@@ -569,7 +569,7 @@ def test_list_staff_success(
     )
 
     response = client.get(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
     )
 
@@ -609,7 +609,7 @@ def test_list_staff_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff?page=3&per_page=10",
+        "/api/v1/staff?page=3&per_page=10",
         headers=admin_headers,
     )
 
@@ -648,7 +648,7 @@ def test_list_staff_forwards_status(
     )
 
     response = client.get(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         query_string={
             "status": StaffStatus.SUSPENDED.value,
@@ -685,7 +685,7 @@ def test_list_staff_forwards_search(
     )
 
     response = client.get(
-        "/api/staff?search=  cardiology  ",
+        "/api/v1/staff?search=  cardiology  ",
         headers=admin_headers,
     )
 
@@ -702,7 +702,7 @@ def test_list_staff_invalid_status_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff?status=not-a-status",
+        "/api/v1/staff?status=not-a-status",
         headers=admin_headers,
     )
 
@@ -714,7 +714,7 @@ def test_list_staff_search_too_long_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         query_string={
             "search": "x" * 101,
@@ -729,7 +729,7 @@ def test_list_staff_invalid_page_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff?page=0",
+        "/api/v1/staff?page=0",
         headers=admin_headers,
     )
 
@@ -741,7 +741,7 @@ def test_list_staff_invalid_per_page_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff?per_page=0",
+        "/api/v1/staff?per_page=0",
         headers=admin_headers,
     )
 
@@ -770,7 +770,7 @@ def test_get_staff_success(
     )
 
     response = client.get(
-        f"/api/staff/{doctor_staff.id}",
+        f"/api/v1/staff/{doctor_staff.id}",
         headers=doctor_headers,
     )
 
@@ -807,7 +807,7 @@ def test_update_staff_success(
     )
 
     response = client.patch(
-        f"/api/staff/{admin_staff.id}",
+        f"/api/v1/staff/{admin_staff.id}",
         headers=admin_headers,
         json={
             "first_name": "Updated",
@@ -847,7 +847,7 @@ def test_update_staff_uses_exclude_unset(
     )
 
     response = client.patch(
-        f"/api/staff/{admin_staff.id}",
+        f"/api/v1/staff/{admin_staff.id}",
         headers=admin_headers,
         json={
             "specialty": "Neurology",
@@ -870,7 +870,7 @@ def test_update_staff_blank_first_name_returns_422(
     admin_headers,
 ):
     response = client.patch(
-        "/api/staff/1",
+        "/api/v1/staff/1",
         headers=admin_headers,
         json={
             "first_name": "",
@@ -885,7 +885,7 @@ def test_update_staff_blank_last_name_returns_422(
     admin_headers,
 ):
     response = client.patch(
-        "/api/staff/1",
+        "/api/v1/staff/1",
         headers=admin_headers,
         json={
             "last_name": "",
@@ -917,7 +917,7 @@ def test_change_staff_status_success(
     )
 
     response = client.patch(
-        f"/api/staff/{admin_staff.id}/status",
+        f"/api/v1/staff/{admin_staff.id}/status",
         headers=admin_headers,
         json={
             "status": StaffStatus.SUSPENDED.value,
@@ -942,7 +942,7 @@ def test_change_staff_status_invalid_status_returns_422(
     admin_headers,
 ):
     response = client.patch(
-        "/api/staff/1/status",
+        "/api/v1/staff/1/status",
         headers=admin_headers,
         json={
             "status": "invalid",
@@ -973,7 +973,7 @@ def test_request_leave_success(
     )
 
     response = client.post(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=doctor_headers,
         json={
             "leave_type": LeaveType.ANNUAL.value,
@@ -1006,7 +1006,7 @@ def test_request_leave_invalid_date_range_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=doctor_headers,
         json={
             "leave_type": LeaveType.ANNUAL.value,
@@ -1023,7 +1023,7 @@ def test_request_leave_missing_leave_type_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=doctor_headers,
         json={
             "start_date": "2026-09-10",
@@ -1057,7 +1057,7 @@ def test_list_leave_requests_admin_can_filter_by_staff(
     )
 
     response = client.get(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=admin_headers,
         query_string={
             "staff_id": admin_staff.id,
@@ -1096,7 +1096,7 @@ def test_list_leave_requests_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff/leave?page=2&per_page=10",
+        "/api/v1/staff/leave?page=2&per_page=10",
         headers=admin_headers,
     )
 
@@ -1133,7 +1133,7 @@ def test_list_leave_requests_non_admin_is_forced_to_own_staff(
     )
 
     response = client.get(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=doctor_headers,
         query_string={
             "staff_id": 999999,
@@ -1169,7 +1169,7 @@ def test_get_own_leave_request_success(
     )
 
     response = client.get(
-        "/api/staff/leave/5",
+        "/api/v1/staff/leave/5",
         headers=doctor_headers,
     )
 
@@ -1201,7 +1201,7 @@ def test_get_foreign_leave_request_is_hidden_from_non_admin(
     )
 
     response = client.get(
-        "/api/staff/leave/5",
+        "/api/v1/staff/leave/5",
         headers=doctor_headers,
     )
 
@@ -1230,7 +1230,7 @@ def test_approve_leave_success(
     )
 
     response = client.post(
-        "/api/staff/leave/1/approve",
+        "/api/v1/staff/leave/1/approve",
         headers=admin_headers,
         json={},
     )
@@ -1271,7 +1271,7 @@ def test_reject_leave_success(
     )
 
     response = client.post(
-        "/api/staff/leave/1/reject",
+        "/api/v1/staff/leave/1/reject",
         headers=admin_headers,
         json={
             "reason": "Staffing shortage",
@@ -1312,7 +1312,7 @@ def test_reject_leave_blank_reason_is_accepted_by_schema(
     )
 
     response = client.post(
-        "/api/staff/leave/1/reject",
+        "/api/v1/staff/leave/1/reject",
         headers=admin_headers,
         json={
             "reason": None,
@@ -1342,7 +1342,7 @@ def test_create_excuse_success(
     )
 
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1384,7 +1384,7 @@ def test_create_excuse_with_leave_request(
     )
 
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "leave_request_id": 7,
@@ -1425,7 +1425,7 @@ def test_create_excuse_with_document_url(
     )
 
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1448,7 +1448,7 @@ def test_create_excuse_missing_description_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1463,7 +1463,7 @@ def test_create_excuse_blank_description_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1479,7 +1479,7 @@ def test_create_excuse_description_too_long_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1495,7 +1495,7 @@ def test_create_excuse_invalid_type_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": "not-real",
@@ -1511,7 +1511,7 @@ def test_create_excuse_invalid_leave_request_id_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "leave_request_id": 0,
@@ -1528,7 +1528,7 @@ def test_create_excuse_invalid_document_url_returns_422(
     doctor_headers,
 ):
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -1563,7 +1563,7 @@ def test_list_excuses_admin_forwards_filters(
     )
 
     response = client.get(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=admin_headers,
         query_string={
             "staff_id": admin_staff.id,
@@ -1606,7 +1606,7 @@ def test_list_excuses_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff/excuses?page=2&per_page=10",
+        "/api/v1/staff/excuses?page=2&per_page=10",
         headers=admin_headers,
     )
 
@@ -1643,7 +1643,7 @@ def test_list_excuses_non_admin_is_forced_to_own_staff(
     )
 
     response = client.get(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         query_string={
             "staff_id": 999999,
@@ -1663,7 +1663,7 @@ def test_list_excuses_invalid_staff_id_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?staff_id=0",
+        "/api/v1/staff/excuses?staff_id=0",
         headers=admin_headers,
     )
 
@@ -1675,7 +1675,7 @@ def test_list_excuses_invalid_leave_request_id_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?leave_request_id=0",
+        "/api/v1/staff/excuses?leave_request_id=0",
         headers=admin_headers,
     )
 
@@ -1687,7 +1687,7 @@ def test_list_excuses_invalid_type_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?excuse_type=invalid",
+        "/api/v1/staff/excuses?excuse_type=invalid",
         headers=admin_headers,
     )
 
@@ -1699,7 +1699,7 @@ def test_list_excuses_invalid_status_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?status=invalid",
+        "/api/v1/staff/excuses?status=invalid",
         headers=admin_headers,
     )
 
@@ -1711,7 +1711,7 @@ def test_list_excuses_invalid_page_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?page=0",
+        "/api/v1/staff/excuses?page=0",
         headers=admin_headers,
     )
 
@@ -1723,7 +1723,7 @@ def test_list_excuses_invalid_per_page_returns_422(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/excuses?per_page=0",
+        "/api/v1/staff/excuses?per_page=0",
         headers=admin_headers,
     )
 
@@ -1757,7 +1757,7 @@ def test_list_my_excuses_success(
     )
 
     response = client.get(
-        "/api/staff/excuses/me",
+        "/api/v1/staff/excuses/me",
         headers=doctor_headers,
     )
 
@@ -1802,7 +1802,7 @@ def test_list_my_excuses_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff/excuses/me?page=2&per_page=5",
+        "/api/v1/staff/excuses/me?page=2&per_page=5",
         headers=doctor_headers,
     )
 
@@ -1841,7 +1841,7 @@ def test_get_own_excuse_success(
     )
 
     response = client.get(
-        "/api/staff/excuses/7",
+        "/api/v1/staff/excuses/7",
         headers=doctor_headers,
     )
 
@@ -1873,7 +1873,7 @@ def test_get_foreign_excuse_is_hidden_from_non_admin(
     )
 
     response = client.get(
-        "/api/staff/excuses/7",
+        "/api/v1/staff/excuses/7",
         headers=doctor_headers,
     )
 
@@ -1902,7 +1902,7 @@ def test_approve_excuse_success(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/approve",
+        "/api/v1/staff/excuses/1/approve",
         headers=admin_headers,
     )
 
@@ -1942,7 +1942,7 @@ def test_approve_excuse_does_not_require_json_body(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/approve",
+        "/api/v1/staff/excuses/1/approve",
         headers=admin_headers,
     )
 
@@ -1973,7 +1973,7 @@ def test_reject_excuse_success(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": "Insufficient documentation",
@@ -2000,7 +2000,7 @@ def test_reject_excuse_missing_json_returns_400(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
     )
 
@@ -2012,7 +2012,7 @@ def test_reject_excuse_blank_reason_returns_422(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": "",
@@ -2027,7 +2027,7 @@ def test_reject_excuse_reason_too_long_returns_422(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": "x" * 2001,
@@ -2042,7 +2042,7 @@ def test_reject_excuse_reason_must_be_string(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": 123,
@@ -2071,7 +2071,7 @@ def test_reject_excuse_null_reason_is_accepted(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": None,
@@ -2106,7 +2106,7 @@ def test_approve_excuse_domain_error_is_returned(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/approve",
+        "/api/v1/staff/excuses/1/approve",
         headers=admin_headers,
     )
 
@@ -2134,7 +2134,7 @@ def test_reject_excuse_domain_error_is_returned(
     )
 
     response = client.post(
-        "/api/staff/excuses/1/reject",
+        "/api/v1/staff/excuses/1/reject",
         headers=admin_headers,
         json={
             "reason": "Insufficient documentation",
@@ -2164,7 +2164,7 @@ def test_create_payroll_success(
     )
 
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=admin_headers,
         json={
             "staff_id": admin_staff.id,
@@ -2195,7 +2195,7 @@ def test_create_payroll_rejects_invalid_period(
     admin_staff,
 ):
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=admin_headers,
         json={
             "staff_id": admin_staff.id,
@@ -2214,7 +2214,7 @@ def test_create_payroll_rejects_negative_salary(
     admin_staff,
 ):
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=admin_headers,
         json={
             "staff_id": admin_staff.id,
@@ -2233,7 +2233,7 @@ def test_create_payroll_rejects_excessive_deductions(
     admin_staff,
 ):
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=admin_headers,
         json={
             "staff_id": admin_staff.id,
@@ -2269,7 +2269,7 @@ def test_generate_payroll_success(
     )
 
     response = client.post(
-        "/api/staff/payroll/generate",
+        "/api/v1/staff/payroll/generate",
         headers=accountant_headers,
         json={
             "pay_period_start": "2026-09-01",
@@ -2298,7 +2298,7 @@ def test_generate_payroll_rejects_invalid_period(
     accountant_headers,
 ):
     response = client.post(
-        "/api/staff/payroll/generate",
+        "/api/v1/staff/payroll/generate",
         headers=accountant_headers,
         json={
             "pay_period_start": "2026-09-30",
@@ -2315,7 +2315,7 @@ def test_generate_payroll_rejects_negative_salary(
     accountant_headers,
 ):
     response = client.post(
-        "/api/staff/payroll/generate",
+        "/api/v1/staff/payroll/generate",
         headers=accountant_headers,
         json={
             "pay_period_start": "2026-09-01",
@@ -2356,7 +2356,7 @@ def test_list_payroll_success(
     )
 
     response = client.get(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=accountant_headers,
     )
 
@@ -2399,7 +2399,7 @@ def test_list_payroll_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff/payroll?page=2&per_page=10",
+        "/api/v1/staff/payroll?page=2&per_page=10",
         headers=accountant_headers,
     )
 
@@ -2442,7 +2442,7 @@ def test_list_payroll_for_staff_success(
     )
 
     response = client.get(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=accountant_headers,
         query_string={
             "staff_id": accountant_staff.id,
@@ -2485,7 +2485,7 @@ def test_list_payroll_for_staff_forwards_pagination(
     )
 
     response = client.get(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=accountant_headers,
         query_string={
             "staff_id": accountant_staff.id,
@@ -2513,7 +2513,7 @@ def test_list_payroll_invalid_staff_id_returns_422(
     accountant_headers,
 ):
     response = client.get(
-        "/api/staff/payroll?staff_id=0",
+        "/api/v1/staff/payroll?staff_id=0",
         headers=accountant_headers,
     )
 
@@ -2525,7 +2525,7 @@ def test_list_payroll_invalid_page_returns_422(
     accountant_headers,
 ):
     response = client.get(
-        "/api/staff/payroll?page=0",
+        "/api/v1/staff/payroll?page=0",
         headers=accountant_headers,
     )
 
@@ -2537,7 +2537,7 @@ def test_list_payroll_invalid_per_page_returns_422(
     accountant_headers,
 ):
     response = client.get(
-        "/api/staff/payroll?per_page=0",
+        "/api/v1/staff/payroll?per_page=0",
         headers=accountant_headers,
     )
 
@@ -2565,7 +2565,7 @@ def test_get_payroll_success(
     )
 
     response = client.get(
-        "/api/staff/payroll/9",
+        "/api/v1/staff/payroll/9",
         headers=accountant_headers,
     )
 
@@ -2601,7 +2601,7 @@ def test_mark_payroll_paid_success(
     )
 
     response = client.post(
-        "/api/staff/payroll/9/pay",
+        "/api/v1/staff/payroll/9/pay",
         headers=accountant_headers,
     )
 
@@ -2626,7 +2626,7 @@ def test_mark_payroll_paid_success(
         (
             "create_staff",
             "post",
-            "/api/staff",
+            "/api/v1/staff",
             {
                 "first_name": "Jane",
                 "last_name": "Smith",
@@ -2635,7 +2635,7 @@ def test_mark_payroll_paid_success(
         (
             "update_staff",
             "patch",
-            "/api/staff/1",
+            "/api/v1/staff/1",
             {
                 "first_name": "Updated",
             },
@@ -2643,7 +2643,7 @@ def test_mark_payroll_paid_success(
         (
             "change_staff_status",
             "patch",
-            "/api/staff/1/status",
+            "/api/v1/staff/1/status",
             {
                 "status": StaffStatus.SUSPENDED.value,
             },
@@ -2704,7 +2704,7 @@ def test_leave_domain_error_is_returned(
     )
 
     response = client.post(
-        "/api/staff/leave",
+        "/api/v1/staff/leave",
         headers=doctor_headers,
         json={
             "leave_type": LeaveType.ANNUAL.value,
@@ -2737,7 +2737,7 @@ def test_payroll_domain_error_is_returned(
     )
 
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=accountant_headers,
         json={
             "staff_id": 1,
@@ -2771,7 +2771,7 @@ def test_excuse_domain_error_is_returned(
     )
 
     response = client.post(
-        "/api/staff/excuses",
+        "/api/v1/staff/excuses",
         headers=doctor_headers,
         json={
             "excuse_type": ExcuseType.MEDICAL.value,
@@ -2897,7 +2897,7 @@ def test_staff_list_allows_view_roles(
     )
 
     response = client.get(
-        "/api/staff",
+        "/api/v1/staff",
         headers=headers,
     )
 
@@ -2936,7 +2936,7 @@ def test_payroll_list_allows_payroll_roles(
     )
 
     response = client.get(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=headers,
     )
 
@@ -2974,7 +2974,7 @@ def test_payroll_create_allows_payroll_roles(
     )
 
     response = client.post(
-        "/api/staff/payroll",
+        "/api/v1/staff/payroll",
         headers=headers,
         json={
             "staff_id": staff_obj.id,
@@ -3008,7 +3008,7 @@ def test_get_staff_uses_authenticated_clinic(
     )
 
     response = client.get(
-        f"/api/staff/{admin_staff.id}",
+        f"/api/v1/staff/{admin_staff.id}",
         headers=admin_headers,
     )
 
@@ -3025,7 +3025,7 @@ def test_create_staff_rejects_client_clinic_id(
     admin_headers,
 ):
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "first_name": "Jane",
@@ -3057,7 +3057,7 @@ def test_create_staff_cannot_override_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/staff",
+        "/api/v1/staff",
         headers=admin_headers,
         json={
             "first_name": "Jane",
@@ -3084,7 +3084,7 @@ def test_inactive_authenticated_user_is_rejected(
     )
 
     response = client.get(
-        "/api/staff",
+        "/api/v1/staff",
         headers=headers,
     )
 
@@ -3096,7 +3096,7 @@ def test_get_staff_invalid_negative_id_returns_404(
     admin_headers,
 ):
     response = client.get(
-        "/api/staff/-1",
+        "/api/v1/staff/-1",
         headers=admin_headers,
     )
 
@@ -3108,7 +3108,7 @@ def test_get_leave_request_invalid_negative_id_returns_404(
     doctor_headers,
 ):
     response = client.get(
-        "/api/staff/leave/-1",
+        "/api/v1/staff/leave/-1",
         headers=doctor_headers,
     )
 
@@ -3120,7 +3120,7 @@ def test_get_payroll_invalid_negative_id_returns_404(
     accountant_headers,
 ):
     response = client.get(
-        "/api/staff/payroll/-1",
+        "/api/v1/staff/payroll/-1",
         headers=accountant_headers,
     )
 
@@ -3132,7 +3132,7 @@ def test_get_excuse_invalid_negative_id_returns_404(
     doctor_headers,
 ):
     response = client.get(
-        "/api/staff/excuses/-1",
+        "/api/v1/staff/excuses/-1",
         headers=doctor_headers,
     )
 

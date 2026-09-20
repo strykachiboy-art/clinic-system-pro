@@ -40,7 +40,7 @@ from app.modules.consultation.services.consultation_service import (
 consultation_bp = Blueprint(
     "consultation",
     __name__,
-    url_prefix="/api/consultations",
+    url_prefix="/consultations",
 )
 
 CONSULTATION_READ_ROLES = (

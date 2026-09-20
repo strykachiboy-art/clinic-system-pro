@@ -72,7 +72,7 @@ def test_dashboard_route_is_registered(app):
         for rule in app.url_map.iter_rules()
     }
 
-    assert "/api/dashboard" in rules
+    assert "/api/v1/dashboard" in rules
 
 
 # ============================================================================
@@ -84,7 +84,7 @@ def test_get_dashboard_requires_authentication(
     client,
 ):
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
     )
 
     assert response.status_code == 401
@@ -114,7 +114,7 @@ def test_get_dashboard_success(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -159,7 +159,7 @@ def test_get_dashboard_forwards_date_filters(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "2026-09-01",
@@ -211,7 +211,7 @@ def test_get_dashboard_forwards_only_known_query_parameters(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "2026-09-01",
@@ -254,7 +254,7 @@ def test_get_dashboard_rejects_invalid_date_from(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "not-a-date",
@@ -289,7 +289,7 @@ def test_get_dashboard_rejects_invalid_date_to(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_to": "invalid-date",
@@ -324,7 +324,7 @@ def test_get_dashboard_rejects_invalid_date_range(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "2026-09-20",
@@ -392,7 +392,7 @@ def test_get_dashboard_rejects_invalid_authentication_identity(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -431,7 +431,7 @@ def test_get_dashboard_converts_string_identity_to_integer(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -494,7 +494,7 @@ def test_get_dashboard_maps_domain_errors(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -523,7 +523,7 @@ def test_get_dashboard_does_not_call_service_when_query_validation_fails(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "2026-10-01",
@@ -555,7 +555,7 @@ def test_get_dashboard_returns_success_and_data(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -587,7 +587,7 @@ def test_get_dashboard_serializes_result_using_json_mode(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
     )
 
@@ -619,7 +619,7 @@ def test_get_dashboard_passes_dashboard_query_schema_instance(
     )
 
     response = client.get(
-        "/api/dashboard",
+        "/api/v1/dashboard",
         headers=make_auth_headers(user),
         query_string={
             "date_from": "2026-09-05",

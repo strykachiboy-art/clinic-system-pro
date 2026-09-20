@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -200,7 +200,7 @@ def make_page(
 
 
 def test_endpoints_require_auth(client):
-    response = client.get("/api/lab/tests")
+    response = client.get("/api/v1/lab/tests")
 
     assert response.status_code in (401, 422)
 
@@ -491,7 +491,7 @@ def test_create_test_is_admin_only(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_doctor_headers,
         json={"name": "CBC"},
     )
@@ -504,7 +504,7 @@ def test_update_test_is_admin_only(
     lab_doctor_headers,
 ):
     response = client.patch(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_doctor_headers,
         json={"name": "Updated CBC"},
     )
@@ -517,7 +517,7 @@ def test_create_order_rejects_receptionist(
     lab_receptionist_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_receptionist_headers,
         json={
             "patient_id": 10,
@@ -533,7 +533,7 @@ def test_collect_sample_rejects_doctor(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_doctor_headers,
         json={},
     )
@@ -546,7 +546,7 @@ def test_process_sample_rejects_doctor(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/process",
+        "/api/v1/lab/orders/1/process",
         headers=lab_doctor_headers,
         json={},
     )
@@ -559,7 +559,7 @@ def test_verify_results_rejects_doctor(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/verify",
+        "/api/v1/lab/orders/1/verify",
         headers=lab_doctor_headers,
         json={},
     )
@@ -572,7 +572,7 @@ def test_complete_order_rejects_doctor(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/complete",
+        "/api/v1/lab/orders/1/complete",
         headers=lab_doctor_headers,
     )
 
@@ -584,7 +584,7 @@ def test_cancel_order_rejects_receptionist(
     lab_receptionist_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_receptionist_headers,
         json={"reason": "Cancel"},
     )
@@ -612,7 +612,7 @@ def test_create_lab_test_success(
     )
 
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -658,7 +658,7 @@ def test_create_lab_test_ignores_no_client_clinic_field(
     )
 
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -687,7 +687,7 @@ def test_create_lab_test_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -704,7 +704,7 @@ def test_create_lab_test_rejects_unknown_field(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -720,7 +720,7 @@ def test_create_lab_test_rejects_invalid_critical_range(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -737,7 +737,7 @@ def test_create_lab_test_rejects_negative_price(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -775,7 +775,7 @@ def test_list_lab_tests_success(
     )
 
     response = client.get(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
     )
 
@@ -828,7 +828,7 @@ def test_list_lab_tests_forwards_filters_and_pagination(
     )
 
     response = client.get(
-        "/api/lab/tests?active_only=false&page=2&per_page=10",
+        "/api/v1/lab/tests?active_only=false&page=2&per_page=10",
         headers=lab_admin_headers,
     )
 
@@ -864,7 +864,7 @@ def test_list_lab_tests_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/lab/tests?{query}",
+        f"/api/v1/lab/tests?{query}",
         headers=lab_admin_headers,
     )
 
@@ -876,7 +876,7 @@ def test_list_lab_tests_rejects_unknown_query(
     lab_admin_headers,
 ):
     response = client.get(
-        "/api/lab/tests?unknown=x",
+        "/api/v1/lab/tests?unknown=x",
         headers=lab_admin_headers,
     )
 
@@ -901,7 +901,7 @@ def test_get_lab_test_success(
     )
 
     response = client.get(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_admin_headers,
     )
 
@@ -930,7 +930,7 @@ def test_get_lab_test_maps_not_found(
     )
 
     response = client.get(
-        "/api/lab/tests/999",
+        "/api/v1/lab/tests/999",
         headers=lab_admin_headers,
     )
 
@@ -961,7 +961,7 @@ def test_update_lab_test_success(
     )
 
     response = client.patch(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_admin_headers,
         json={
             "name": "Updated CBC",
@@ -996,7 +996,7 @@ def test_update_lab_test_allows_partial_fields(
     )
 
     response = client.patch(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_admin_headers,
         json={
             "critical_low": "3.000",
@@ -1015,7 +1015,7 @@ def test_update_lab_test_rejects_client_clinic(
     lab_admin_headers,
 ):
     response = client.patch(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_admin_headers,
         json={
             "name": "Updated",
@@ -1046,7 +1046,7 @@ def test_create_lab_order_success(
     )
 
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -1073,7 +1073,7 @@ def test_create_lab_order_rejects_client_clinic(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -1090,7 +1090,7 @@ def test_create_lab_order_rejects_client_actor(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -1107,7 +1107,7 @@ def test_create_lab_order_rejects_duplicate_test_ids(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -1123,7 +1123,7 @@ def test_create_lab_order_rejects_invalid_test_id(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -1152,7 +1152,7 @@ def test_get_lab_order_success(
     )
 
     response = client.get(
-        "/api/lab/orders/1",
+        "/api/v1/lab/orders/1",
         headers=lab_admin_headers,
     )
 
@@ -1185,7 +1185,7 @@ def test_list_orders_for_patient_success(
     )
 
     response = client.get(
-        "/api/lab/orders?patient_id=10",
+        "/api/v1/lab/orders?patient_id=10",
         headers=lab_admin_headers,
     )
 
@@ -1231,7 +1231,7 @@ def test_list_orders_for_patient_forwards_pagination(
     )
 
     response = client.get(
-        "/api/lab/orders?patient_id=10&page=3&per_page=10",
+        "/api/v1/lab/orders?patient_id=10&page=3&per_page=10",
         headers=lab_admin_headers,
     )
 
@@ -1263,7 +1263,7 @@ def test_list_orders_for_patient_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/lab/orders?{query}",
+        f"/api/v1/lab/orders?{query}",
         headers=lab_admin_headers,
     )
 
@@ -1275,7 +1275,7 @@ def test_list_orders_for_patient_requires_patient_id(
     lab_admin_headers,
 ):
     response = client.get(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
     )
 
@@ -1287,7 +1287,7 @@ def test_list_orders_for_patient_rejects_unknown_query(
     lab_admin_headers,
 ):
     response = client.get(
-        "/api/lab/orders?patient_id=10&unknown=x",
+        "/api/v1/lab/orders?patient_id=10&unknown=x",
         headers=lab_admin_headers,
     )
 
@@ -1311,7 +1311,7 @@ def test_get_lab_order_maps_not_found(
     )
 
     response = client.get(
-        "/api/lab/orders/999",
+        "/api/v1/lab/orders/999",
         headers=lab_admin_headers,
     )
 
@@ -1343,7 +1343,7 @@ def test_collect_sample_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_technician_headers,
         json={
             "scanned_qr_code": "LAB-123",
@@ -1370,7 +1370,7 @@ def test_collect_sample_rejects_client_actor(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_technician_headers,
         json={
             "scanned_qr_code": "LAB-123",
@@ -1394,7 +1394,7 @@ def test_collect_sample_accepts_empty_body(
     )
 
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_technician_headers,
         json={},
     )
@@ -1419,7 +1419,7 @@ def test_collect_sample_maps_conflict(
     )
 
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_technician_headers,
         json={
             "scanned_qr_code": "BAD",
@@ -1453,7 +1453,7 @@ def test_link_equipment_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/equipment",
+        "/api/v1/lab/orders/1/equipment",
         headers=lab_technician_headers,
         json={
             "equipment_reference_id": "EQ-100",
@@ -1472,7 +1472,7 @@ def test_link_equipment_rejects_missing_reference(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/equipment",
+        "/api/v1/lab/orders/1/equipment",
         headers=lab_technician_headers,
         json={},
     )
@@ -1485,7 +1485,7 @@ def test_link_equipment_rejects_unknown_field(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/equipment",
+        "/api/v1/lab/orders/1/equipment",
         headers=lab_technician_headers,
         json={
             "equipment_reference_id": "EQ-100",
@@ -1517,7 +1517,7 @@ def test_process_sample_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/process",
+        "/api/v1/lab/orders/1/process",
         headers=lab_technician_headers,
         json={
             "equipment_reference_id": "EQ-100",
@@ -1544,7 +1544,7 @@ def test_process_sample_rejects_client_actor(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/process",
+        "/api/v1/lab/orders/1/process",
         headers=lab_technician_headers,
         json={
             "equipment_reference_id": "EQ-100",
@@ -1575,7 +1575,7 @@ def test_enter_result_success(
     )
 
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "10",
@@ -1609,7 +1609,7 @@ def test_enter_result_rejects_client_actor(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "10",
@@ -1625,7 +1625,7 @@ def test_enter_result_rejects_empty_value(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "",
@@ -1640,7 +1640,7 @@ def test_enter_result_rejects_unknown_field(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "10",
@@ -1668,7 +1668,7 @@ def test_enter_result_maps_conflict(
     )
 
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "10",
@@ -1699,7 +1699,7 @@ def test_verify_results_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/verify",
+        "/api/v1/lab/orders/1/verify",
         headers=lab_technician_headers,
         json={},
     )
@@ -1720,7 +1720,7 @@ def test_verify_results_rejects_client_actor(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/verify",
+        "/api/v1/lab/orders/1/verify",
         headers=lab_technician_headers,
         json={
             "verified_by_id": 999,
@@ -1743,7 +1743,7 @@ def test_verify_results_accepts_empty_body(
     )
 
     response = client.post(
-        "/api/lab/orders/1/verify",
+        "/api/v1/lab/orders/1/verify",
         headers=lab_technician_headers,
         json={},
     )
@@ -1774,7 +1774,7 @@ def test_complete_order_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/complete",
+        "/api/v1/lab/orders/1/complete",
         headers=lab_technician_headers,
     )
 
@@ -1794,7 +1794,7 @@ def test_complete_order_does_not_accept_actor_id(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/complete",
+        "/api/v1/lab/orders/1/complete",
         headers=lab_technician_headers,
         json={
             "verified_by_id": 999,
@@ -1825,7 +1825,7 @@ def test_cancel_order_success(
     )
 
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={
             "reason": "Patient request",
@@ -1852,7 +1852,7 @@ def test_cancel_order_rejects_client_actor(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={
             "reason": "Cancel",
@@ -1880,7 +1880,7 @@ def test_cancel_order_allows_empty_body(
     )
 
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={},
     )
@@ -1893,7 +1893,7 @@ def test_cancel_order_rejects_long_reason(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={
             "reason": "X" * 256,
@@ -1926,7 +1926,7 @@ def test_get_lab_order_maps_domain_errors(
     )
 
     response = client.get(
-        "/api/lab/orders/1",
+        "/api/v1/lab/orders/1",
         headers=lab_admin_headers,
     )
 
@@ -1955,7 +1955,7 @@ def test_unexpected_exception_is_not_exposed(
     )
 
     response = client.get(
-        "/api/lab/orders/1",
+        "/api/v1/lab/orders/1",
         headers=lab_admin_headers,
     )
 
@@ -1976,7 +1976,7 @@ def test_pydantic_validation_returns_consistent_shape(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "",
@@ -1998,7 +1998,7 @@ def test_create_order_has_no_client_controlled_staff_identity(
     lab_admin_headers,
 ):
     response = client.post(
-        "/api/lab/orders",
+        "/api/v1/lab/orders",
         headers=lab_admin_headers,
         json={
             "patient_id": 10,
@@ -2015,7 +2015,7 @@ def test_collect_sample_has_no_client_controlled_staff_identity(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/collect-sample",
+        "/api/v1/lab/orders/1/collect-sample",
         headers=lab_technician_headers,
         json={
             "collected_by_id": 999999,
@@ -2030,7 +2030,7 @@ def test_process_sample_has_no_client_controlled_staff_identity(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/process",
+        "/api/v1/lab/orders/1/process",
         headers=lab_technician_headers,
         json={
             "processed_by_id": 999999,
@@ -2045,7 +2045,7 @@ def test_verify_results_has_no_client_controlled_staff_identity(
     lab_technician_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/verify",
+        "/api/v1/lab/orders/1/verify",
         headers=lab_technician_headers,
         json={
             "verified_by_id": 999999,
@@ -2060,7 +2060,7 @@ def test_cancel_order_has_no_client_controlled_staff_identity(
     lab_doctor_headers,
 ):
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={
             "cancelled_by_id": 999999,
@@ -2087,7 +2087,7 @@ def test_create_lab_test_passes_all_schema_fields(
     )
 
     response = client.post(
-        "/api/lab/tests",
+        "/api/v1/lab/tests",
         headers=lab_admin_headers,
         json={
             "name": "CBC",
@@ -2136,7 +2136,7 @@ def test_update_lab_test_uses_exclude_unset(
     )
 
     response = client.patch(
-        "/api/lab/tests/1",
+        "/api/v1/lab/tests/1",
         headers=lab_admin_headers,
         json={
             "name": "Updated CBC",
@@ -2170,7 +2170,7 @@ def test_enter_result_converts_enum_input(
     )
 
     response = client.post(
-        "/api/lab/order-items/1/result",
+        "/api/v1/lab/order-items/1/result",
         headers=lab_technician_headers,
         json={
             "result_value": "10",
@@ -2204,7 +2204,7 @@ def test_cancel_order_passes_optional_reason(
     )
 
     response = client.post(
-        "/api/lab/orders/1/cancel",
+        "/api/v1/lab/orders/1/cancel",
         headers=lab_doctor_headers,
         json={},
     )

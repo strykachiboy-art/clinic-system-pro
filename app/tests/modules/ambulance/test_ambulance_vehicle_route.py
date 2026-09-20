@@ -1,4 +1,4 @@
-﻿# app/tests/modules/ambulance/test_ambulance_vehicle_routes.py
+# app/tests/modules/ambulance/test_ambulance_vehicle_routes.py
 
 from datetime import date, datetime
 from unittest.mock import Mock
@@ -97,7 +97,7 @@ def test_payload_accepts_valid_vehicle_create_payload(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         json={
             "plate_number": "AMB-001",
@@ -132,7 +132,7 @@ def test_payload_accepts_all_equipment_levels(
     equipment_level,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         json={
             "plate_number": "AMB-001",
@@ -155,7 +155,7 @@ def test_payload_rejects_invalid_vehicle_create_payload(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         json={
             "plate_number": "",
@@ -181,7 +181,7 @@ def test_payload_rejects_unknown_create_fields(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         json={
             "plate_number": "AMB-001",
@@ -208,7 +208,7 @@ def test_payload_accepts_default_vehicle_create_values(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         json={
             "plate_number": "AMB-002",
@@ -232,7 +232,7 @@ def test_payload_rejects_invalid_vehicle_status_payload(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         method="PATCH",
         json={},
     ):
@@ -256,7 +256,7 @@ def test_payload_rejects_non_object_json(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         method="POST",
         data="[]",
         content_type="application/json",
@@ -403,7 +403,7 @@ def test_create_ambulance_vehicle_success(
     )
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
             "equipment_level": EquipmentLevel.BLS.value,
@@ -484,7 +484,7 @@ def test_create_ambulance_vehicle_passes_equipment_level(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
             "equipment_level": equipment_level.value,
@@ -537,7 +537,7 @@ def test_create_ambulance_vehicle_does_not_use_client_clinic_id(
     )
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
             "clinic_id": 999999,
@@ -577,7 +577,7 @@ def test_create_ambulance_vehicle_invalid_payload(
     )
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "",
         },
@@ -620,7 +620,7 @@ def test_create_ambulance_vehicle_domain_error(
     )
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
         },
@@ -651,7 +651,7 @@ def test_create_ambulance_vehicle_requires_management_role(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
         },
@@ -721,7 +721,7 @@ def test_get_ambulance_vehicles_success(
     )
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         headers=headers,
     )
 
@@ -785,7 +785,7 @@ def test_get_ambulance_vehicles_supports_pagination(
     )
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string={
             "page": "2",
             "per_page": "25",
@@ -841,7 +841,7 @@ def test_get_ambulance_vehicles_empty_page(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string={
             "page": "3",
             "per_page": "50",
@@ -896,7 +896,7 @@ def test_get_ambulance_vehicles_filters_by_status(
     )
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string={
             "status": VehicleStatus.AVAILABLE.value,
         },
@@ -931,7 +931,7 @@ def test_get_ambulance_vehicles_rejects_empty_status(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string={
             "status": "   ",
         },
@@ -962,7 +962,7 @@ def test_get_ambulance_vehicles_rejects_invalid_status(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string={
             "status": "NOT_A_REAL_STATUS",
         },
@@ -1009,7 +1009,7 @@ def test_get_ambulance_vehicles_rejects_invalid_pagination(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         query_string=query_string,
         headers=headers,
     )
@@ -1048,7 +1048,7 @@ def test_get_ambulance_vehicles_domain_error(
     )
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         headers=headers,
     )
 
@@ -1074,7 +1074,7 @@ def test_get_ambulance_vehicles_requires_view_role(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         headers=headers,
     )
 
@@ -1117,7 +1117,7 @@ def test_get_ambulance_vehicle_success(
     )
 
     response = client.get(
-        f"/api/ambulance/vehicles/{vehicle.id}",
+        f"/api/v1/ambulance/vehicles/{vehicle.id}",
         headers=headers,
     )
 
@@ -1164,7 +1164,7 @@ def test_get_ambulance_vehicle_not_found(
     )
 
     response = client.get(
-        "/api/ambulance/vehicles/999999",
+        "/api/v1/ambulance/vehicles/999999",
         headers=headers,
     )
 
@@ -1192,7 +1192,7 @@ def test_get_ambulance_vehicle_requires_view_role(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles/1",
+        "/api/v1/ambulance/vehicles/1",
         headers=headers,
     )
 
@@ -1247,7 +1247,7 @@ def test_update_ambulance_vehicle_status_success(
     )
 
     response = client.patch(
-        f"/api/ambulance/vehicles/{vehicle.id}/status",
+        f"/api/v1/ambulance/vehicles/{vehicle.id}/status",
         json={
             "status": target_status.value,
         },
@@ -1294,7 +1294,7 @@ def test_update_ambulance_vehicle_status_invalid_payload(
     )
 
     response = client.patch(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         json={},
         headers=headers,
     )
@@ -1323,7 +1323,7 @@ def test_update_ambulance_vehicle_status_rejects_unknown_fields(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         json={
             "status": VehicleStatus.AVAILABLE.value,
             "clinic_id": 999,
@@ -1365,7 +1365,7 @@ def test_update_ambulance_vehicle_status_domain_error(
     )
 
     response = client.patch(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         json={
             "status": VehicleStatus.AVAILABLE.value,
         },
@@ -1396,7 +1396,7 @@ def test_update_ambulance_vehicle_status_requires_management_role(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         json={
             "status": VehicleStatus.AVAILABLE.value,
         },
@@ -1414,10 +1414,10 @@ def test_update_ambulance_vehicle_status_requires_management_role(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("POST", "/api/ambulance/vehicles"),
-        ("GET", "/api/ambulance/vehicles"),
-        ("GET", "/api/ambulance/vehicles/1"),
-        ("PATCH", "/api/ambulance/vehicles/1/status"),
+        ("POST", "/api/v1/ambulance/vehicles"),
+        ("GET", "/api/v1/ambulance/vehicles"),
+        ("GET", "/api/v1/ambulance/vehicles/1"),
+        ("PATCH", "/api/v1/ambulance/vehicles/1/status"),
     ],
 )
 def test_ambulance_vehicle_routes_require_authentication(
@@ -1448,7 +1448,7 @@ def test_create_ambulance_vehicle_rejects_inactive_user(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
         },
@@ -1488,7 +1488,7 @@ def test_update_ambulance_vehicle_status_rejects_inactive_user(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/vehicles/1/status",
+        "/api/v1/ambulance/vehicles/1/status",
         json={
             "status": VehicleStatus.AVAILABLE.value,
         },
@@ -1512,7 +1512,7 @@ def test_create_ambulance_vehicle_rejects_user_without_clinic(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
         },
@@ -1562,7 +1562,7 @@ def test_create_ambulance_vehicle_uses_authenticated_clinic(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/vehicles",
+        "/api/v1/ambulance/vehicles",
         json={
             "plate_number": "AMB-001",
         },
@@ -1602,7 +1602,7 @@ def test_get_ambulance_vehicles_uses_authenticated_clinic(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/vehicles?clinic_id=999",
+        "/api/v1/ambulance/vehicles?clinic_id=999",
         headers=headers,
     )
 
@@ -1629,14 +1629,14 @@ def test_ambulance_vehicle_routes_are_registered(
         for rule in app.url_map.iter_rules()
     }
 
-    assert "/api/ambulance/vehicles" in rules
+    assert "/api/v1/ambulance/vehicles" in rules
 
     assert (
-        "/api/ambulance/vehicles/"
+        "/api/v1/ambulance/vehicles/"
         "<int:vehicle_id>"
     ) in rules
 
     assert (
-        "/api/ambulance/vehicles/"
+        "/api/v1/ambulance/vehicles/"
         "<int:vehicle_id>/status"
     ) in rules

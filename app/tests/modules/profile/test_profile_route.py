@@ -93,7 +93,7 @@ def test_get_my_profile_requires_authentication(
     assert_unauthorized,
 ):
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
     )
 
     assert_unauthorized(response)
@@ -104,7 +104,7 @@ def test_update_my_profile_requires_authentication(
     assert_unauthorized,
 ):
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         json={
             "email": "new@example.com",
         },
@@ -125,7 +125,7 @@ def test_get_my_profile_rejects_invalid_role(
     )
 
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
     )
 
@@ -144,7 +144,7 @@ def test_update_my_profile_rejects_invalid_role(
     )
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "email": "new@example.com",
@@ -203,7 +203,7 @@ def test_get_my_profile_accepts_supported_roles(
     )
 
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
     )
 
@@ -268,7 +268,7 @@ def test_update_my_profile_accepts_supported_roles(
     )
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "email": "updated@example.com",
@@ -372,7 +372,7 @@ def test_payload_returns_valid_dictionary(
     }
 
     with app.test_request_context(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         method="PATCH",
         json=payload,
     ):
@@ -384,7 +384,7 @@ def test_payload_rejects_missing_json(
     profile_routes,
 ):
     with app.test_request_context(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         method="PATCH",
     ):
         with pytest.raises(
@@ -399,7 +399,7 @@ def test_payload_rejects_null_json(
     profile_routes,
 ):
     with app.test_request_context(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         method="PATCH",
         json=None,
     ):
@@ -428,7 +428,7 @@ def test_payload_rejects_non_dictionary_json(
     payload,
 ):
     with app.test_request_context(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         method="PATCH",
         json=payload,
     ):
@@ -470,7 +470,7 @@ def test_get_my_profile_returns_profile(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
     )
 
@@ -519,7 +519,7 @@ def test_get_my_profile_uses_jwt_identity_not_query_parameter(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/profile/me?user_id=999999",
+        "/api/v1/profile/me?user_id=999999",
         headers=headers,
     )
 
@@ -531,7 +531,7 @@ def test_get_my_profile_uses_jwt_identity_not_query_parameter(
 
 
 # ============================================================================
-# UPDATE MY PROFILE — SUCCESS
+# UPDATE MY PROFILE â€” SUCCESS
 # ============================================================================
 
 
@@ -561,7 +561,7 @@ def test_update_my_profile_updates_email(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "email": "updated@example.com",
@@ -615,7 +615,7 @@ def test_update_my_profile_updates_staff_fields(
     )
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "first_name": "Updated",
@@ -673,7 +673,7 @@ def test_update_my_profile_can_update_multiple_allowed_fields(
     )
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "email": "updated@example.com",
@@ -697,7 +697,7 @@ def test_update_my_profile_can_update_multiple_allowed_fields(
 
 
 # ============================================================================
-# UPDATE MY PROFILE — SCHEMA VALIDATION
+# UPDATE MY PROFILE â€” SCHEMA VALIDATION
 # ============================================================================
 
 
@@ -733,7 +733,7 @@ def test_update_my_profile_rejects_forbidden_or_unknown_fields(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json=payload,
     )
@@ -775,7 +775,7 @@ def test_update_my_profile_rejects_blank_text(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json=payload,
     )
@@ -796,7 +796,7 @@ def test_update_my_profile_rejects_non_object_body(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json=[
             "email",
@@ -823,7 +823,7 @@ def test_update_my_profile_rejects_missing_json_body(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
     )
 
@@ -845,7 +845,7 @@ def test_update_my_profile_rejects_null_json_body(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json=None,
     )
@@ -861,7 +861,7 @@ def test_update_my_profile_rejects_null_json_body(
 
 
 # ============================================================================
-# UPDATE MY PROFILE — IDENTITY BOUNDARY
+# UPDATE MY PROFILE â€” IDENTITY BOUNDARY
 # ============================================================================
 
 
@@ -889,7 +889,7 @@ def test_update_my_profile_uses_authenticated_identity(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me?user_id=999999",
+        "/api/v1/profile/me?user_id=999999",
         headers=headers,
         json={
             "email": "updated@example.com",
@@ -921,7 +921,7 @@ def test_update_my_profile_cannot_change_identity_fields(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             field: 999999,
@@ -962,7 +962,7 @@ def test_get_my_profile_propagates_service_error(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
     )
 
@@ -998,7 +998,7 @@ def test_update_my_profile_propagates_service_error(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=headers,
         json={
             "first_name": "Updated",
@@ -1040,7 +1040,7 @@ def test_profile_get_route_exists(
     )
 
     response = client.get(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=auth_headers_for(user),
     )
 
@@ -1067,7 +1067,7 @@ def test_profile_patch_route_exists(
     )
 
     response = client.patch(
-        "/api/profile/me",
+        "/api/v1/profile/me",
         headers=auth_headers_for(user),
         json={
             "email": "updated@example.com",

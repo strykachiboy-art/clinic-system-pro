@@ -36,7 +36,7 @@ from app.modules.appointment.services.appointment_service import (
 appointment_bp = Blueprint(
     "appointment",
     __name__,
-    url_prefix="/api/appointments",
+    url_prefix="/appointments",
 )
 
 

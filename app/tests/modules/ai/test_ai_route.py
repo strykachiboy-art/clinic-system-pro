@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 
@@ -99,7 +99,7 @@ def test_drug_interactions_requires_authentication(app):
         register_ai_blueprint(app)
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             json=valid_drug_payload(),
         )
 
@@ -111,7 +111,7 @@ def test_triage_requires_authentication(app):
         register_ai_blueprint(app)
 
         response = app.test_client().post(
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             json={
                 "patient_id": 1,
                 "symptoms": "Fever",
@@ -126,7 +126,7 @@ def test_lab_results_requires_authentication(app):
         register_ai_blueprint(app)
 
         response = app.test_client().post(
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             json=valid_lab_payload(),
         )
 
@@ -161,7 +161,7 @@ def test_ai_roles_are_allowed(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -185,7 +185,7 @@ def test_unauthorized_role_is_rejected(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -220,7 +220,7 @@ def test_missing_role_claim_is_rejected(
         )
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers={
                 "Authorization": f"Bearer {token}",
             },
@@ -246,7 +246,7 @@ def test_invalid_jwt_identity_is_rejected(
         )
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers={
                 "Authorization": f"Bearer {token}",
             },
@@ -274,7 +274,7 @@ def test_non_positive_jwt_identity_is_rejected(
         )
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers={
                 "Authorization": f"Bearer {token}",
             },
@@ -311,7 +311,7 @@ def test_current_user_returns_authenticated_user(
         from flask_jwt_extended import verify_jwt_in_request
 
         with app.test_request_context(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers=headers,
         ):
             verify_jwt_in_request()
@@ -339,7 +339,7 @@ def test_current_user_rejects_nonexistent_user(
         )
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers={
                 "Authorization": f"Bearer {token}",
             },
@@ -370,7 +370,7 @@ def test_current_user_rejects_inactive_user(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -399,7 +399,7 @@ def test_current_clinic_requires_user_clinic(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -433,7 +433,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -456,9 +456,9 @@ def test_current_clinic_rejects_invalid_clinic_id(
 @pytest.mark.parametrize(
     "endpoint",
     [
-        "/api/ai/drug-interactions",
-        "/api/ai/triage",
-        "/api/ai/lab-results/interpret",
+        "/api/v1/ai/drug-interactions",
+        "/api/v1/ai/triage",
+        "/api/v1/ai/lab-results/interpret",
     ],
 )
 def test_ai_routes_reject_empty_payload(
@@ -495,9 +495,9 @@ def test_ai_routes_reject_empty_payload(
 @pytest.mark.parametrize(
     "endpoint",
     [
-        "/api/ai/drug-interactions",
-        "/api/ai/triage",
-        "/api/ai/lab-results/interpret",
+        "/api/v1/ai/drug-interactions",
+        "/api/v1/ai/triage",
+        "/api/v1/ai/lab-results/interpret",
     ],
 )
 @pytest.mark.parametrize(
@@ -562,7 +562,7 @@ def test_drug_interactions_rejects_unknown_fields(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             payload,
         )
@@ -595,7 +595,7 @@ def test_triage_rejects_unknown_fields(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             payload,
         )
@@ -622,7 +622,7 @@ def test_lab_results_rejects_unknown_fields(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             payload,
         )
@@ -665,7 +665,7 @@ def test_drug_interactions_success(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -716,7 +716,7 @@ def test_drug_interactions_passes_authenticated_context(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             payload,
         )
@@ -757,7 +757,7 @@ def test_drug_interactions_uses_authenticated_clinic_and_user(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -800,7 +800,7 @@ def test_drug_interactions_passes_client_ip(
         )
 
         response = app.test_client().post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             headers=auth_headers_for(user),
             json=valid_drug_payload(),
             environ_base={
@@ -828,7 +828,7 @@ def test_drug_interactions_validation_error(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             {
                 "drug_names": [
@@ -870,7 +870,7 @@ def test_drug_interactions_domain_error(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -910,7 +910,7 @@ def test_drug_interactions_invalid_service_response(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -954,7 +954,7 @@ def test_triage_success(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
@@ -983,7 +983,7 @@ def test_triage_validation_error(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             {
                 "symptoms": "Fever",
@@ -1033,7 +1033,7 @@ def test_triage_passes_authenticated_context(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
@@ -1071,7 +1071,7 @@ def test_triage_invalid_service_response(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
@@ -1117,7 +1117,7 @@ def test_lab_results_success(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             valid_lab_payload(),
         )
@@ -1148,7 +1148,7 @@ def test_lab_results_validation_error(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             {
                 "result_data": {},
@@ -1200,7 +1200,7 @@ def test_lab_results_passes_authenticated_context(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             valid_lab_payload(),
         )
@@ -1235,7 +1235,7 @@ def test_lab_results_domain_error(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             {
                 "lab_order_id": 99999,
@@ -1281,7 +1281,7 @@ def test_lab_results_invalid_service_response(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             valid_lab_payload(),
         )
@@ -1324,7 +1324,7 @@ def test_drug_interactions_response_contract(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             valid_drug_payload(),
         )
@@ -1367,7 +1367,7 @@ def test_triage_response_contract(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             valid_triage_payload(patient.id),
         )
@@ -1412,7 +1412,7 @@ def test_lab_results_response_contract(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             valid_lab_payload(),
         )
@@ -1449,7 +1449,7 @@ def test_drug_interactions_rejects_invalid_drug_names(
 
         response = post_json(
             app,
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             auth_headers_for(user),
             {
                 "drug_names": [
@@ -1479,7 +1479,7 @@ def test_triage_rejects_blank_symptoms(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             {
                 "patient_id": patient.id,
@@ -1506,7 +1506,7 @@ def test_triage_rejects_invalid_patient_id(
 
         response = post_json(
             app,
-            "/api/ai/triage",
+            "/api/v1/ai/triage",
             auth_headers_for(user),
             {
                 "patient_id": 0,
@@ -1533,7 +1533,7 @@ def test_lab_results_rejects_empty_result_data(
 
         response = post_json(
             app,
-            "/api/ai/lab-results/interpret",
+            "/api/v1/ai/lab-results/interpret",
             auth_headers_for(user),
             {
                 "result_data": {},
@@ -1577,7 +1577,7 @@ def test_ai_rate_limit_is_enforced(
 
         responses = [
             client.post(
-                "/api/ai/drug-interactions",
+                "/api/v1/ai/drug-interactions",
                 headers=headers,
                 json=valid_drug_payload(),
             )

@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+
 class DomainError(Exception):
-    """Base class for business-logic errors raised from the service layer."""
     status_code = 400
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
 
 class NotFoundError(DomainError):
@@ -17,3 +22,14 @@ class ValidationError(DomainError):
 
 class InsufficientCreditsError(ConflictError):
     status_code = 402
+
+
+class APIVersionNotSupportedError(DomainError):
+    status_code = 404
+    code = "api_version_not_supported"
+
+    def __init__(self, version: str) -> None:
+        self.version = version
+        super().__init__(
+            f"API version '{version}' is not supported."
+        )

@@ -213,7 +213,7 @@ def test_create_notification_success(
     )
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=valid_create_payload(user.id),
         headers=auth_headers_for(user),
     )
@@ -282,7 +282,7 @@ def test_create_notification_uses_authenticated_clinic(
     )
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=valid_create_payload(user.id),
         headers=auth_headers_for(user),
     )
@@ -304,7 +304,7 @@ def test_create_notification_rejects_client_clinic_id(
     payload["clinic_id"] = user.clinic_id + 999
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=payload,
         headers=auth_headers_for(user),
     )
@@ -338,7 +338,7 @@ def test_create_notification_rejects_protected_fields(
     payload[field] = value
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=payload,
         headers=auth_headers_for(user),
     )
@@ -421,7 +421,7 @@ def test_create_notification_rejects_invalid_payload(
     payload,
 ):
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=payload,
         headers=auth_headers_for(user),
     )
@@ -452,7 +452,7 @@ def test_create_notification_not_found(
     )
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=valid_create_payload(user.id),
         headers=auth_headers_for(user),
     )
@@ -486,12 +486,21 @@ def test_create_notification_domain_error(
     )
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=valid_create_payload(user.id),
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    expected_status = (
+        422
+        if isinstance(exception, ValidationError)
+        else 409
+    )
+
+    body = assert_error_response(
+        response,
+        expected_status,
+    )
 
     assert body["error"] == str(exception)
 
@@ -542,7 +551,7 @@ def test_list_notifications_success(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(user),
     )
 
@@ -609,7 +618,7 @@ def test_list_notifications_custom_pagination(
     )
 
     response = client.get(
-        "/api/notifications/?page=2&per_page=2",
+        "/api/v1/notifications/?page=2&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -669,7 +678,7 @@ def test_list_notifications_first_page(
     )
 
     response = client.get(
-        "/api/notifications/?page=1&per_page=2",
+        "/api/v1/notifications/?page=1&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -720,7 +729,7 @@ def test_list_notifications_middle_page(
     )
 
     response = client.get(
-        "/api/notifications/?page=2&per_page=2",
+        "/api/v1/notifications/?page=2&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -764,7 +773,7 @@ def test_list_notifications_last_page(
     )
 
     response = client.get(
-        "/api/notifications/?page=3&per_page=2",
+        "/api/v1/notifications/?page=3&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -803,7 +812,7 @@ def test_list_notifications_empty_page(
     )
 
     response = client.get(
-        "/api/notifications/?page=2&per_page=2",
+        "/api/v1/notifications/?page=2&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -846,7 +855,7 @@ def test_list_notifications_empty(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(user),
     )
 
@@ -891,7 +900,7 @@ def test_list_notifications_not_found(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(user),
     )
 
@@ -920,11 +929,11 @@ def test_list_notifications_domain_error(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    body = assert_error_response(response, 422)
 
     assert body["error"] == (
         "Invalid notification scope"
@@ -950,7 +959,7 @@ def test_list_notifications_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/notifications/{query}",
+        f"/api/v1/notifications/{query}",
         headers=auth_headers_for(user),
     )
 
@@ -983,7 +992,7 @@ def test_list_notifications_allows_max_per_page(
     )
 
     response = client.get(
-        "/api/notifications/?per_page=500",
+        "/api/v1/notifications/?per_page=500",
         headers=auth_headers_for(user),
     )
 
@@ -1043,7 +1052,7 @@ def test_list_unread_notifications_success(
     )
 
     response = client.get(
-        "/api/notifications/unread",
+        "/api/v1/notifications/unread",
         headers=auth_headers_for(user),
     )
 
@@ -1112,7 +1121,7 @@ def test_list_unread_notifications_custom_pagination(
     )
 
     response = client.get(
-        "/api/notifications/unread?page=2&per_page=2",
+        "/api/v1/notifications/unread?page=2&per_page=2",
         headers=auth_headers_for(user),
     )
 
@@ -1167,7 +1176,7 @@ def test_list_unread_notifications_empty(
     )
 
     response = client.get(
-        "/api/notifications/unread",
+        "/api/v1/notifications/unread",
         headers=auth_headers_for(user),
     )
 
@@ -1209,7 +1218,7 @@ def test_list_unread_notifications_rejects_invalid_pagination(
     query,
 ):
     response = client.get(
-        f"/api/notifications/unread{query}",
+        f"/api/v1/notifications/unread{query}",
         headers=auth_headers_for(user),
     )
 
@@ -1238,7 +1247,7 @@ def test_list_unread_notifications_not_found(
     )
 
     response = client.get(
-        "/api/notifications/unread",
+        "/api/v1/notifications/unread",
         headers=auth_headers_for(user),
     )
 
@@ -1267,11 +1276,11 @@ def test_list_unread_notifications_domain_error(
     )
 
     response = client.get(
-        "/api/notifications/unread",
+        "/api/v1/notifications/unread",
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    body = assert_error_response(response, 422)
 
     assert body["error"] == "Invalid user"
 
@@ -1305,7 +1314,7 @@ def test_get_notification_success(
     )
 
     response = client.get(
-        "/api/notifications/55",
+        "/api/v1/notifications/55",
         headers=auth_headers_for(user),
     )
 
@@ -1346,7 +1355,7 @@ def test_get_notification_not_found(
     )
 
     response = client.get(
-        "/api/notifications/999999",
+        "/api/v1/notifications/999999",
         headers=auth_headers_for(user),
     )
 
@@ -1375,11 +1384,11 @@ def test_get_notification_domain_error(
     )
 
     response = client.get(
-        "/api/notifications/10",
+        "/api/v1/notifications/10",
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    body = assert_error_response(response, 409)
 
     assert body["error"] == "Notification conflict"
 
@@ -1416,7 +1425,7 @@ def test_mark_notification_read_success(
     )
 
     response = client.post(
-        "/api/notifications/77/read",
+        "/api/v1/notifications/77/read",
         json={},
         headers=auth_headers_for(user),
     )
@@ -1443,7 +1452,7 @@ def test_mark_notification_read_rejects_extra_fields(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/notifications/77/read",
+        "/api/v1/notifications/77/read",
         json={
             "unexpected": "field",
         },
@@ -1476,7 +1485,7 @@ def test_mark_notification_read_not_found(
     )
 
     response = client.post(
-        "/api/notifications/77/read",
+        "/api/v1/notifications/77/read",
         json={},
         headers=auth_headers_for(user),
     )
@@ -1506,12 +1515,12 @@ def test_mark_notification_read_domain_error(
     )
 
     response = client.post(
-        "/api/notifications/77/read",
+        "/api/v1/notifications/77/read",
         json={},
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    body = assert_error_response(response, 409)
 
     assert body["error"] == "Notification conflict"
 
@@ -1537,7 +1546,7 @@ def test_mark_all_notifications_read_success(
     )
 
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={},
         headers=auth_headers_for(user),
     )
@@ -1568,7 +1577,7 @@ def test_mark_all_notifications_read_zero(
     )
 
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={},
         headers=auth_headers_for(user),
     )
@@ -1589,7 +1598,7 @@ def test_mark_all_notifications_read_rejects_extra_fields(
     auth_headers_for,
 ):
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={
             "unexpected": "field",
         },
@@ -1622,7 +1631,7 @@ def test_mark_all_notifications_read_not_found(
     )
 
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={},
         headers=auth_headers_for(user),
     )
@@ -1652,12 +1661,12 @@ def test_mark_all_notifications_read_domain_error(
     )
 
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={},
         headers=auth_headers_for(user),
     )
 
-    body = assert_error_response(response, 400)
+    body = assert_error_response(response, 422)
 
     assert body["error"] == "Invalid user"
 
@@ -1670,12 +1679,12 @@ def test_mark_all_notifications_read_domain_error(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("get", "/api/notifications/"),
-        ("get", "/api/notifications/unread"),
-        ("get", "/api/notifications/1"),
-        ("post", "/api/notifications/"),
-        ("post", "/api/notifications/1/read"),
-        ("post", "/api/notifications/read-all"),
+        ("get", "/api/v1/notifications/"),
+        ("get", "/api/v1/notifications/unread"),
+        ("get", "/api/v1/notifications/1"),
+        ("post", "/api/v1/notifications/"),
+        ("post", "/api/v1/notifications/1/read"),
+        ("post", "/api/v1/notifications/read-all"),
     ],
 )
 def test_notification_routes_require_authentication(
@@ -1716,7 +1725,7 @@ def test_authenticated_user_must_exist(
         )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers={
             "Authorization": f"Bearer {token}",
         },
@@ -1748,7 +1757,7 @@ def test_authenticated_user_identity_must_be_integer(
         )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers={
             "Authorization": f"Bearer {token}",
         },
@@ -1781,7 +1790,7 @@ def test_inactive_authenticated_user_is_rejected(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(inactive_user),
     )
 
@@ -1802,13 +1811,13 @@ def test_authenticated_user_without_clinic_is_rejected(
     user_without_clinic = make_user(None)
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(
             user_without_clinic
         ),
     )
 
-    body = assert_domain_error(response, 400)
+    body = assert_domain_error(response, 422)
 
     assert body["error"] == (
         "Authenticated user is not assigned to a clinic"
@@ -1829,7 +1838,7 @@ def test_create_notification_cannot_override_authenticated_clinic(
     payload["clinic_id"] = user.clinic_id + 500
 
     response = client.post(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         json=payload,
         headers=auth_headers_for(user),
     )
@@ -1861,7 +1870,7 @@ def test_get_notification_passes_authenticated_user_and_clinic(
     )
 
     response = client.get(
-        "/api/notifications/15",
+        "/api/v1/notifications/15",
         headers=auth_headers_for(user),
     )
 
@@ -1897,7 +1906,7 @@ def test_list_notifications_passes_authenticated_user_and_clinic(
     )
 
     response = client.get(
-        "/api/notifications/",
+        "/api/v1/notifications/",
         headers=auth_headers_for(user),
     )
 
@@ -1935,7 +1944,7 @@ def test_unread_notifications_pass_authenticated_user_and_clinic(
     )
 
     response = client.get(
-        "/api/notifications/unread",
+        "/api/v1/notifications/unread",
         headers=auth_headers_for(user),
     )
 
@@ -1975,7 +1984,7 @@ def test_mark_notification_read_passes_authenticated_user_and_clinic(
     )
 
     response = client.post(
-        "/api/notifications/15/read",
+        "/api/v1/notifications/15/read",
         json={},
         headers=auth_headers_for(user),
     )
@@ -2005,7 +2014,7 @@ def test_mark_all_passes_authenticated_user_and_clinic(
     )
 
     response = client.post(
-        "/api/notifications/read-all",
+        "/api/v1/notifications/read-all",
         json={},
         headers=auth_headers_for(user),
     )
@@ -2056,7 +2065,7 @@ def test_notification_response_serializes_optional_fields(
     )
 
     response = client.get(
-        "/api/notifications/88",
+        "/api/v1/notifications/88",
         headers=auth_headers_for(user),
     )
 
@@ -2111,7 +2120,7 @@ def test_notification_response_serializes_all_timestamps(
     )
 
     response = client.get(
-        "/api/notifications/91",
+        "/api/v1/notifications/91",
         headers=auth_headers_for(user),
     )
 
@@ -2163,7 +2172,7 @@ def test_notification_response_serializes_failed_notification(
     )
 
     response = client.get(
-        "/api/notifications/89",
+        "/api/v1/notifications/89",
         headers=auth_headers_for(user),
     )
 
@@ -2215,7 +2224,7 @@ def test_notification_response_serializes_read_notification(
     )
 
     response = client.get(
-        "/api/notifications/90",
+        "/api/v1/notifications/90",
         headers=auth_headers_for(user),
     )
 

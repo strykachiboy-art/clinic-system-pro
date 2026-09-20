@@ -88,7 +88,7 @@ from app.modules.staff.models.staff_model import Staff
 inventory_bp = Blueprint(
     "inventory",
     __name__,
-    url_prefix="/api/inventory",
+    url_prefix="/inventory",
 )
 
 

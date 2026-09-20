@@ -43,7 +43,7 @@ from app.modules.clinic.services.clinic_service import (
 clinic_bp = Blueprint(
     "clinic",
     __name__,
-    url_prefix="/api/clinics",
+    url_prefix="/clinics",
 )
 
 

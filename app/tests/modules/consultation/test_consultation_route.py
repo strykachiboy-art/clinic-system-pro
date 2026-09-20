@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -167,7 +167,7 @@ def test_start_consultation_success(
     )
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "patient_id": patient.id,
             "staff_id": staff.id,
@@ -230,7 +230,7 @@ def test_start_consultation_forwards_consultation_type(
     )
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "patient_id": patient.id,
             "staff_id": staff.id,
@@ -275,7 +275,7 @@ def test_start_consultation_ignores_client_clinic_id(
     )
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "clinic_id": 999999,
             "patient_id": patient.id,
@@ -297,7 +297,7 @@ def test_start_consultation_invalid_payload_returns_422(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "patient_id": 0,
             "staff_id": 0,
@@ -321,7 +321,7 @@ def test_start_consultation_rejects_blank_chief_complaint(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "patient_id": 1,
             "staff_id": 1,
@@ -346,7 +346,7 @@ def test_start_consultation_rejects_unknown_field(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().post(
-        "/api/consultations/",
+        "/api/v1/consultations/",
         json={
             "patient_id": 1,
             "staff_id": 1,
@@ -384,7 +384,7 @@ def test_get_consultation_success(
     )
 
     response = app.test_client().get(
-        f"/api/consultations/{consultation.id}",
+        f"/api/v1/consultations/{consultation.id}",
         headers=headers,
     )
 
@@ -430,7 +430,7 @@ def test_get_consultation_uses_authenticated_clinic(
     )
 
     response = app.test_client().get(
-        "/api/consultations/44",
+        "/api/v1/consultations/44",
         headers=headers,
     )
 
@@ -468,7 +468,7 @@ def test_update_consultation_success(
     )
 
     response = app.test_client().patch(
-        "/api/consultations/10",
+        "/api/v1/consultations/10",
         json={
             "diagnosis": "Viral infection",
             "notes": "Updated notes",
@@ -498,7 +498,7 @@ def test_update_consultation_rejects_blank_notes(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().patch(
-        "/api/consultations/1",
+        "/api/v1/consultations/1",
         json={
             "notes": "   ",
         },
@@ -521,7 +521,7 @@ def test_update_consultation_rejects_unknown_field(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().patch(
-        "/api/consultations/1",
+        "/api/v1/consultations/1",
         json={
             "clinic_id": 999,
         },
@@ -562,7 +562,7 @@ def test_complete_consultation_success(
     )
 
     response = app.test_client().post(
-        "/api/consultations/20/complete",
+        "/api/v1/consultations/20/complete",
         json={
             "diagnosis": "Malaria",
             "treatment_plan": "Oral treatment",
@@ -594,7 +594,7 @@ def test_complete_consultation_requires_diagnosis(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().post(
-        "/api/consultations/20/complete",
+        "/api/v1/consultations/20/complete",
         json={},
         headers=headers,
     )
@@ -615,7 +615,7 @@ def test_complete_consultation_rejects_blank_diagnosis(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().post(
-        "/api/consultations/20/complete",
+        "/api/v1/consultations/20/complete",
         json={
             "diagnosis": "   ",
         },
@@ -658,7 +658,7 @@ def test_cancel_consultation_success(
     )
 
     response = app.test_client().post(
-        "/api/consultations/30/cancel",
+        "/api/v1/consultations/30/cancel",
         json={
             "reason": "Patient unavailable",
         },
@@ -707,7 +707,7 @@ def test_cancel_consultation_allows_missing_reason(
     )
 
     response = app.test_client().post(
-        "/api/consultations/31/cancel",
+        "/api/v1/consultations/31/cancel",
         json={},
         headers=headers,
     )
@@ -726,7 +726,7 @@ def test_cancel_consultation_rejects_blank_reason(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().post(
-        "/api/consultations/31/cancel",
+        "/api/v1/consultations/31/cancel",
         json={
             "reason": "   ",
         },
@@ -783,7 +783,7 @@ def test_patient_consultations_success(
     )
 
     response = app.test_client().get(
-        "/api/consultations/patient/55",
+        "/api/v1/consultations/patient/55",
         headers=headers,
     )
 
@@ -836,7 +836,7 @@ def test_patient_consultations_forwards_pagination(
     )
 
     response = app.test_client().get(
-        "/api/consultations/patient/55?page=3&per_page=25",
+        "/api/v1/consultations/patient/55?page=3&per_page=25",
         headers=headers,
     )
 
@@ -885,7 +885,7 @@ def test_patient_consultations_filters_by_type(
     )
 
     response = app.test_client().get(
-        "/api/consultations/patient/55"
+        "/api/v1/consultations/patient/55"
         "?consultation_type=specialist",
         headers=headers,
     )
@@ -914,7 +914,7 @@ def test_patient_consultations_rejects_invalid_type(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().get(
-        "/api/consultations/patient/55"
+        "/api/v1/consultations/patient/55"
         "?consultation_type=invalid",
         headers=headers,
     )
@@ -976,7 +976,7 @@ def test_my_patients_success(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients",
+        "/api/v1/consultations/my-patients",
         headers=headers,
     )
 
@@ -1038,7 +1038,7 @@ def test_my_patients_forwards_pagination(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients"
+        "/api/v1/consultations/my-patients"
         "?page=2&per_page=10",
         headers=headers,
     )
@@ -1093,7 +1093,7 @@ def test_my_patients_returns_serialized_patient_fields(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients",
+        "/api/v1/consultations/my-patients",
         headers=headers,
     )
 
@@ -1135,7 +1135,7 @@ def test_my_patients_uses_authenticated_staff(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients",
+        "/api/v1/consultations/my-patients",
         headers=headers,
     )
 
@@ -1171,7 +1171,7 @@ def test_my_patients_does_not_accept_staff_id_from_query(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?staff_id=999999",
+        "/api/v1/consultations/my-patients?staff_id=999999",
         headers=headers,
     )
 
@@ -1191,7 +1191,7 @@ def test_my_patients_rejects_invalid_page(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?page=0",
+        "/api/v1/consultations/my-patients?page=0",
         headers=headers,
     )
 
@@ -1214,7 +1214,7 @@ def test_my_patients_rejects_invalid_per_page(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?per_page=0",
+        "/api/v1/consultations/my-patients?per_page=0",
         headers=headers,
     )
 
@@ -1237,7 +1237,7 @@ def test_my_patients_rejects_per_page_above_maximum(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?per_page=501",
+        "/api/v1/consultations/my-patients?per_page=501",
         headers=headers,
     )
 
@@ -1262,7 +1262,7 @@ def test_my_patients_rejects_non_integer_page(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?page=abc",
+        "/api/v1/consultations/my-patients?page=abc",
         headers=headers,
     )
 
@@ -1285,7 +1285,7 @@ def test_my_patients_rejects_non_integer_per_page(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients?per_page=abc",
+        "/api/v1/consultations/my-patients?per_page=abc",
         headers=headers,
     )
 
@@ -1320,7 +1320,7 @@ def test_my_patients_rejects_unlinked_user(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients",
+        "/api/v1/consultations/my-patients",
         headers=headers,
     )
 
@@ -1357,7 +1357,7 @@ def test_my_patients_rejects_staff_from_other_clinic(
     )
 
     response = app.test_client().get(
-        "/api/consultations/my-patients",
+        "/api/v1/consultations/my-patients",
         headers=headers,
     )
 
@@ -1404,7 +1404,7 @@ def test_staff_consultations_success(
     )
 
     response = app.test_client().get(
-        "/api/consultations/staff/77?status=in_progress",
+        "/api/v1/consultations/staff/77?status=in_progress",
         headers=headers,
     )
 
@@ -1446,7 +1446,7 @@ def test_staff_consultations_without_status(
     )
 
     response = app.test_client().get(
-        "/api/consultations/staff/77",
+        "/api/v1/consultations/staff/77",
         headers=headers,
     )
 
@@ -1492,7 +1492,7 @@ def test_staff_consultations_filters_by_type(
     )
 
     response = app.test_client().get(
-        "/api/consultations/staff/77"
+        "/api/v1/consultations/staff/77"
         "?status=in_progress&consultation_type=emergency",
         headers=headers,
     )
@@ -1544,7 +1544,7 @@ def test_staff_consultations_forwards_pagination(
     )
 
     response = app.test_client().get(
-        "/api/consultations/staff/77?page=2&per_page=10",
+        "/api/v1/consultations/staff/77?page=2&per_page=10",
         headers=headers,
     )
 
@@ -1562,7 +1562,7 @@ def test_staff_consultations_rejects_invalid_status(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().get(
-        "/api/consultations/staff/77?status=invalid",
+        "/api/v1/consultations/staff/77?status=invalid",
         headers=headers,
     )
 
@@ -1582,7 +1582,7 @@ def test_staff_consultations_rejects_invalid_type(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().get(
-        "/api/consultations/staff/77"
+        "/api/v1/consultations/staff/77"
         "?consultation_type=invalid",
         headers=headers,
     )
@@ -1598,12 +1598,12 @@ def test_staff_consultations_rejects_invalid_type(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/patient/55?page=0",
-        "/api/consultations/patient/55?page=-1",
-        "/api/consultations/staff/77?page=0",
-        "/api/consultations/staff/77?page=-1",
-        "/api/consultations/templates?page=0",
-        "/api/consultations/templates?page=-1",
+        "/api/v1/consultations/patient/55?page=0",
+        "/api/v1/consultations/patient/55?page=-1",
+        "/api/v1/consultations/staff/77?page=0",
+        "/api/v1/consultations/staff/77?page=-1",
+        "/api/v1/consultations/templates?page=0",
+        "/api/v1/consultations/templates?page=-1",
     ],
 )
 def test_pagination_rejects_invalid_page(
@@ -1633,9 +1633,9 @@ def test_pagination_rejects_invalid_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/patient/55?page=abc",
-        "/api/consultations/staff/77?page=abc",
-        "/api/consultations/templates?page=abc",
+        "/api/v1/consultations/patient/55?page=abc",
+        "/api/v1/consultations/staff/77?page=abc",
+        "/api/v1/consultations/templates?page=abc",
     ],
 )
 def test_pagination_rejects_non_integer_page(
@@ -1665,12 +1665,12 @@ def test_pagination_rejects_non_integer_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/patient/55?per_page=0",
-        "/api/consultations/patient/55?per_page=-1",
-        "/api/consultations/staff/77?per_page=0",
-        "/api/consultations/staff/77?per_page=-1",
-        "/api/consultations/templates?per_page=0",
-        "/api/consultations/templates?per_page=-1",
+        "/api/v1/consultations/patient/55?per_page=0",
+        "/api/v1/consultations/patient/55?per_page=-1",
+        "/api/v1/consultations/staff/77?per_page=0",
+        "/api/v1/consultations/staff/77?per_page=-1",
+        "/api/v1/consultations/templates?per_page=0",
+        "/api/v1/consultations/templates?per_page=-1",
     ],
 )
 def test_pagination_rejects_invalid_per_page(
@@ -1700,9 +1700,9 @@ def test_pagination_rejects_invalid_per_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/patient/55?per_page=501",
-        "/api/consultations/staff/77?per_page=501",
-        "/api/consultations/templates?per_page=501",
+        "/api/v1/consultations/patient/55?per_page=501",
+        "/api/v1/consultations/staff/77?per_page=501",
+        "/api/v1/consultations/templates?per_page=501",
     ],
 )
 def test_pagination_rejects_per_page_above_maximum(
@@ -1757,7 +1757,7 @@ def test_create_template_success(
     )
 
     response = app.test_client().post(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         json={
             "name": "General Consultation",
             "specialty": "General Medicine",
@@ -1794,7 +1794,7 @@ def test_create_template_forbidden_for_nurse(
     headers = auth_headers_for(user, role=Role.NURSE)
 
     response = app.test_client().post(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         json={
             "name": "Nursing Template",
             "structure": {
@@ -1815,7 +1815,7 @@ def test_create_template_rejects_blank_name(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().post(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         json={
             "name": "   ",
             "structure": {
@@ -1841,7 +1841,7 @@ def test_create_template_rejects_empty_structure(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().post(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         json={
             "name": "Empty Template",
             "structure": {},
@@ -1896,7 +1896,7 @@ def test_active_templates_admin_without_clinic_filter(
     )
 
     response = app.test_client().get(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         headers=headers,
     )
 
@@ -1938,7 +1938,7 @@ def test_active_templates_admin_with_clinic_filter(
     )
 
     response = app.test_client().get(
-        "/api/consultations/templates?clinic_id=7",
+        "/api/v1/consultations/templates?clinic_id=7",
         headers=headers,
     )
 
@@ -1968,7 +1968,7 @@ def test_active_templates_non_admin_uses_authenticated_clinic(
     )
 
     response = app.test_client().get(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         headers=headers,
     )
 
@@ -1987,7 +1987,7 @@ def test_active_templates_non_admin_rejects_other_clinic(
     headers = auth_headers_for(user, role=Role.DOCTOR)
 
     response = app.test_client().get(
-        "/api/consultations/templates?clinic_id=999",
+        "/api/v1/consultations/templates?clinic_id=999",
         headers=headers,
     )
 
@@ -2007,7 +2007,7 @@ def test_active_templates_rejects_non_integer_clinic_id(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().get(
-        "/api/consultations/templates?clinic_id=abc",
+        "/api/v1/consultations/templates?clinic_id=abc",
         headers=headers,
     )
 
@@ -2027,7 +2027,7 @@ def test_active_templates_rejects_non_positive_clinic_id(
     headers = auth_headers_for(user, role=Role.ADMIN)
 
     response = app.test_client().get(
-        "/api/consultations/templates?clinic_id=0",
+        "/api/v1/consultations/templates?clinic_id=0",
         headers=headers,
     )
 
@@ -2070,7 +2070,7 @@ def test_active_templates_forwards_pagination(
     )
 
     response = app.test_client().get(
-        "/api/consultations/templates?page=2&per_page=20",
+        "/api/v1/consultations/templates?page=2&per_page=20",
         headers=headers,
     )
 
@@ -2088,8 +2088,8 @@ def test_active_templates_forwards_pagination(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/my-patients?page=0",
-        "/api/consultations/my-patients?page=-1",
+        "/api/v1/consultations/my-patients?page=0",
+        "/api/v1/consultations/my-patients?page=-1",
     ],
 )
 def test_my_patients_pagination_rejects_invalid_page(
@@ -2119,7 +2119,7 @@ def test_my_patients_pagination_rejects_invalid_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/my-patients?page=abc",
+        "/api/v1/consultations/my-patients?page=abc",
     ],
 )
 def test_my_patients_pagination_rejects_non_integer_page(
@@ -2149,8 +2149,8 @@ def test_my_patients_pagination_rejects_non_integer_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/my-patients?per_page=0",
-        "/api/consultations/my-patients?per_page=-1",
+        "/api/v1/consultations/my-patients?per_page=0",
+        "/api/v1/consultations/my-patients?per_page=-1",
     ],
 )
 def test_my_patients_pagination_rejects_invalid_per_page(
@@ -2180,7 +2180,7 @@ def test_my_patients_pagination_rejects_invalid_per_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/consultations/my-patients?per_page=501",
+        "/api/v1/consultations/my-patients?per_page=501",
     ],
 )
 def test_my_patients_pagination_rejects_per_page_above_maximum(
@@ -2212,14 +2212,14 @@ def test_my_patients_pagination_rejects_per_page_above_maximum(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("get", "/api/consultations/1"),
-        ("patch", "/api/consultations/1"),
-        ("post", "/api/consultations/1/complete"),
-        ("post", "/api/consultations/1/cancel"),
-        ("get", "/api/consultations/patient/1"),
-        ("get", "/api/consultations/my-patients"),
-        ("get", "/api/consultations/staff/1"),
-        ("get", "/api/consultations/templates"),
+        ("get", "/api/v1/consultations/1"),
+        ("patch", "/api/v1/consultations/1"),
+        ("post", "/api/v1/consultations/1/complete"),
+        ("post", "/api/v1/consultations/1/cancel"),
+        ("get", "/api/v1/consultations/patient/1"),
+        ("get", "/api/v1/consultations/my-patients"),
+        ("get", "/api/v1/consultations/staff/1"),
+        ("get", "/api/v1/consultations/templates"),
     ],
 )
 def test_consultation_routes_require_authentication(
@@ -2260,7 +2260,7 @@ def test_read_routes_forbidden_for_unauthorized_roles(
     )
 
     response = app.test_client().get(
-        "/api/consultations/1",
+        "/api/v1/consultations/1",
         headers=headers,
     )
 
@@ -2287,7 +2287,7 @@ def test_template_create_allowed_for_admin(
     )
 
     response = app.test_client().post(
-        "/api/consultations/templates",
+        "/api/v1/consultations/templates",
         json={
             "name": "Admin Template",
             "structure": {
@@ -2319,7 +2319,7 @@ def test_route_returns_domain_error_status(
     )
 
     response = app.test_client().get(
-        "/api/consultations/999",
+        "/api/v1/consultations/999",
         headers=headers,
     )
 

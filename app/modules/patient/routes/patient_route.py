@@ -62,7 +62,7 @@ from app.modules.patient.services.patient_service import (
 patient_bp = Blueprint(
     "patients",
     __name__,
-    url_prefix="/api/patients",
+    url_prefix="/patients",
 )
 
 

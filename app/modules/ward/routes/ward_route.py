@@ -70,7 +70,7 @@ from app.modules.ward.services.ward_service import (
 ward_bp = Blueprint(
     "ward",
     __name__,
-    url_prefix="/api/wards",
+    url_prefix="/wards",
 )
 
 

@@ -68,7 +68,7 @@ from app.modules.staff.services.excuse_service import (
 staff_bp = Blueprint(
     "staff",
     __name__,
-    url_prefix="/api/staff",
+    url_prefix="/staff",
 )
 
 

@@ -16,7 +16,7 @@ from app.core.utils.decorators import role_required
 audit_bp = Blueprint(
     "audit",
     __name__,
-    url_prefix="/api/audit-logs",
+    url_prefix="/audit-logs",
 )
 
 

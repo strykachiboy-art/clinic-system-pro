@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from app.core.enums.clinic_enums import ClinicStatus, ClinicType
 from app.core.enums.role_enums import Role
@@ -35,7 +35,7 @@ class TestClinicSerialization:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             headers=headers,
         )
 
@@ -89,7 +89,7 @@ class TestClinicSerialization:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             headers=headers,
         )
 
@@ -110,16 +110,16 @@ class TestClinicRouteAuthentication:
     @pytest.mark.parametrize(
         "method,path",
         [
-            ("GET", "/api/clinics"),
-            ("GET", "/api/clinics/1"),
-            ("GET", "/api/clinics/1/branches"),
-            ("POST", "/api/clinics"),
-            ("POST", "/api/clinics/1/branches"),
-            ("PATCH", "/api/clinics/1"),
-            ("PATCH", "/api/clinics/1/branch-configuration"),
-            ("PATCH", "/api/clinics/1/status"),
-            ("PATCH", "/api/clinics/1/ai-credits"),
-            ("POST", "/api/clinics/1/api-token/regenerate"),
+            ("GET", "/api/v1/clinics"),
+            ("GET", "/api/v1/clinics/1"),
+            ("GET", "/api/v1/clinics/1/branches"),
+            ("POST", "/api/v1/clinics"),
+            ("POST", "/api/v1/clinics/1/branches"),
+            ("PATCH", "/api/v1/clinics/1"),
+            ("PATCH", "/api/v1/clinics/1/branch-configuration"),
+            ("PATCH", "/api/v1/clinics/1/status"),
+            ("PATCH", "/api/v1/clinics/1/ai-credits"),
+            ("POST", "/api/v1/clinics/1/api-token/regenerate"),
         ],
     )
     def test_missing_authentication_is_rejected(
@@ -152,7 +152,7 @@ class TestClinicRouteAuthorization:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "New Clinic",
             },
@@ -180,7 +180,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Unauthorized Clinic",
             },
@@ -208,7 +208,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={
                 "name": "Unauthorized Branch",
             },
@@ -236,7 +236,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "name": "Unauthorized Update",
             },
@@ -264,7 +264,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/branch-configuration",
+            f"/api/v1/clinics/{clinic.id}/branch-configuration",
             json={
                 "is_headquarters": True,
             },
@@ -292,7 +292,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/status",
+            f"/api/v1/clinics/{clinic.id}/status",
             json={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -320,7 +320,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": 10,
             },
@@ -348,7 +348,7 @@ class TestClinicRouteAuthorization:
         )
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/api-token/regenerate",
+            f"/api/v1/clinics/{clinic.id}/api-token/regenerate",
             headers=headers,
         )
 
@@ -370,7 +370,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Created Clinic",
                 "clinic_type": ClinicType.GENERAL.value,
@@ -402,7 +402,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Full Profile Clinic",
                 "clinic_type": ClinicType.SPECIALIST.value,
@@ -440,7 +440,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={},
             headers=headers,
         )
@@ -462,7 +462,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Invalid Timezone Clinic",
                 "timezone": "Not/A/Timezone",
@@ -486,7 +486,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Child Clinic",
                 "parent_clinic_id": 99999,
@@ -511,7 +511,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": clinic.name,
             },
@@ -531,7 +531,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Extra Field Clinic",
                 "clinic_id": 999,
@@ -555,7 +555,7 @@ class TestCreateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Headquarters Clinic",
                 "is_headquarters": True,
@@ -591,7 +591,7 @@ class TestListClinicsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             headers=headers,
         )
 
@@ -615,7 +615,7 @@ class TestListClinicsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             query_string={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -639,7 +639,7 @@ class TestListClinicsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             query_string={
                 "status": "not-a-real-status",
             },
@@ -676,7 +676,7 @@ class TestListClinicsRoute:
         )
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             headers=headers,
         )
 
@@ -706,7 +706,7 @@ class TestListClinicsRoute:
         )
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             query_string={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -733,7 +733,7 @@ class TestListClinicsRoute:
         )
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             headers=headers,
         )
 
@@ -765,7 +765,7 @@ class TestGetClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            f"/api/clinics/{other_clinic.id}",
+            f"/api/v1/clinics/{other_clinic.id}",
             headers=headers,
         )
 
@@ -790,7 +790,7 @@ class TestGetClinicRoute:
         )
 
         response = client.get(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             headers=headers,
         )
 
@@ -820,7 +820,7 @@ class TestGetClinicRoute:
         )
 
         response = client.get(
-            f"/api/clinics/{other_clinic.id}",
+            f"/api/v1/clinics/{other_clinic.id}",
             headers=headers,
         )
 
@@ -840,7 +840,7 @@ class TestGetClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics/99999",
+            "/api/v1/clinics/99999",
             headers=headers,
         )
 
@@ -860,7 +860,7 @@ class TestGetClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics/0",
+            "/api/v1/clinics/0",
             headers=headers,
         )
 
@@ -894,7 +894,7 @@ class TestListClinicBranchesRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             headers=headers,
         )
 
@@ -930,7 +930,7 @@ class TestListClinicBranchesRoute:
         )
 
         response = client.get(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             headers=headers,
         )
 
@@ -960,7 +960,7 @@ class TestListClinicBranchesRoute:
         )
 
         response = client.get(
-            f"/api/clinics/{other_clinic.id}/branches",
+            f"/api/v1/clinics/{other_clinic.id}/branches",
             headers=headers,
         )
 
@@ -975,7 +975,7 @@ class TestListClinicBranchesRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics/99999/branches",
+            "/api/v1/clinics/99999/branches",
             headers=headers,
         )
 
@@ -1003,7 +1003,7 @@ class TestCreateClinicBranchRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={
                 "name": "New Branch",
                 "clinic_type": ClinicType.GENERAL.value,
@@ -1037,7 +1037,7 @@ class TestCreateClinicBranchRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={},
             headers=headers,
         )
@@ -1059,7 +1059,7 @@ class TestCreateClinicBranchRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={
                 "name": "Branch",
                 "parent_clinic_id": clinic.id,
@@ -1083,7 +1083,7 @@ class TestCreateClinicBranchRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics/99999/branches",
+            "/api/v1/clinics/99999/branches",
             json={
                 "name": "Missing Parent Branch",
             },
@@ -1113,7 +1113,7 @@ class TestCreateClinicBranchRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={
                 "name": "Existing Branch",
             },
@@ -1151,7 +1151,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{branch.id}/branch-configuration",
+            f"/api/v1/clinics/{branch.id}/branch-configuration",
             json={
                 "parent_clinic_id": new_parent.id,
             },
@@ -1180,7 +1180,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{branch.id}/branch-configuration",
+            f"/api/v1/clinics/{branch.id}/branch-configuration",
             json={
                 "parent_clinic_id": None,
             },
@@ -1202,7 +1202,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/99999/branch-configuration",
+            "/api/v1/clinics/99999/branch-configuration",
             json={
                 "is_headquarters": True,
             },
@@ -1226,7 +1226,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/branch-configuration",
+            f"/api/v1/clinics/{clinic.id}/branch-configuration",
             json={
                 "parent_clinic_id": 99999,
             },
@@ -1250,7 +1250,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/branch-configuration",
+            f"/api/v1/clinics/{clinic.id}/branch-configuration",
             json={
                 "parent_clinic_id": clinic.id,
             },
@@ -1280,7 +1280,7 @@ class TestUpdateClinicBranchConfigurationRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{branch.id}/branch-configuration",
+            f"/api/v1/clinics/{branch.id}/branch-configuration",
             json={
                 "parent_clinic_id": clinic.id,
                 "is_headquarters": True,
@@ -1312,7 +1312,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "name": "Updated Clinic",
                 "city": "Lagos",
@@ -1346,7 +1346,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/99999",
+            "/api/v1/clinics/99999",
             json={
                 "name": "Updated",
             },
@@ -1370,7 +1370,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "timezone": "Invalid/Timezone",
             },
@@ -1394,7 +1394,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "opening_time": "18:00:00",
                 "closing_time": "08:00:00",
@@ -1425,7 +1425,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "name": "Existing Clinic",
             },
@@ -1446,7 +1446,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "timezone": 12345,
             },
@@ -1467,7 +1467,7 @@ class TestUpdateClinicRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "name": "Updated Clinic",
                 "clinic_id": 999,
@@ -1499,7 +1499,7 @@ class TestUpdateClinicStatusRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/status",
+            f"/api/v1/clinics/{clinic.id}/status",
             json={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -1529,7 +1529,7 @@ class TestUpdateClinicStatusRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/99999/status",
+            "/api/v1/clinics/99999/status",
             json={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -1553,7 +1553,7 @@ class TestUpdateClinicStatusRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/status",
+            f"/api/v1/clinics/{clinic.id}/status",
             json={},
             headers=headers,
         )
@@ -1582,7 +1582,7 @@ class TestUpdateClinicAICreditsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": 10,
             },
@@ -1610,7 +1610,7 @@ class TestUpdateClinicAICreditsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": 0,
             },
@@ -1629,7 +1629,7 @@ class TestUpdateClinicAICreditsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": -5,
             },
@@ -1647,7 +1647,7 @@ class TestUpdateClinicAICreditsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/99999/ai-credits",
+            "/api/v1/clinics/99999/ai-credits",
             json={
                 "amount": 10,
             },
@@ -1671,7 +1671,7 @@ class TestUpdateClinicAICreditsRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={},
             headers=headers,
         )
@@ -1700,7 +1700,7 @@ class TestRegenerateClinicAPITokenRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/api-token/regenerate",
+            f"/api/v1/clinics/{clinic.id}/api-token/regenerate",
             headers=headers,
         )
 
@@ -1729,12 +1729,12 @@ class TestRegenerateClinicAPITokenRoute:
         headers = admin_headers(auth_headers_for, user)
 
         first_response = client.post(
-            f"/api/clinics/{clinic.id}/api-token/regenerate",
+            f"/api/v1/clinics/{clinic.id}/api-token/regenerate",
             headers=headers,
         )
 
         second_response = client.post(
-            f"/api/clinics/{clinic.id}/api-token/regenerate",
+            f"/api/v1/clinics/{clinic.id}/api-token/regenerate",
             headers=headers,
         )
 
@@ -1764,7 +1764,7 @@ class TestRegenerateClinicAPITokenRoute:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics/99999/api-token/regenerate",
+            "/api/v1/clinics/99999/api-token/regenerate",
             headers=headers,
         )
 
@@ -1801,7 +1801,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Test Clinic",
             },
@@ -1833,7 +1833,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Test Clinic",
             },
@@ -1862,7 +1862,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             json={
                 "name": "Test Clinic",
             },
@@ -1895,7 +1895,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics",
+            "/api/v1/clinics",
             headers=headers,
         )
 
@@ -1925,7 +1925,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics/123",
+            "/api/v1/clinics/123",
             headers=headers,
         )
 
@@ -1955,7 +1955,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.get(
-            "/api/clinics/123/branches",
+            "/api/v1/clinics/123/branches",
             headers=headers,
         )
 
@@ -1986,7 +1986,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={
                 "name": "Test Branch",
             },
@@ -2020,7 +2020,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/branch-configuration",
+            f"/api/v1/clinics/{clinic.id}/branch-configuration",
             json={
                 "is_headquarters": True,
             },
@@ -2054,7 +2054,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}",
+            f"/api/v1/clinics/{clinic.id}",
             json={
                 "name": "Updated Clinic",
             },
@@ -2087,7 +2087,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/123/status",
+            "/api/v1/clinics/123/status",
             json={
                 "status": ClinicStatus.ACTIVE.value,
             },
@@ -2121,7 +2121,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/status",
+            f"/api/v1/clinics/{clinic.id}/status",
             json={
                 "status": ClinicStatus.SUSPENDED.value,
             },
@@ -2154,7 +2154,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            "/api/clinics/123/ai-credits",
+            "/api/v1/clinics/123/ai-credits",
             json={
                 "amount": 10,
             },
@@ -2188,7 +2188,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": 10,
             },
@@ -2221,7 +2221,7 @@ class TestClinicRouteExceptionMapping:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics/123/api-token/regenerate",
+            "/api/v1/clinics/123/api-token/regenerate",
             headers=headers,
         )
 
@@ -2248,7 +2248,7 @@ class TestClinicRouteValidation:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            "/api/clinics",
+            "/api/v1/clinics",
             data="",
             headers={
                 **headers,
@@ -2273,7 +2273,7 @@ class TestClinicRouteValidation:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.post(
-            f"/api/clinics/{clinic.id}/branches",
+            f"/api/v1/clinics/{clinic.id}/branches",
             json={},
             headers=headers,
         )
@@ -2295,7 +2295,7 @@ class TestClinicRouteValidation:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/status",
+            f"/api/v1/clinics/{clinic.id}/status",
             json={
                 "status": "invalid-status",
             },
@@ -2319,7 +2319,7 @@ class TestClinicRouteValidation:
         headers = admin_headers(auth_headers_for, user)
 
         response = client.patch(
-            f"/api/clinics/{clinic.id}/ai-credits",
+            f"/api/v1/clinics/{clinic.id}/ai-credits",
             json={
                 "amount": "ten",
             },
@@ -2363,7 +2363,7 @@ class TestClinicTenantIsolation:
         )
 
         response = client.get(
-            f"/api/clinics/{other.id}",
+            f"/api/v1/clinics/{other.id}",
             headers=headers,
         )
 
@@ -2397,7 +2397,7 @@ class TestClinicTenantIsolation:
         )
 
         response = client.get(
-            f"/api/clinics/{other.id}/branches",
+            f"/api/v1/clinics/{other.id}/branches",
             headers=headers,
         )
 
@@ -2421,7 +2421,7 @@ class TestClinicTenantIsolation:
         )
 
         response = client.get(
-            f"/api/clinics/{other.id}",
+            f"/api/v1/clinics/{other.id}",
             headers=headers,
         )
 

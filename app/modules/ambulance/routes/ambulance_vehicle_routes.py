@@ -38,7 +38,7 @@ from app.modules.ambulance.services.ambulance_service import (
 vehicle_bp = Blueprint(
     "ambulance_vehicles",
     __name__,
-    url_prefix="/api/ambulance/vehicles",
+    url_prefix="/ambulance/vehicles",
 )
 
 

@@ -31,7 +31,7 @@ from app.modules.ai.services.ai_service import (
 ai_bp = Blueprint(
     "ai",
     __name__,
-    url_prefix="/api/ai",
+    url_prefix="/ai",
 )
 
 

@@ -52,7 +52,7 @@ from app.modules.staff.models.staff_model import Staff
 lab_bp = Blueprint(
     "lab",
     __name__,
-    url_prefix="/api/lab",
+    url_prefix="/lab",
 )
 
 

@@ -36,7 +36,7 @@ from app.core.exceptions import DomainError
 auth_bp = Blueprint(
     "auth",
     __name__,
-    url_prefix="/api/auth",
+    url_prefix="/auth",
 )
 
 

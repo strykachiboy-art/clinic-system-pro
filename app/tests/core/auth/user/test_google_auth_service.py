@@ -375,7 +375,7 @@ def test_get_google_authorization_url_returns_url_and_state(
 ):
     app.config["GOOGLE_CLIENT_ID"] = "client-id"
     app.config["GOOGLE_REDIRECT_URI"] = (
-        "http://localhost/api/auth/google/callback"
+        "http://localhost/api/v1/auth/google/callback"
     )
 
     with patch.object(
@@ -403,7 +403,7 @@ def test_get_google_authorization_url_returns_url_and_state(
     assert "prompt=select_account" in authorization_url
     assert (
         "redirect_uri="
-        "http%3A%2F%2Flocalhost%2Fapi%2Fauth%2Fgoogle%2Fcallback"
+        "http%3A%2F%2Flocalhost%2Fapi%2Fv1%2Fauth%2Fgoogle%2Fcallback"
         in authorization_url
     )
 

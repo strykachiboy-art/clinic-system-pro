@@ -214,7 +214,7 @@ def test_create_ambulance_trip_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup address",
@@ -265,7 +265,7 @@ def test_create_ambulance_trip_passes_payload_to_service(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.EMERGENCY_PICKUP.value,
             "pickup_address": "Pickup",
@@ -301,7 +301,7 @@ def test_create_ambulance_trip_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={},
         headers=headers,
     )
@@ -326,7 +326,7 @@ def test_create_ambulance_trip_rejects_non_object_json(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         data="[]",
         content_type="application/json",
         headers=headers,
@@ -364,7 +364,7 @@ def test_create_ambulance_trip_maps_domain_error(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup address",
@@ -428,7 +428,7 @@ def test_get_ambulance_trips_success(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         headers=headers,
     )
 
@@ -492,7 +492,7 @@ def test_get_ambulance_trips_supports_pagination(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={
             "page": "2",
             "per_page": "25",
@@ -550,7 +550,7 @@ def test_get_ambulance_trips_supports_status_filter(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={
             "status": TripStatus.DISPATCHED.value,
         },
@@ -578,7 +578,7 @@ def test_get_ambulance_trips_rejects_invalid_status(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={
             "status": "not-a-real-status",
         },
@@ -604,7 +604,7 @@ def test_get_ambulance_trips_rejects_empty_status(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={"status": "   "},
         headers=headers,
     )
@@ -643,7 +643,7 @@ def test_get_ambulance_trips_rejects_invalid_pagination(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string=query_string,
         headers=headers,
     )
@@ -686,7 +686,7 @@ def test_get_ambulance_trip_success(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips/123",
+        "/api/v1/ambulance/trips/123",
         headers=headers,
     )
 
@@ -722,7 +722,7 @@ def test_get_ambulance_trip_maps_not_found(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips/999",
+        "/api/v1/ambulance/trips/999",
         headers=headers,
     )
 
@@ -765,7 +765,7 @@ def test_dispatch_ambulance_trip_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/dispatch",
+        "/api/v1/ambulance/trips/1/dispatch",
         json={
             "vehicle_id": 20,
             "driver_id": 40,
@@ -800,7 +800,7 @@ def test_dispatch_ambulance_trip_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/dispatch",
+        "/api/v1/ambulance/trips/1/dispatch",
         json={},
         headers=headers,
     )
@@ -835,7 +835,7 @@ def test_dispatch_ambulance_trip_maps_domain_error(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/dispatch",
+        "/api/v1/ambulance/trips/1/dispatch",
         json={
             "vehicle_id": 20,
             "driver_id": 40,
@@ -882,7 +882,7 @@ def test_update_ambulance_trip_status_success(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/trips/1/status",
+        "/api/v1/ambulance/trips/1/status",
         json={
             "status": TripStatus.EN_ROUTE_TO_PICKUP.value,
         },
@@ -913,7 +913,7 @@ def test_update_ambulance_trip_status_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.patch(
-        "/api/ambulance/trips/1/status",
+        "/api/v1/ambulance/trips/1/status",
         json={},
         headers=headers,
     )
@@ -957,7 +957,7 @@ def test_link_ambulance_patient_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/patient",
+        "/api/v1/ambulance/trips/1/patient",
         json={
             "patient_id": 30,
         },
@@ -988,7 +988,7 @@ def test_link_ambulance_patient_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/patient",
+        "/api/v1/ambulance/trips/1/patient",
         json={},
         headers=headers,
     )
@@ -1023,7 +1023,7 @@ def test_link_ambulance_patient_maps_domain_error(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/patient",
+        "/api/v1/ambulance/trips/1/patient",
         json={
             "patient_id": 30,
         },
@@ -1071,7 +1071,7 @@ def test_complete_ambulance_trip_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/complete",
+        "/api/v1/ambulance/trips/1/complete",
         headers=headers,
     )
 
@@ -1107,7 +1107,7 @@ def test_complete_ambulance_trip_maps_domain_error(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/complete",
+        "/api/v1/ambulance/trips/1/complete",
         headers=headers,
     )
 
@@ -1153,7 +1153,7 @@ def test_link_ambulance_invoice_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/invoice",
+        "/api/v1/ambulance/trips/1/invoice",
         json={
             "invoice_id": 900,
         },
@@ -1184,7 +1184,7 @@ def test_link_ambulance_invoice_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/invoice",
+        "/api/v1/ambulance/trips/1/invoice",
         json={},
         headers=headers,
     )
@@ -1219,7 +1219,7 @@ def test_link_ambulance_invoice_maps_domain_error(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/invoice",
+        "/api/v1/ambulance/trips/1/invoice",
         json={
             "invoice_id": 900,
         },
@@ -1269,7 +1269,7 @@ def test_cancel_ambulance_trip_success(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/cancel",
+        "/api/v1/ambulance/trips/1/cancel",
         json={
             "reason": "Patient no longer requires transport",
         },
@@ -1303,7 +1303,7 @@ def test_cancel_ambulance_trip_rejects_invalid_payload(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips/1/cancel",
+        "/api/v1/ambulance/trips/1/cancel",
         json={"reason": 123},
         headers=headers,
     )
@@ -1324,15 +1324,15 @@ def test_cancel_ambulance_trip_rejects_invalid_payload(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("GET", "/api/ambulance/trips"),
-        ("GET", "/api/ambulance/trips/1"),
-        ("POST", "/api/ambulance/trips"),
-        ("POST", "/api/ambulance/trips/1/dispatch"),
-        ("PATCH", "/api/ambulance/trips/1/status"),
-        ("POST", "/api/ambulance/trips/1/patient"),
-        ("POST", "/api/ambulance/trips/1/complete"),
-        ("POST", "/api/ambulance/trips/1/invoice"),
-        ("POST", "/api/ambulance/trips/1/cancel"),
+        ("GET", "/api/v1/ambulance/trips"),
+        ("GET", "/api/v1/ambulance/trips/1"),
+        ("POST", "/api/v1/ambulance/trips"),
+        ("POST", "/api/v1/ambulance/trips/1/dispatch"),
+        ("PATCH", "/api/v1/ambulance/trips/1/status"),
+        ("POST", "/api/v1/ambulance/trips/1/patient"),
+        ("POST", "/api/v1/ambulance/trips/1/complete"),
+        ("POST", "/api/v1/ambulance/trips/1/invoice"),
+        ("POST", "/api/v1/ambulance/trips/1/cancel"),
     ],
 )
 def test_ambulance_trip_routes_require_authentication(
@@ -1385,7 +1385,7 @@ def test_ambulance_management_roles_can_create_trip(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup",
@@ -1420,7 +1420,7 @@ def test_ambulance_management_routes_reject_crew_roles(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup address",
@@ -1470,7 +1470,7 @@ def test_ambulance_view_routes_allow_view_roles(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         headers=headers,
     )
 
@@ -1496,7 +1496,7 @@ def test_ambulance_route_rejects_inactive_authenticated_user(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         headers=headers,
     )
 
@@ -1513,7 +1513,7 @@ def test_ambulance_route_rejects_user_without_clinic(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         headers=headers,
     )
 
@@ -1557,7 +1557,7 @@ def test_create_ambulance_trip_uses_authenticated_clinic(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         json={
             "trip_type": TripType.NON_EMERGENCY.value,
             "pickup_address": "Pickup address",
@@ -1596,7 +1596,7 @@ def test_get_ambulance_trip_does_not_accept_clinic_parameter(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips/1?clinic_id=999",
+        "/api/v1/ambulance/trips/1?clinic_id=999",
         headers=headers,
     )
 
@@ -1646,7 +1646,7 @@ def test_ambulance_route_maps_domain_errors(
     headers = auth_headers_for(user)
 
     response = client.get(
-        "/api/ambulance/trips/1",
+        "/api/v1/ambulance/trips/1",
         headers=headers,
     )
 
@@ -1678,7 +1678,7 @@ def test_get_int_query_param_rejects_invalid_values(
     value,
 ):
     with app.test_request_context(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={"page": value},
     ):
         with pytest.raises(ValidationError):
@@ -1692,7 +1692,7 @@ def test_get_int_query_param_uses_default(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
     ):
         result = ambulance_trip_routes._get_int_query_param(
             "page",
@@ -1706,7 +1706,7 @@ def test_pagination_params_use_defaults(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
     ):
         page, per_page = (
             ambulance_trip_routes._pagination_params()
@@ -1722,7 +1722,7 @@ def test_pagination_params_enforce_max_per_page(
     app,
 ):
     with app.test_request_context(
-        "/api/ambulance/trips",
+        "/api/v1/ambulance/trips",
         query_string={"per_page": "501"},
     ):
         with pytest.raises(ValidationError):

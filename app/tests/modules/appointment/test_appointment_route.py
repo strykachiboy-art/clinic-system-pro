@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -131,7 +131,7 @@ def test_payload_accepts_valid_create_payload(app):
     end = datetime(2026, 9, 8, 10, 30)
 
     with app.test_request_context(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         method="POST",
         json={
             "patient_id": 20,
@@ -166,7 +166,7 @@ def test_payload_accepts_valid_create_payload(app):
 
 def test_payload_rejects_invalid_create_payload(app):
     with app.test_request_context(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         method="POST",
         json={
             "patient_id": 0,
@@ -191,7 +191,7 @@ def test_payload_rejects_invalid_create_payload(app):
 
 def test_payload_rejects_unknown_create_field(app):
     with app.test_request_context(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         method="POST",
         json={
             "patient_id": 20,
@@ -223,7 +223,7 @@ def test_payload_rejects_unknown_create_field(app):
 
 def test_payload_rejects_client_clinic_id(app):
     with app.test_request_context(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         method="POST",
         json={
             "clinic_id": 999,
@@ -255,7 +255,7 @@ def test_payload_rejects_client_clinic_id(app):
 
 def test_payload_rejects_non_object_json(app):
     with app.test_request_context(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         method="POST",
         json=[],
     ):
@@ -279,7 +279,7 @@ def test_payload_rejects_non_object_json(app):
 
 def test_payload_accepts_empty_cancel_payload(app):
     with app.test_request_context(
-        "/api/appointments/1/cancel",
+        "/api/v1/appointments/1/cancel",
         method="POST",
         json={},
     ):
@@ -297,7 +297,7 @@ def test_payload_accepts_empty_cancel_payload(app):
 
 def test_payload_accepts_empty_complete_payload(app):
     with app.test_request_context(
-        "/api/appointments/1/complete",
+        "/api/v1/appointments/1/complete",
         method="POST",
         json={},
     ):
@@ -315,7 +315,7 @@ def test_payload_accepts_empty_complete_payload(app):
 
 def test_payload_rejects_invalid_reschedule_payload(app):
     with app.test_request_context(
-        "/api/appointments/1/reschedule",
+        "/api/v1/appointments/1/reschedule",
         method="POST",
         json={
             "scheduled_start": "not-a-date",
@@ -340,7 +340,7 @@ def test_payload_rejects_invalid_reschedule_payload(app):
 
 def test_payload_rejects_unknown_reschedule_field(app):
     with app.test_request_context(
-        "/api/appointments/1/reschedule",
+        "/api/v1/appointments/1/reschedule",
         method="POST",
         json={
             "scheduled_start": (
@@ -370,7 +370,7 @@ def test_payload_rejects_unknown_reschedule_field(app):
 
 def test_query_payload_accepts_date_and_pagination(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
         query_string={
             "date": "2026-09-08",
@@ -399,7 +399,7 @@ def test_query_payload_accepts_date_and_pagination(app):
 
 def test_query_payload_uses_pagination_defaults(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
     ):
         result = appointment_route._query_payload(
@@ -418,7 +418,7 @@ def test_query_payload_uses_pagination_defaults(app):
 
 def test_query_payload_rejects_invalid_date(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
         query_string={
             "date": "not-a-date",
@@ -442,7 +442,7 @@ def test_query_payload_rejects_invalid_date(app):
 
 def test_query_payload_rejects_invalid_page(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
         query_string={
             "page": "0",
@@ -466,7 +466,7 @@ def test_query_payload_rejects_invalid_page(app):
 
 def test_query_payload_rejects_invalid_per_page(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
         query_string={
             "per_page": "501",
@@ -490,7 +490,7 @@ def test_query_payload_rejects_invalid_per_page(app):
 
 def test_query_payload_rejects_unknown_field(app):
     with app.test_request_context(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         method="GET",
         query_string={
             "page": "1",
@@ -731,7 +731,7 @@ def test_create_appointment_success(
     )
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "patient_id": 20,
             "staff_id": 30,
@@ -805,7 +805,7 @@ def test_create_appointment_does_not_accept_client_clinic_id(
     )
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "clinic_id": 999999,
             "patient_id": 20,
@@ -850,7 +850,7 @@ def test_create_appointment_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "patient_id": 20,
             "staff_id": 30,
@@ -902,7 +902,7 @@ def test_create_appointment_invalid_payload_does_not_call_service(
     )
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "patient_id": 0,
             "staff_id": 0,
@@ -970,7 +970,7 @@ def test_reschedule_appointment_success(
     )
 
     response = client.post(
-        "/api/appointments/8/reschedule",
+        "/api/v1/appointments/8/reschedule",
         json={
             "scheduled_start": (
                 "2026-09-09T11:00:00"
@@ -1025,7 +1025,7 @@ def test_reschedule_appointment_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/999/reschedule",
+        "/api/v1/appointments/999/reschedule",
         json={
             "scheduled_start": (
                 "2026-09-09T11:00:00"
@@ -1075,7 +1075,7 @@ def test_reschedule_appointment_invalid_payload(
     )
 
     response = client.post(
-        "/api/appointments/1/reschedule",
+        "/api/v1/appointments/1/reschedule",
         json={
             "scheduled_start": "invalid",
             "scheduled_end": "invalid",
@@ -1129,7 +1129,7 @@ def test_confirm_appointment_success(
     )
 
     response = client.post(
-        "/api/appointments/9/confirm",
+        "/api/v1/appointments/9/confirm",
         headers=headers,
     )
 
@@ -1173,7 +1173,7 @@ def test_confirm_appointment_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/1/confirm",
+        "/api/v1/appointments/1/confirm",
         headers=headers,
     )
 
@@ -1232,7 +1232,7 @@ def test_cancel_appointment_success(
     )
 
     response = client.post(
-        "/api/appointments/10/cancel",
+        "/api/v1/appointments/10/cancel",
         json={
             "cancellation_reason": (
                 "Patient unavailable"
@@ -1295,7 +1295,7 @@ def test_cancel_appointment_accepts_empty_payload(
     )
 
     response = client.post(
-        "/api/appointments/11/cancel",
+        "/api/v1/appointments/11/cancel",
         json={},
         headers=headers,
     )
@@ -1330,7 +1330,7 @@ def test_cancel_appointment_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/1/cancel",
+        "/api/v1/appointments/1/cancel",
         json={},
         headers=headers,
     )
@@ -1390,7 +1390,7 @@ def test_complete_appointment_success(
     )
 
     response = client.post(
-        "/api/appointments/12/complete",
+        "/api/v1/appointments/12/complete",
         json={
             "notes": "Consultation completed",
         },
@@ -1451,7 +1451,7 @@ def test_complete_appointment_accepts_empty_payload(
     )
 
     response = client.post(
-        "/api/appointments/13/complete",
+        "/api/v1/appointments/13/complete",
         json={},
         headers=headers,
     )
@@ -1486,7 +1486,7 @@ def test_complete_appointment_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/1/complete",
+        "/api/v1/appointments/1/complete",
         json={},
         headers=headers,
     )
@@ -1543,7 +1543,7 @@ def test_mark_appointment_no_show_success(
     )
 
     response = client.post(
-        "/api/appointments/14/no-show",
+        "/api/v1/appointments/14/no-show",
         headers=headers,
     )
 
@@ -1587,7 +1587,7 @@ def test_mark_appointment_no_show_domain_error(
     )
 
     response = client.post(
-        "/api/appointments/1/no-show",
+        "/api/v1/appointments/1/no-show",
         headers=headers,
     )
 
@@ -1660,7 +1660,7 @@ def test_get_patient_appointments_success(
     )
 
     response = client.get(
-        "/api/appointments/patient/20",
+        "/api/v1/appointments/patient/20",
         headers=headers,
     )
 
@@ -1733,7 +1733,7 @@ def test_get_patient_appointments_accepts_pagination(
     )
 
     response = client.get(
-        "/api/appointments/patient/20",
+        "/api/v1/appointments/patient/20",
         query_string={
             "page": "3",
             "per_page": "25",
@@ -1785,7 +1785,7 @@ def test_get_patient_appointments_rejects_invalid_pagination(
     )
 
     response = client.get(
-        "/api/appointments/patient/20",
+        "/api/v1/appointments/patient/20",
         query_string={
             "page": "0",
         },
@@ -1822,7 +1822,7 @@ def test_get_patient_appointments_not_found(
     )
 
     response = client.get(
-        "/api/appointments/patient/999",
+        "/api/v1/appointments/patient/999",
         headers=headers,
     )
 
@@ -1897,7 +1897,7 @@ def test_get_staff_appointments_success(
     )
 
     response = client.get(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         headers=headers,
     )
 
@@ -1970,7 +1970,7 @@ def test_get_staff_appointments_with_date_filter(
     )
 
     response = client.get(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         query_string={
             "date": "2026-09-08",
             "page": "2",
@@ -2029,7 +2029,7 @@ def test_get_staff_appointments_rejects_invalid_date(
     )
 
     response = client.get(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         query_string={
             "date": "not-a-date",
         },
@@ -2068,7 +2068,7 @@ def test_get_staff_appointments_rejects_invalid_pagination(
     )
 
     response = client.get(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         query_string={
             "per_page": "501",
         },
@@ -2107,7 +2107,7 @@ def test_get_staff_appointments_rejects_unknown_query_field(
     )
 
     response = client.get(
-        "/api/appointments/staff/30",
+        "/api/v1/appointments/staff/30",
         query_string={
             "unknown": "blocked",
         },
@@ -2144,7 +2144,7 @@ def test_get_staff_appointments_domain_error(
     )
 
     response = client.get(
-        "/api/appointments/staff/999",
+        "/api/v1/appointments/staff/999",
         headers=headers,
     )
 
@@ -2199,7 +2199,7 @@ def test_appointment_routes_allow_configured_roles(
     )
 
     response = client.post(
-        "/api/appointments/1/confirm",
+        "/api/v1/appointments/1/confirm",
         headers=headers,
     )
 
@@ -2221,7 +2221,7 @@ def test_appointment_route_rejects_unauthorized_role(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/appointments/1/confirm",
+        "/api/v1/appointments/1/confirm",
         headers=headers,
     )
 
@@ -2244,7 +2244,7 @@ def test_create_appointment_rejects_inactive_user(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "patient_id": 20,
             "staff_id": 30,
@@ -2274,7 +2274,7 @@ def test_appointment_route_rejects_user_without_clinic(
     headers = auth_headers_for(user)
 
     response = client.post(
-        "/api/appointments/",
+        "/api/v1/appointments/",
         json={
             "patient_id": 20,
             "staff_id": 30,
@@ -2300,7 +2300,7 @@ def test_appointment_route_rejects_unauthenticated_request(
     client,
 ):
     response = client.post(
-        "/api/appointments/1/confirm",
+        "/api/v1/appointments/1/confirm",
     )
 
     assert response.status_code in (
@@ -2320,39 +2320,39 @@ def test_appointment_routes_are_registered(app):
         for rule in app.url_map.iter_rules()
     }
 
-    assert "/api/appointments/" in rules
+    assert "/api/v1/appointments/" in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "<int:appointment_id>/reschedule"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "<int:appointment_id>/confirm"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "<int:appointment_id>/cancel"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "<int:appointment_id>/complete"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "<int:appointment_id>/no-show"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "patient/<int:patient_id>"
     ) in rules
 
     assert (
-        "/api/appointments/"
+        "/api/v1/appointments/"
         "staff/<int:staff_id>"
     ) in rules

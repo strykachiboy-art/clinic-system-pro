@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -115,7 +115,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -191,7 +191,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 filters=filters,
             ),
@@ -236,7 +236,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={
                 "report_type": ReportType.PATIENTS.value,
                 "report_format": ReportFormat.CSV.value,
@@ -272,7 +272,7 @@ class TestCreateReport:
         payload["clinic_id"] = 999
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=payload,
             headers=headers,
         )
@@ -297,7 +297,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={
                 "report_format": ReportFormat.CSV.value,
             },
@@ -333,7 +333,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={
                 "report_type": report_type,
                 "report_format": ReportFormat.CSV.value,
@@ -371,7 +371,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={
                 "report_type": ReportType.PATIENTS.value,
                 "report_format": report_format,
@@ -416,7 +416,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={
                 "report_type": ReportType.PATIENTS.value,
             },
@@ -468,7 +468,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 filters=filters,
             ),
@@ -495,7 +495,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 filters={
                     "date_from": "2026-09-01",
@@ -525,7 +525,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 filters={
                     "date_from": "2026-09-08",
@@ -555,7 +555,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 filters={
                     "active_only": "yes",
@@ -584,7 +584,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={},
             headers=headers,
         )
@@ -624,7 +624,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -664,7 +664,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -706,7 +706,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -766,7 +766,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(
                 report_type=ReportType.BILLING,
                 report_format=ReportFormat.CSV,
@@ -819,7 +819,7 @@ class TestCreateReport:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=[],
             headers=headers,
         )
@@ -881,7 +881,7 @@ class TestCreateReportAuthorization:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -918,7 +918,7 @@ class TestCreateReportAuthorization:
         )
 
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json=_report_payload(),
             headers=headers,
         )
@@ -969,7 +969,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1031,7 +1031,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             query_string={
                 "report_type": ReportType.PATIENTS.value,
                 "report_format": ReportFormat.CSV.value,
@@ -1083,7 +1083,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             query_string={
                 "report_type": "invalid",
             },
@@ -1110,7 +1110,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             query_string={
                 "report_format": "invalid",
             },
@@ -1137,7 +1137,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             query_string={
                 "date_from": "2026-09-08",
                 "date_to": "2026-09-01",
@@ -1165,7 +1165,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             query_string={
                 "page": "0",
             },
@@ -1207,7 +1207,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1246,7 +1246,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1308,7 +1308,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1361,7 +1361,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1408,7 +1408,7 @@ class TestGetReports:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1475,7 +1475,7 @@ class TestGetReportsAuthorization:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1504,7 +1504,7 @@ class TestGetReportsAuthorization:
         )
 
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
             headers=headers,
         )
 
@@ -1547,7 +1547,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/101",
+            "/api/v1/reports/101",
             headers=headers,
         )
 
@@ -1609,7 +1609,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            f"/api/reports/{report_id}",
+            f"/api/v1/reports/{report_id}",
             headers=headers,
         )
 
@@ -1657,7 +1657,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/999",
+            "/api/v1/reports/999",
             headers=headers,
         )
 
@@ -1698,7 +1698,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/123",
+            "/api/v1/reports/123",
             headers=headers,
         )
 
@@ -1737,7 +1737,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/123",
+            "/api/v1/reports/123",
             headers=headers,
         )
 
@@ -1795,7 +1795,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/77",
+            "/api/v1/reports/77",
             headers=headers,
         )
 
@@ -1854,7 +1854,7 @@ class TestGetSingleReport:
         )
 
         response = client.get(
-            "/api/reports/200",
+            "/api/v1/reports/200",
             headers=headers,
         )
 
@@ -1920,7 +1920,7 @@ class TestGetSingleReportAuthorization:
         )
 
         response = client.get(
-            "/api/reports/10",
+            "/api/v1/reports/10",
             headers=headers,
         )
 
@@ -1949,7 +1949,7 @@ class TestGetSingleReportAuthorization:
         )
 
         response = client.get(
-            "/api/reports/10",
+            "/api/v1/reports/10",
             headers=headers,
         )
 
@@ -2179,7 +2179,7 @@ class TestRouteExistence:
         client,
     ):
         response = client.post(
-            "/api/reports",
+            "/api/v1/reports",
             json={},
         )
 
@@ -2190,7 +2190,7 @@ class TestRouteExistence:
         client,
     ):
         response = client.get(
-            "/api/reports",
+            "/api/v1/reports",
         )
 
         assert response.status_code != 404
@@ -2200,7 +2200,7 @@ class TestRouteExistence:
         client,
     ):
         response = client.get(
-            "/api/reports/1",
+            "/api/v1/reports/1",
         )
 
         assert response.status_code != 404
@@ -2210,7 +2210,7 @@ class TestRouteExistence:
         client,
     ):
         response = client.get(
-            "/api/reports/not-an-integer",
+            "/api/v1/reports/not-an-integer",
         )
 
         assert response.status_code == 404

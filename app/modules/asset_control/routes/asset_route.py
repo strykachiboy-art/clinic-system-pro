@@ -74,7 +74,7 @@ from app.modules.asset_control.services.asset_service import (
 asset_bp = Blueprint(
     "asset",
     __name__,
-    url_prefix="/api/assets",
+    url_prefix="/assets",
 )
 
 

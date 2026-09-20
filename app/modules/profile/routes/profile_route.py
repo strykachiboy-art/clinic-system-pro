@@ -27,7 +27,7 @@ from app.modules.profile.services.profile_service import (
 profile_bp = Blueprint(
     "profile",
     __name__,
-    url_prefix="/api/profile",
+    url_prefix="/profile",
 )
 
 

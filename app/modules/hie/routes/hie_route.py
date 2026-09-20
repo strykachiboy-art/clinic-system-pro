@@ -29,7 +29,7 @@ from app.modules.hie.services.hie_service import (
 hie_bp = Blueprint(
     "hie",
     __name__,
-    url_prefix="/api/hie",
+    url_prefix="/hie",
 )
 
 

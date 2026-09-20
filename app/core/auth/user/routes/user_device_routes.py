@@ -32,7 +32,7 @@ from app.core.utils.decorators import role_required
 user_device_bp = Blueprint(
     "user_device",
     __name__,
-    url_prefix="/api/users/devices",
+    url_prefix="/users/devices",
 )
 
 
