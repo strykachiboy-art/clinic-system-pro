@@ -168,11 +168,14 @@ def _serialize_notification_page(result):
 
 
 def _domain_error_response(exc):
-    status_code = (
-        404
-        if isinstance(exc, NotFoundError)
-        else 400
-    )
+    if isinstance(exc, NotFoundError):
+        status_code = 404
+    elif isinstance(exc, ConflictError):
+        status_code = 409
+    elif isinstance(exc, ValidationError):
+        status_code = 422
+    else:
+        status_code = 400
 
     return jsonify({
         "success": False,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func, select
+
 from app.extensions import db, celery
 from app.core.enums.role_enums import Role
 from app.modules.staff.models.staff_model import Staff
@@ -822,35 +824,64 @@ def get_user_notifications(
         "Unread-only",
     )
 
-    query = Notification.query.filter(
+    filters = [
         Notification.clinic_id == clinic_id,
         Notification.user_id == user_id,
-    )
+    ]
 
     if unread_only:
-        query = query.filter(
+        filters.append(
             Notification.is_read.is_(False),
         )
 
-    query = query.order_by(
-        Notification.created_at.desc(),
-        Notification.id.desc(),
+    count_statement = (
+        select(
+            func.count(Notification.id)
+        )
+        .where(*filters)
     )
 
-    pagination = query.paginate(
-        page=page,
-        per_page=per_page,
-        error_out=False,
+    total = db.session.execute(
+        count_statement
+    ).scalar_one()
+
+    offset = (page - 1) * per_page
+
+    items_statement = (
+        select(Notification)
+        .where(*filters)
+        .order_by(
+            Notification.created_at.desc(),
+            Notification.id.desc(),
+        )
+        .offset(offset)
+        .limit(per_page)
+    )
+
+    items = list(
+        db.session.execute(
+            items_statement
+        ).scalars()
+    )
+
+    pages = (
+        (total + per_page - 1)
+        // per_page
+        if total
+        else 0
     )
 
     return {
-        "items": pagination.items,
-        "page": pagination.page,
-        "per_page": pagination.per_page,
-        "total": pagination.total,
-        "pages": pagination.pages,
-        "has_next": pagination.has_next,
-        "has_prev": pagination.has_prev,
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_next": (
+            offset + len(items)
+            < total
+        ),
+        "has_prev": page > 1,
     }
 
 
@@ -979,15 +1010,20 @@ def mark_all_notifications_read(
         clinic_id=clinic_id,
     )
 
-    notifications = (
-        Notification.query
-        .filter(
+    statement = (
+        select(Notification)
+        .where(
             Notification.clinic_id == clinic_id,
             Notification.user_id == user_id,
             Notification.is_read.is_(False),
         )
         .with_for_update()
-        .all()
+    )
+
+    notifications = list(
+        db.session.execute(
+            statement
+        ).scalars()
     )
 
     if not notifications:
