@@ -38,7 +38,25 @@ def _validate_positive_id(
         )
 
 
-def _get_user(user_id: int) -> User:
+def _normalize_reason(
+    reason: str | None,
+) -> str | None:
+    if reason is None:
+        return None
+
+    if not isinstance(reason, str):
+        raise ValidationError(
+            "Reason must be a string"
+        )
+
+    normalized = reason.strip()
+
+    return normalized or None
+
+
+def _get_user(
+    user_id: int,
+) -> User:
     _validate_positive_id(
         user_id,
         "User ID",
@@ -57,7 +75,9 @@ def _get_user(user_id: int) -> User:
     return user
 
 
-def _validate_actor(actor_id: int) -> User:
+def _validate_actor(
+    actor_id: int,
+) -> User:
     actor = _get_user(actor_id)
 
     if not actor.is_active:
@@ -65,12 +85,9 @@ def _validate_actor(actor_id: int) -> User:
             "Authenticated administrator is inactive"
         )
 
-    if actor.role not in {
-        Role.ADMIN,
-        Role.SUPER_ADMIN,
-    }:
+    if actor.role is not Role.SUPER_ADMIN:
         raise ValidationError(
-            "Authenticated user is not authorized"
+            "Only a super administrator can access access-control administration"
         )
 
     return actor
@@ -113,61 +130,42 @@ def _validate_role_change_permissions(
     target: User,
     new_role: Role,
 ) -> None:
-    if actor.id == target.id:
+    if actor.role is not Role.SUPER_ADMIN:
         raise ConflictError(
-            "Users cannot change their own role"
+            "Only a super administrator can change user roles"
         )
 
-    if actor.role is Role.ADMIN:
-        if target.role in {
-            Role.ADMIN,
-            Role.SUPER_ADMIN,
-        }:
-            raise ConflictError(
-                "Administrator cannot modify another administrator"
-            )
+    if actor.id == target.id:
+        raise ConflictError(
+            "Super administrators cannot change their own role"
+        )
 
-        if new_role in {
-            Role.ADMIN,
-            Role.SUPER_ADMIN,
-        }:
-            raise ConflictError(
-                "Administrator cannot assign administrator privileges"
-            )
+    if target.role is Role.SUPER_ADMIN:
+        raise ConflictError(
+            "A super administrator cannot modify another super administrator"
+        )
 
-    elif actor.role is Role.SUPER_ADMIN:
-        if target.role is Role.SUPER_ADMIN:
-            raise ConflictError(
-                "A super administrator cannot modify another super administrator"
-            )
-
-        if new_role is Role.SUPER_ADMIN:
-            raise ConflictError(
-                "A super administrator cannot assign super administrator privileges"
-            )
+    if new_role is Role.SUPER_ADMIN:
+        raise ConflictError(
+            "A super administrator cannot assign super administrator privileges"
+        )
 
 
 def _validate_status_change_permissions(
     actor: User,
     target: User,
 ) -> None:
+    if actor.role is not Role.SUPER_ADMIN:
+        raise ConflictError(
+            "Only a super administrator can change user status"
+        )
+
     if actor.id == target.id:
         raise ConflictError(
-            "Users cannot change their own account status"
+            "Super administrators cannot change their own account status"
         )
 
-    if actor.role is Role.ADMIN and target.role in {
-        Role.ADMIN,
-        Role.SUPER_ADMIN,
-    }:
-        raise ConflictError(
-            "Administrator cannot modify another administrator"
-        )
-
-    if (
-        actor.role is Role.SUPER_ADMIN
-        and target.role is Role.SUPER_ADMIN
-    ):
+    if target.role is Role.SUPER_ADMIN:
         raise ConflictError(
             "A super administrator cannot modify another super administrator"
         )
@@ -247,17 +245,12 @@ def list_access_control_users(
 ) -> tuple[list[AccessControlUserResponseSchema], int]:
     actor = _validate_actor(actor_id)
 
-    if actor.role is Role.SUPER_ADMIN:
-        base_query = User.query
-    else:
-        if actor.clinic_id is None:
-            raise ValidationError(
-                "Administrator must belong to a clinic"
-            )
-
-        base_query = User.query.filter(
-            User.clinic_id == actor.clinic_id
+    if actor.role is not Role.SUPER_ADMIN:
+        raise ValidationError(
+            "Only a super administrator can list access-control users"
         )
+
+    base_query = User.query
 
     if query.role is not None:
         base_query = base_query.filter(
@@ -321,10 +314,8 @@ def change_user_role(
             f"User already has role '{new_role.value}'"
         )
 
-    normalized_reason = (
-        reason.strip()
-        if reason is not None
-        else None
+    normalized_reason = _normalize_reason(
+        reason
     )
 
     previous_token_version = target.token_version
@@ -399,10 +390,8 @@ def change_user_status(
             "User already has the requested account status"
         )
 
-    normalized_reason = (
-        reason.strip()
-        if reason is not None
-        else None
+    normalized_reason = _normalize_reason(
+        reason
     )
 
     previous_token_version = target.token_version
@@ -471,10 +460,8 @@ def transfer_user_clinic(
             "User already belongs to the destination clinic"
         )
 
-    normalized_reason = (
-        reason.strip()
-        if reason is not None
-        else None
+    normalized_reason = _normalize_reason(
+        reason
     )
 
     previous_token_version = target.token_version

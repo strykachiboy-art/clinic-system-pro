@@ -5,6 +5,8 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    StrictBool,
+    StrictInt,
 )
 
 from app.core.enums.role_enums import Role
@@ -24,7 +26,7 @@ class AccessControlRoleUpdateSchema(BaseModel):
 
 
 class AccessControlStatusUpdateSchema(BaseModel):
-    is_active: bool
+    is_active: StrictBool
     reason: str | None = Field(
         default=None,
         min_length=1,
@@ -37,7 +39,7 @@ class AccessControlStatusUpdateSchema(BaseModel):
 
 
 class AccessControlClinicTransferSchema(BaseModel):
-    destination_clinic_id: int = Field(
+    destination_clinic_id: StrictInt = Field(
         ...,
         gt=0,
     )
@@ -53,14 +55,14 @@ class AccessControlClinicTransferSchema(BaseModel):
 
 
 class AccessControlUserResponseSchema(BaseModel):
-    id: int = Field(
+    id: StrictInt = Field(
         ...,
         gt=0,
     )
     email: EmailStr
     role: Role
-    is_active: bool
-    clinic_id: int | None = Field(
+    is_active: StrictBool
+    clinic_id: StrictInt | None = Field(
         default=None,
         gt=0,
     )
@@ -84,8 +86,8 @@ class AccessControlRoleChangeResponseSchema(BaseModel):
 
 class AccessControlStatusChangeResponseSchema(BaseModel):
     user: AccessControlUserResponseSchema
-    previous_status: bool
-    new_status: bool
+    previous_status: StrictBool
+    new_status: StrictBool
     reason: str | None = None
 
     model_config = ConfigDict(
@@ -95,11 +97,11 @@ class AccessControlStatusChangeResponseSchema(BaseModel):
 
 class AccessControlClinicTransferResponseSchema(BaseModel):
     user: AccessControlUserResponseSchema
-    previous_clinic_id: int | None = Field(
+    previous_clinic_id: StrictInt | None = Field(
         default=None,
         gt=0,
     )
-    new_clinic_id: int = Field(
+    new_clinic_id: StrictInt = Field(
         ...,
         gt=0,
     )
@@ -111,17 +113,17 @@ class AccessControlClinicTransferResponseSchema(BaseModel):
 
 
 class AccessControlUserListQuerySchema(BaseModel):
-    page: int = Field(
+    page: StrictInt = Field(
         default=1,
         ge=1,
     )
-    per_page: int = Field(
+    per_page: StrictInt = Field(
         default=50,
         ge=1,
         le=500,
     )
     role: Role | None = None
-    is_active: bool | None = None
+    is_active: StrictBool | None = None
 
     model_config = ConfigDict(
         extra="forbid",

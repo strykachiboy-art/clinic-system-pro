@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from math import ceil
-
 from unittest.mock import Mock
 
 import pytest
@@ -32,18 +31,26 @@ def route_path(
     app,
     endpoint_name: str,
 ) -> str:
-    """
-    Resolve the registered Flask route path by endpoint name.
-
-    This avoids hard-coding whether the Access Control blueprint is mounted
-    directly at /access-control or under an application prefix such as /api.
-    """
     for rule in app.url_map.iter_rules():
         if rule.endpoint == endpoint_name:
             return rule.rule
 
     raise AssertionError(
         f"Route endpoint '{endpoint_name}' is not registered"
+    )
+
+
+def concrete_path(
+    app,
+    endpoint_name: str,
+    user_id: int,
+) -> str:
+    return route_path(
+        app,
+        endpoint_name,
+    ).replace(
+        "<int:user_id>",
+        str(user_id),
     )
 
 
@@ -65,6 +72,18 @@ def valid_clinic_transfer_payload(
     return {
         "destination_clinic_id": clinic_id,
     }
+
+
+def assert_validation_error_response(
+    response,
+):
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Validation error"
+    assert "details" in body
 
 
 # ============================================================================
@@ -282,6 +301,148 @@ class TestCurrentUserResolution:
 
 
 # ============================================================================
+# JSON BODY
+# ============================================================================
+
+
+class TestJsonBody:
+    def test_returns_empty_dict_when_body_is_missing(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="json-body-missing@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="json-body-target@test.com",
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_role_route",
+            target.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+        )
+
+        assert response.status_code == 422
+
+    def test_rejects_non_object_json(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="json-body-list-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="json-body-list-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "change_user_role",
+            service,
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_role_route",
+            target.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json=[
+                Role.DOCTOR.value,
+            ],
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "JSON body must be an object"
+
+        service.assert_not_called()
+
+    def test_rejects_boolean_json(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="json-body-bool-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="json-body-bool-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "change_user_role",
+            service,
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_role_route",
+            target.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json=False,
+        )
+
+        assert response.status_code == 422
+
+        body = response.get_json()
+
+        assert body["success"] is False
+        assert body["error"] == "JSON body must be an object"
+
+        service.assert_not_called()
+
+
+# ============================================================================
 # SERIALIZATION
 # ============================================================================
 
@@ -306,7 +467,6 @@ class TestAccessControlSerialization:
     def test_serializes_role_change_response(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
@@ -339,7 +499,6 @@ class TestAccessControlSerialization:
     def test_serializes_status_change_response(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
@@ -372,7 +531,6 @@ class TestAccessControlSerialization:
     def test_serializes_clinic_transfer_response(
         self,
         app,
-        user,
         make_user,
         clinic,
         make_clinic,
@@ -426,6 +584,27 @@ class TestListAccessControlUsersRoute:
 
         assert response.status_code == 401
 
+    def test_rejects_non_super_admin_admin_user(
+        self,
+        app,
+        client,
+        user,
+        auth_headers_for,
+    ):
+        user.role = Role.ADMIN
+
+        path = route_path(
+            app,
+            "access_control.list_access_control_users_route",
+        )
+
+        response = client.get(
+            path,
+            headers=auth_headers_for(user),
+        )
+
+        assert response.status_code == 403
+
     def test_rejects_non_admin_user(
         self,
         app,
@@ -451,78 +630,6 @@ class TestListAccessControlUsersRoute:
         )
 
         assert response.status_code == 403
-
-    def test_admin_can_list_users(
-        self,
-        app,
-        client,
-        user,
-        clinic,
-        auth_headers_for,
-        monkeypatch,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        service_result = [
-            AccessControlUserResponseSchema.model_validate(
-                user,
-                from_attributes=True,
-            )
-        ]
-
-        service = Mock(
-            return_value=(
-                service_result,
-                1,
-            ),
-        )
-
-        monkeypatch.setattr(
-            access_control_routes,
-            "list_access_control_users",
-            service,
-        )
-
-        path = route_path(
-            app,
-            "access_control.list_access_control_users_route",
-        )
-
-        response = client.get(
-            path,
-            headers=auth_headers_for(user),
-        )
-
-        assert response.status_code == 200
-
-        body = response.get_json()
-
-        assert body["success"] is True
-        assert body["data"]["items"] == [
-            {
-                "id": user.id,
-                "email": user.email,
-                "role": user.role.value,
-                "is_active": user.is_active,
-                "clinic_id": user.clinic_id,
-            }
-        ]
-
-        assert body["data"]["pagination"] == {
-            "page": 1,
-            "per_page": 50,
-            "total": 1,
-            "pages": 1,
-        }
-
-        service.assert_called_once()
-
-        kwargs = service.call_args.kwargs
-
-        assert kwargs["actor_id"] == user.id
-        assert kwargs["query"].page == 1
-        assert kwargs["query"].per_page == 50
 
     def test_super_admin_can_list_users(
         self,
@@ -573,9 +680,22 @@ class TestListAccessControlUsersRoute:
         body = response.get_json()
 
         assert body["success"] is True
-        assert body["data"]["items"][0]["id"] == (
-            super_admin.id
-        )
+        assert body["data"]["items"] == [
+            {
+                "id": super_admin.id,
+                "email": super_admin.email,
+                "role": super_admin.role.value,
+                "is_active": super_admin.is_active,
+                "clinic_id": super_admin.clinic_id,
+            }
+        ]
+
+        assert body["data"]["pagination"] == {
+            "page": 1,
+            "per_page": 50,
+            "total": 1,
+            "pages": 1,
+        }
 
         service.assert_called_once()
 
@@ -589,12 +709,15 @@ class TestListAccessControlUsersRoute:
         self,
         app,
         client,
-        user,
+        make_user,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = 1
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="query-filter-super@test.com",
+        )
 
         service = Mock(
             return_value=(
@@ -616,7 +739,7 @@ class TestListAccessControlUsersRoute:
 
         response = client.get(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             query_string={
                 "page": "2",
                 "per_page": "25",
@@ -630,21 +753,25 @@ class TestListAccessControlUsersRoute:
         kwargs = service.call_args.kwargs
         query = kwargs["query"]
 
-        assert kwargs["actor_id"] == user.id
+        assert kwargs["actor_id"] == super_admin.id
         assert query.page == 2
         assert query.per_page == 25
         assert query.role is Role.DOCTOR
         assert query.is_active is True
 
-    def test_list_rejects_invalid_query(
+    def test_list_query_page_must_be_positive(
         self,
         app,
         client,
-        user,
+        make_user,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-page-super@test.com",
+        )
 
         service = Mock()
 
@@ -661,19 +788,52 @@ class TestListAccessControlUsersRoute:
 
         response = client.get(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             query_string={
                 "page": "0",
             },
         )
 
-        assert response.status_code == 422
+        assert_validation_error_response(response)
 
-        body = response.get_json()
+        service.assert_not_called()
 
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+    def test_list_query_per_page_has_maximum(
+        self,
+        app,
+        client,
+        make_user,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-per-page-super@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "list_access_control_users",
+            service,
+        )
+
+        path = route_path(
+            app,
+            "access_control.list_access_control_users_route",
+        )
+
+        response = client.get(
+            path,
+            headers=auth_headers_for(super_admin),
+            query_string={
+                "per_page": "501",
+            },
+        )
+
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -681,11 +841,15 @@ class TestListAccessControlUsersRoute:
         self,
         app,
         client,
-        user,
+        make_user,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="unknown-query-field-super@test.com",
+        )
 
         service = Mock()
 
@@ -702,19 +866,13 @@ class TestListAccessControlUsersRoute:
 
         response = client.get(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             query_string={
                 "unexpected": "value",
             },
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -722,11 +880,15 @@ class TestListAccessControlUsersRoute:
         self,
         app,
         client,
-        user,
+        make_user,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="empty-list-super@test.com",
+        )
 
         service = Mock(
             return_value=(
@@ -748,7 +910,7 @@ class TestListAccessControlUsersRoute:
 
         response = client.get(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
         )
 
         assert response.status_code == 200
@@ -777,17 +939,37 @@ class TestGetAccessControlUserRoute:
         app,
         client,
     ):
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.get_access_control_user_route",
-        ).replace(
-            "<int:user_id>",
-            "1",
+            1,
         )
 
         response = client.get(path)
 
         assert response.status_code == 401
+
+    def test_rejects_regular_admin(
+        self,
+        app,
+        client,
+        user,
+        auth_headers_for,
+    ):
+        user.role = Role.ADMIN
+
+        path = concrete_path(
+            app,
+            "access_control.get_access_control_user_route",
+            user.id,
+        )
+
+        response = client.get(
+            path,
+            headers=auth_headers_for(user),
+        )
+
+        assert response.status_code == 403
 
     def test_rejects_non_admin_user(
         self,
@@ -803,12 +985,10 @@ class TestGetAccessControlUserRoute:
             email="get-route-patient@test.com",
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.get_access_control_user_route",
-        ).replace(
-            "<int:user_id>",
-            str(patient.id),
+            patient.id,
         )
 
         response = client.get(
@@ -817,69 +997,6 @@ class TestGetAccessControlUserRoute:
         )
 
         assert response.status_code == 403
-
-    def test_admin_can_get_user(
-        self,
-        app,
-        client,
-        user,
-        make_user,
-        clinic,
-        auth_headers_for,
-        monkeypatch,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="get-target@test.com",
-        )
-
-        service = Mock(
-            return_value=AccessControlUserResponseSchema.model_validate(
-                target,
-                from_attributes=True,
-            ),
-        )
-
-        monkeypatch.setattr(
-            access_control_routes,
-            "get_access_control_user",
-            service,
-        )
-
-        path = route_path(
-            app,
-            "access_control.get_access_control_user_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
-        )
-
-        response = client.get(
-            path,
-            headers=auth_headers_for(user),
-        )
-
-        assert response.status_code == 200
-
-        body = response.get_json()
-
-        assert body["success"] is True
-        assert body["data"] == {
-            "id": target.id,
-            "email": target.email,
-            "role": target.role.value,
-            "is_active": target.is_active,
-            "clinic_id": target.clinic_id,
-        }
-
-        service.assert_called_once_with(
-            actor_id=user.id,
-            user_id=target.id,
-        )
 
     def test_super_admin_can_get_user(
         self,
@@ -915,12 +1032,10 @@ class TestGetAccessControlUserRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.get_access_control_user_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.get(
@@ -930,20 +1045,87 @@ class TestGetAccessControlUserRoute:
 
         assert response.status_code == 200
 
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"] == {
+            "id": target.id,
+            "email": target.email,
+            "role": target.role.value,
+            "is_active": target.is_active,
+            "clinic_id": target.clinic_id,
+        }
+
         service.assert_called_once_with(
             actor_id=super_admin.id,
             user_id=target.id,
         )
 
+    def test_get_uses_jwt_user_as_actor(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="jwt-actor-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="jwt-actor-target@test.com",
+        )
+
+        service = Mock(
+            return_value=AccessControlUserResponseSchema.model_validate(
+                target,
+                from_attributes=True,
+            ),
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "get_access_control_user",
+            service,
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.get_access_control_user_route",
+            target.id,
+        )
+
+        response = client.get(
+            path,
+            headers=auth_headers_for(super_admin),
+        )
+
+        assert response.status_code == 200
+
+        kwargs = service.call_args.kwargs
+
+        assert kwargs["actor_id"] == super_admin.id
+        assert kwargs["user_id"] == target.id
+
     def test_get_handles_service_not_found(
         self,
         app,
         client,
-        user,
+        make_user,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="get-domain-super@test.com",
+        )
 
         service = Mock(
             side_effect=NotFoundError(
@@ -957,17 +1139,15 @@ class TestGetAccessControlUserRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.get_access_control_user_route",
-        ).replace(
-            "<int:user_id>",
-            "999999",
+            999999,
         )
 
         response = client.get(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
         )
 
         assert response.status_code == 404
@@ -977,6 +1157,11 @@ class TestGetAccessControlUserRoute:
         assert body["success"] is False
         assert body["error"] == (
             "User 999999 not found"
+        )
+
+        service.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=999999,
         )
 
 
@@ -991,12 +1176,10 @@ class TestChangeUserRoleRoute:
         app,
         client,
     ):
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            "1",
+            1,
         )
 
         response = client.patch(
@@ -1015,17 +1198,43 @@ class TestChangeUserRoleRoute:
     ):
         user.role = Role.ADMIN
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(user.id),
+            user.id,
         )
 
         response = client.patch(
             path,
             headers=auth_headers_for(user),
+            json=valid_role_payload(),
+        )
+
+        assert response.status_code == 403
+
+    def test_patient_is_rejected_by_route_authorization(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+    ):
+        patient = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="role-route-patient@test.com",
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_role_route",
+            patient.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(patient),
             json=valid_role_payload(),
         )
 
@@ -1053,15 +1262,15 @@ class TestChangeUserRoleRoute:
         )
 
         result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
+            return_value=AccessControlRoleChangeResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
                     target,
                     from_attributes=True,
                 ),
-                "previous_role": Role.PATIENT,
-                "new_role": Role.DOCTOR,
-                "reason": "Clinical promotion",
-            },
+                previous_role=Role.PATIENT,
+                new_role=Role.DOCTOR,
+                reason="Clinical promotion",
+            ),
         )
 
         monkeypatch.setattr(
@@ -1070,12 +1279,10 @@ class TestChangeUserRoleRoute:
             result,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1131,15 +1338,15 @@ class TestChangeUserRoleRoute:
         )
 
         result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
+            return_value=AccessControlRoleChangeResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
                     target,
                     from_attributes=True,
                 ),
-                "previous_role": Role.PATIENT,
-                "new_role": Role.DOCTOR,
-                "reason": None,
-            },
+                previous_role=Role.PATIENT,
+                new_role=Role.DOCTOR,
+                reason=None,
+            ),
         )
 
         monkeypatch.setattr(
@@ -1148,12 +1355,10 @@ class TestChangeUserRoleRoute:
             result,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1202,12 +1407,10 @@ class TestChangeUserRoleRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1216,13 +1419,7 @@ class TestChangeUserRoleRoute:
             json={},
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -1255,12 +1452,10 @@ class TestChangeUserRoleRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1272,13 +1467,54 @@ class TestChangeUserRoleRoute:
             },
         )
 
-        assert response.status_code == 422
+        assert_validation_error_response(response)
 
-        body = response.get_json()
+        service.assert_not_called()
 
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+    def test_role_change_rejects_invalid_role(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-role-value@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="invalid-role-value-target@test.com",
+        )
+
+        service = Mock()
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "change_user_role",
+            service,
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_role_route",
+            target.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "role": "not-a-role",
+            },
+        )
+
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -1311,12 +1547,10 @@ class TestChangeUserRoleRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1334,7 +1568,7 @@ class TestChangeUserRoleRoute:
 
         service.assert_not_called()
 
-    def test_role_change_handles_domain_error(
+    def test_role_change_handles_conflict_error(
         self,
         app,
         client,
@@ -1357,7 +1591,7 @@ class TestChangeUserRoleRoute:
 
         service = Mock(
             side_effect=ConflictError(
-                "Users cannot change their own role",
+                "Super administrators cannot change their own role",
             ),
         )
 
@@ -1367,12 +1601,10 @@ class TestChangeUserRoleRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_role_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -1387,7 +1619,7 @@ class TestChangeUserRoleRoute:
 
         assert body["success"] is False
         assert body["error"] == (
-            "Users cannot change their own role"
+            "Super administrators cannot change their own role"
         )
 
 
@@ -1402,12 +1634,10 @@ class TestChangeUserStatusRoute:
         app,
         client,
     ):
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            "1",
+            1,
         )
 
         response = client.patch(
@@ -1417,75 +1647,56 @@ class TestChangeUserStatusRoute:
 
         assert response.status_code == 401
 
-    def test_admin_can_change_status(
+    def test_admin_is_rejected_by_route_authorization(
         self,
         app,
         client,
         user,
-        make_user,
-        clinic,
         auth_headers_for,
-        monkeypatch,
     ):
         user.role = Role.ADMIN
-        user.clinic_id = clinic.id
 
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="status-route-target@test.com",
-        )
-
-        result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
-                    target,
-                    from_attributes=True,
-                ),
-                "previous_status": True,
-                "new_status": False,
-                "reason": "Suspended",
-            },
-        )
-
-        monkeypatch.setattr(
-            access_control_routes,
-            "change_user_status",
-            result,
-        )
-
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            user.id,
         )
 
         response = client.patch(
             path,
             headers=auth_headers_for(user),
-            json={
-                "is_active": False,
-                "reason": "Suspended",
-            },
+            json=valid_status_payload(),
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 403
 
-        body = response.get_json()
-
-        assert body["success"] is True
-        assert body["data"]["previous_status"] is True
-        assert body["data"]["new_status"] is False
-        assert body["data"]["reason"] == "Suspended"
-
-        result.assert_called_once_with(
-            actor_id=user.id,
-            user_id=target.id,
-            is_active=False,
-            reason="Suspended",
+    def test_patient_is_rejected_by_route_authorization(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+    ):
+        patient = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="status-route-patient@test.com",
         )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_status_route",
+            patient.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(patient),
+            json=valid_status_payload(),
+        )
+
+        assert response.status_code == 403
 
     def test_super_admin_can_change_status(
         self,
@@ -1505,19 +1716,19 @@ class TestChangeUserStatusRoute:
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="status-route-super-target@test.com",
+            email="status-route-target@test.com",
         )
 
         result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
+            return_value=AccessControlStatusChangeResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
                     target,
                     from_attributes=True,
                 ),
-                "previous_status": True,
-                "new_status": False,
-                "reason": None,
-            },
+                previous_status=True,
+                new_status=False,
+                reason="Suspended",
+            ),
         )
 
         monkeypatch.setattr(
@@ -1526,12 +1737,80 @@ class TestChangeUserStatusRoute:
             result,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
+        )
+
+        response = client.patch(
+            path,
+            headers=auth_headers_for(super_admin),
+            json={
+                "is_active": False,
+                "reason": "Suspended",
+            },
+        )
+
+        assert response.status_code == 200
+
+        body = response.get_json()
+
+        assert body["success"] is True
+        assert body["data"]["previous_status"] is True
+        assert body["data"]["new_status"] is False
+        assert body["data"]["reason"] == "Suspended"
+
+        result.assert_called_once_with(
+            actor_id=super_admin.id,
+            user_id=target.id,
+            is_active=False,
+            reason="Suspended",
+        )
+
+    def test_status_change_allows_missing_reason(
+        self,
+        app,
+        client,
+        make_user,
+        clinic,
+        auth_headers_for,
+        monkeypatch,
+    ):
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-no-reason-super@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="status-no-reason-target@test.com",
+        )
+
+        result = Mock(
+            return_value=AccessControlStatusChangeResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
+                    target,
+                    from_attributes=True,
+                ),
+                previous_status=True,
+                new_status=False,
+                reason=None,
+            ),
+        )
+
+        monkeypatch.setattr(
+            access_control_routes,
+            "change_user_status",
+            result,
+        )
+
+        path = concrete_path(
+            app,
+            "access_control.change_user_status_route",
+            target.id,
         )
 
         response = client.patch(
@@ -1551,53 +1830,25 @@ class TestChangeUserStatusRoute:
             reason=None,
         )
 
-    def test_status_change_rejects_non_admin(
-        self,
-        app,
-        client,
-        make_user,
-        clinic,
-        auth_headers_for,
-    ):
-        patient = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="status-route-patient@test.com",
-        )
-
-        path = route_path(
-            app,
-            "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(patient.id),
-        )
-
-        response = client.patch(
-            path,
-            headers=auth_headers_for(patient),
-            json=valid_status_payload(),
-        )
-
-        assert response.status_code == 403
-
     def test_status_change_rejects_missing_body(
         self,
         app,
         client,
-        user,
         make_user,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="missing-status-body@test.com",
+        )
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="missing-status-body@test.com",
+            email="missing-status-body-target@test.com",
         )
 
         service = Mock()
@@ -1608,26 +1859,18 @@ class TestChangeUserStatusRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -1635,19 +1878,21 @@ class TestChangeUserStatusRoute:
         self,
         app,
         client,
-        user,
         make_user,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="unknown-status-field@test.com",
+        )
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="unknown-status-field@test.com",
+            email="unknown-status-field-target@test.com",
         )
 
         service = Mock()
@@ -1658,30 +1903,22 @@ class TestChangeUserStatusRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             json={
                 "is_active": False,
                 "unexpected": "value",
             },
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -1689,19 +1926,21 @@ class TestChangeUserStatusRoute:
         self,
         app,
         client,
-        user,
         make_user,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-status-value@test.com",
+        )
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="invalid-status-value@test.com",
+            email="invalid-status-value-target@test.com",
         )
 
         service = Mock()
@@ -1712,29 +1951,21 @@ class TestChangeUserStatusRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             json={
                 "is_active": "not-a-bool",
             },
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -1742,19 +1973,21 @@ class TestChangeUserStatusRoute:
         self,
         app,
         client,
-        user,
         make_user,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="non-object-status@test.com",
+        )
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="non-object-status@test.com",
+            email="non-object-status-target@test.com",
         )
 
         service = Mock()
@@ -1765,17 +1998,15 @@ class TestChangeUserStatusRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             json=False,
         )
 
@@ -1788,18 +2019,20 @@ class TestChangeUserStatusRoute:
 
         service.assert_not_called()
 
-    def test_status_change_handles_domain_error(
+    def test_status_change_handles_conflict_error(
         self,
         app,
         client,
-        user,
         make_user,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-domain-error@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1819,17 +2052,15 @@ class TestChangeUserStatusRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.change_user_status_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
-            headers=auth_headers_for(user),
+            headers=auth_headers_for(super_admin),
             json={
                 "is_active": True,
             },
@@ -1856,12 +2087,10 @@ class TestTransferUserClinicRoute:
         app,
         client,
     ):
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            "1",
+            1,
         )
 
         response = client.patch(
@@ -1880,12 +2109,10 @@ class TestTransferUserClinicRoute:
     ):
         user.role = Role.ADMIN
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(user.id),
+            user.id,
         )
 
         response = client.patch(
@@ -1910,12 +2137,10 @@ class TestTransferUserClinicRoute:
             email="transfer-route-patient@test.com",
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(patient.id),
+            patient.id,
         )
 
         response = client.patch(
@@ -1951,15 +2176,15 @@ class TestTransferUserClinicRoute:
         )
 
         result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
+            return_value=AccessControlClinicTransferResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
                     target,
                     from_attributes=True,
                 ),
-                "previous_clinic_id": clinic.id,
-                "new_clinic_id": destination.id,
-                "reason": "Clinic reassignment",
-            },
+                previous_clinic_id=clinic.id,
+                new_clinic_id=destination.id,
+                reason="Clinic reassignment",
+            ),
         )
 
         monkeypatch.setattr(
@@ -1968,12 +2193,10 @@ class TestTransferUserClinicRoute:
             result,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2029,15 +2252,15 @@ class TestTransferUserClinicRoute:
         )
 
         result = Mock(
-            return_value={
-                "user": AccessControlUserResponseSchema.model_validate(
+            return_value=AccessControlClinicTransferResponseSchema(
+                user=AccessControlUserResponseSchema.model_validate(
                     target,
                     from_attributes=True,
                 ),
-                "previous_clinic_id": clinic.id,
-                "new_clinic_id": destination.id,
-                "reason": None,
-            },
+                previous_clinic_id=clinic.id,
+                new_clinic_id=destination.id,
+                reason=None,
+            ),
         )
 
         monkeypatch.setattr(
@@ -2046,12 +2269,10 @@ class TestTransferUserClinicRoute:
             result,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2105,12 +2326,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2118,13 +2337,7 @@ class TestTransferUserClinicRoute:
             headers=auth_headers_for(super_admin),
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -2157,12 +2370,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2171,13 +2382,7 @@ class TestTransferUserClinicRoute:
             json={},
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -2210,12 +2415,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2226,13 +2429,7 @@ class TestTransferUserClinicRoute:
             },
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -2268,12 +2465,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2285,13 +2480,7 @@ class TestTransferUserClinicRoute:
             },
         )
 
-        assert response.status_code == 422
-
-        body = response.get_json()
-
-        assert body["success"] is False
-        assert body["error"] == "Validation error"
-        assert "details" in body
+        assert_validation_error_response(response)
 
         service.assert_not_called()
 
@@ -2300,13 +2489,10 @@ class TestTransferUserClinicRoute:
         app,
         client,
         make_user,
-        make_clinic,
         clinic,
         auth_headers_for,
         monkeypatch,
     ):
-        destination = make_clinic()
-
         super_admin = make_user(
             None,
             role=Role.SUPER_ADMIN,
@@ -2327,19 +2513,17 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
             path,
             headers=auth_headers_for(super_admin),
             json=[
-                destination.id,
+                2,
             ],
         )
 
@@ -2388,12 +2572,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(
@@ -2453,12 +2635,10 @@ class TestTransferUserClinicRoute:
             service,
         )
 
-        path = route_path(
+        path = concrete_path(
             app,
             "access_control.transfer_user_clinic_route",
-        ).replace(
-            "<int:user_id>",
-            str(target.id),
+            target.id,
         )
 
         response = client.patch(

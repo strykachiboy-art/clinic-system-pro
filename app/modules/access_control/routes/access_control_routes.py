@@ -115,13 +115,12 @@ def _serialize(
 
 @access_control_bp.get("/users")
 @role_required(
-    Role.ADMIN,
     Role.SUPER_ADMIN,
 )
 def list_access_control_users_route():
     current_user = _get_current_user()
 
-    query = AccessControlUserListQuerySchema.model_validate(
+    query = AccessControlUserListQuerySchema.model_validate_strings(
         request.args.to_dict()
     )
 
@@ -162,7 +161,6 @@ def list_access_control_users_route():
     "/users/<int:user_id>"
 )
 @role_required(
-    Role.ADMIN,
     Role.SUPER_ADMIN,
 )
 def get_access_control_user_route(
@@ -223,7 +221,6 @@ def change_user_role_route(
     "/users/<int:user_id>/status"
 )
 @role_required(
-    Role.ADMIN,
     Role.SUPER_ADMIN,
 )
 def change_user_status_route(

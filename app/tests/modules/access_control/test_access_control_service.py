@@ -101,6 +101,44 @@ class TestValidatePositiveId:
 
 
 # ============================================================================
+# REASON NORMALIZATION
+# ============================================================================
+
+
+class TestNormalizeReason:
+    def test_none_returns_none(self):
+        assert (
+            access_control_service._normalize_reason(
+                None
+            )
+            is None
+        )
+
+    def test_strips_surrounding_whitespace(self):
+        result = access_control_service._normalize_reason(
+            "  Administrative review  "
+        )
+
+        assert result == "Administrative review"
+
+    def test_blank_string_returns_none(self):
+        result = access_control_service._normalize_reason(
+            "    "
+        )
+
+        assert result is None
+
+    def test_rejects_non_string_reason(self):
+        with pytest.raises(
+            ValidationError,
+            match="Reason must be a string",
+        ):
+            access_control_service._normalize_reason(
+                123
+            )
+
+
+# ============================================================================
 # GET USER
 # ============================================================================
 
@@ -161,21 +199,6 @@ class TestGetUser:
 
 
 class TestValidateActor:
-    def test_accepts_active_admin(
-        self,
-        app,
-        user,
-    ):
-        user.role = Role.ADMIN
-        user.is_active = True
-
-        result = access_control_service._validate_actor(
-            user.id
-        )
-
-        assert result.id == user.id
-        assert result.role is Role.ADMIN
-
     def test_accepts_active_super_admin(
         self,
         app,
@@ -193,15 +216,21 @@ class TestValidateActor:
 
         assert result.id == super_admin.id
         assert result.role is Role.SUPER_ADMIN
+        assert result.is_active is True
 
-    def test_rejects_inactive_admin(
+    def test_rejects_inactive_super_admin(
         self,
         app,
-        user,
+        make_user,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.is_active = False
+        super_admin = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="inactive-super-admin@test.com",
+            is_active=False,
+        )
+
         db_session.commit()
 
         with pytest.raises(
@@ -209,19 +238,29 @@ class TestValidateActor:
             match="Authenticated administrator is inactive",
         ):
             access_control_service._validate_actor(
-                user.id
+                super_admin.id
             )
 
     @pytest.mark.parametrize(
         "role",
         [
+            Role.ADMIN,
             Role.PATIENT,
             Role.DOCTOR,
             Role.NURSE,
             Role.PHARMACIST,
+            Role.LAB_TECHNICIAN,
+            Role.RECEPTIONIST,
+            Role.ACCOUNTANT,
+            Role.PARAMEDIC,
+            Role.OTHER,
+            Role.DRIVER,
+            Role.EMT,
+            Role.AMBULANCE_DISPATCHER,
+            Role.AMBULANCE_COORDINATOR,
         ],
     )
-    def test_rejects_non_administrator_roles(
+    def test_rejects_non_super_admin_roles(
         self,
         app,
         user,
@@ -234,7 +273,10 @@ class TestValidateActor:
 
         with pytest.raises(
             ValidationError,
-            match="Authenticated user is not authorized",
+            match=(
+                "Only a super administrator can access "
+                "access-control administration"
+            ),
         ):
             access_control_service._validate_actor(
                 user.id
@@ -252,6 +294,30 @@ class TestValidateActor:
                 999999
             )
 
+    @pytest.mark.parametrize(
+        "actor_id",
+        [
+            0,
+            -1,
+            None,
+            True,
+            False,
+            "1",
+        ],
+    )
+    def test_rejects_invalid_actor_id(
+        self,
+        app,
+        actor_id,
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="User ID must be a positive integer",
+        ):
+            access_control_service._validate_actor(
+                actor_id
+            )
+
 
 # ============================================================================
 # CLINIC VALIDATION
@@ -259,34 +325,13 @@ class TestValidateActor:
 
 
 class TestValidateSameClinic:
-    def test_admin_and_target_in_same_clinic_are_allowed(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="same-clinic@test.com",
-        )
-
-        access_control_service._validate_same_clinic(
-            user,
-            target,
-        )
-
     def test_super_admin_bypasses_clinic_check(
         self,
         app,
         make_user,
         clinic,
     ):
-        super_admin = make_user(
+        actor = make_user(
             None,
             role=Role.SUPER_ADMIN,
             email="scope-super@test.com",
@@ -299,11 +344,33 @@ class TestValidateSameClinic:
         )
 
         access_control_service._validate_same_clinic(
-            super_admin,
+            actor,
             target,
         )
 
-    def test_admin_without_clinic_is_rejected(
+    def test_super_admin_can_access_target_without_clinic(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="scope-super-no-clinic@test.com",
+        )
+
+        target = make_user(
+            None,
+            role=Role.PATIENT,
+            email="scope-target-no-clinic@test.com",
+        )
+
+        access_control_service._validate_same_clinic(
+            actor,
+            target,
+        )
+
+    def test_admin_without_clinic_is_rejected_by_helper(
         self,
         app,
         user,
@@ -327,7 +394,7 @@ class TestValidateSameClinic:
                 target,
             )
 
-    def test_target_without_clinic_is_rejected_for_admin(
+    def test_target_without_clinic_is_rejected_for_admin_helper(
         self,
         app,
         user,
@@ -351,12 +418,12 @@ class TestValidateSameClinic:
                 target,
             )
 
-    def test_different_clinics_are_rejected(
+    def test_different_clinics_are_rejected_for_admin_helper(
         self,
         app,
         user,
-        make_clinic,
         make_user,
+        make_clinic,
         clinic,
     ):
         second_clinic = make_clinic()
@@ -429,91 +496,50 @@ class TestSerializeUser:
 
 
 class TestValidateRoleChangePermissions:
-    def test_rejects_self_role_change(
-        self,
-        app,
-        user,
-    ):
-        user.role = Role.ADMIN
-
-        with pytest.raises(
-            ConflictError,
-            match="Users cannot change their own role",
-        ):
-            access_control_service._validate_role_change_permissions(
-                user,
-                user,
-                Role.PATIENT,
-            )
-
-    @pytest.mark.parametrize(
-        "target_role",
-        [
-            Role.ADMIN,
-            Role.SUPER_ADMIN,
-        ],
-    )
-    def test_admin_cannot_modify_administrator_targets(
+    def test_rejects_non_super_admin_actor(
         self,
         app,
         user,
         make_user,
         clinic,
-        target_role,
-    ):
-        user.role = Role.ADMIN
-
-        target = make_user(
-            clinic,
-            role=target_role,
-            email=f"target-{target_role.value}@test.com",
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=(
-                "Administrator cannot modify another administrator"
-            ),
-        ):
-            access_control_service._validate_role_change_permissions(
-                user,
-                target,
-                Role.PATIENT,
-            )
-
-    @pytest.mark.parametrize(
-        "new_role",
-        [
-            Role.ADMIN,
-            Role.SUPER_ADMIN,
-        ],
-    )
-    def test_admin_cannot_assign_administrator_privileges(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-        new_role,
     ):
         user.role = Role.ADMIN
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email=f"assignment-{new_role.value}@test.com",
+            email="regular-target@test.com",
         )
 
         with pytest.raises(
             ConflictError,
-            match=(
-                "Administrator cannot assign administrator privileges"
-            ),
+            match="Only a super administrator can change user roles",
         ):
             access_control_service._validate_role_change_permissions(
                 user,
                 target,
-                new_role,
+                Role.DOCTOR,
+            )
+
+    def test_super_admin_cannot_modify_self(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="self-role@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match="Super administrators cannot change their own role",
+        ):
+            access_control_service._validate_role_change_permissions(
+                actor,
+                actor,
+                Role.ADMIN,
             )
 
     def test_super_admin_cannot_modify_another_super_admin(
@@ -601,7 +627,58 @@ class TestValidateRoleChangePermissions:
             Role.DOCTOR,
         )
 
-    def test_admin_can_change_regular_user_role(
+    @pytest.mark.parametrize(
+        "new_role",
+        [
+            Role.PATIENT,
+            Role.DOCTOR,
+            Role.NURSE,
+            Role.PHARMACIST,
+            Role.LAB_TECHNICIAN,
+            Role.RECEPTIONIST,
+            Role.ACCOUNTANT,
+            Role.PARAMEDIC,
+            Role.OTHER,
+            Role.DRIVER,
+            Role.EMT,
+            Role.AMBULANCE_DISPATCHER,
+            Role.AMBULANCE_COORDINATOR,
+            Role.ADMIN,
+        ],
+    )
+    def test_super_admin_can_assign_non_super_admin_roles(
+        self,
+        app,
+        make_user,
+        clinic,
+        new_role,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email=f"assign-actor-{new_role.value}@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email=f"assign-target-{new_role.value}@test.com",
+        )
+
+        access_control_service._validate_role_change_permissions(
+            actor,
+            target,
+            new_role,
+        )
+
+
+# ============================================================================
+# STATUS CHANGE PERMISSIONS
+# ============================================================================
+
+
+class TestValidateStatusChangePermissions:
+    def test_rejects_non_super_admin_actor(
         self,
         app,
         user,
@@ -613,73 +690,42 @@ class TestValidateRoleChangePermissions:
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="regular-target@test.com",
-        )
-
-        access_control_service._validate_role_change_permissions(
-            user,
-            target,
-            Role.DOCTOR,
-        )
-
-
-# ============================================================================
-# STATUS CHANGE PERMISSIONS
-# ============================================================================
-
-
-class TestValidateStatusChangePermissions:
-    def test_rejects_self_status_change(
-        self,
-        app,
-        user,
-    ):
-        user.role = Role.ADMIN
-
-        with pytest.raises(
-            ConflictError,
-            match="Users cannot change their own account status",
-        ):
-            access_control_service._validate_status_change_permissions(
-                user,
-                user,
-            )
-
-    @pytest.mark.parametrize(
-        "target_role",
-        [
-            Role.ADMIN,
-            Role.SUPER_ADMIN,
-        ],
-    )
-    def test_admin_cannot_modify_administrator_status(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-        target_role,
-    ):
-        user.role = Role.ADMIN
-
-        target = make_user(
-            clinic,
-            role=target_role,
-            email=f"status-target-{target_role.value}@test.com",
+            email="status-regular-target@test.com",
         )
 
         with pytest.raises(
             ConflictError,
-            match=(
-                "Administrator cannot modify another administrator"
-            ),
+            match="Only a super administrator can change user status",
         ):
             access_control_service._validate_status_change_permissions(
                 user,
                 target,
             )
 
-    def test_super_admin_cannot_modify_another_super_admin_status(
+    def test_super_admin_cannot_modify_self(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-self@test.com",
+        )
+
+        with pytest.raises(
+            ConflictError,
+            match=(
+                "Super administrators cannot change their own "
+                "account status"
+            ),
+        ):
+            access_control_service._validate_status_change_permissions(
+                actor,
+                actor,
+            )
+
+    def test_super_admin_cannot_modify_another_super_admin(
         self,
         app,
         make_user,
@@ -731,26 +777,6 @@ class TestValidateStatusChangePermissions:
             target,
         )
 
-    def test_admin_can_modify_regular_user_status(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
-
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="status-regular-user@test.com",
-        )
-
-        access_control_service._validate_status_change_permissions(
-            user,
-            target,
-        )
-
 
 # ============================================================================
 # GET ACCESS CONTROL USER
@@ -758,32 +784,6 @@ class TestValidateStatusChangePermissions:
 
 
 class TestGetAccessControlUser:
-    def test_admin_can_get_same_clinic_user(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="view-target@test.com",
-        )
-
-        result = access_control_service.get_access_control_user(
-            actor_id=user.id,
-            user_id=target.id,
-        )
-
-        assert_user_response(
-            result,
-            target,
-        )
-
     def test_super_admin_can_get_user_in_any_clinic(
         self,
         app,
@@ -812,30 +812,55 @@ class TestGetAccessControlUser:
             target,
         )
 
-    def test_admin_cannot_get_user_from_other_clinic(
+    def test_super_admin_can_get_user_without_clinic(
+        self,
+        app,
+        make_user,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="global-no-clinic-viewer@test.com",
+        )
+
+        target = make_user(
+            None,
+            role=Role.PATIENT,
+            email="global-no-clinic-target@test.com",
+        )
+
+        result = access_control_service.get_access_control_user(
+            actor_id=actor.id,
+            user_id=target.id,
+        )
+
+        assert_user_response(
+            result,
+            target,
+        )
+
+    def test_regular_admin_is_denied(
         self,
         app,
         user,
         make_user,
-        make_clinic,
         clinic,
     ):
-        second_clinic = make_clinic()
-
         user.role = Role.ADMIN
+        user.is_active = True
         user.clinic_id = clinic.id
 
         target = make_user(
-            second_clinic,
+            clinic,
             role=Role.PATIENT,
-            email="cross-clinic-target@test.com",
+            email="admin-denied-target@test.com",
         )
 
         with pytest.raises(
             ValidationError,
             match=(
-                "Administrator and target user must belong "
-                "to the same clinic"
+                "Only a super administrator can access "
+                "access-control administration"
             ),
         ):
             access_control_service.get_access_control_user(
@@ -860,16 +885,20 @@ class TestGetAccessControlUser:
     def test_get_rejects_missing_target(
         self,
         app,
-        user,
+        make_user,
     ):
-        user.role = Role.ADMIN
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="missing-target-actor@test.com",
+        )
 
         with pytest.raises(
             NotFoundError,
             match=r"User 999999 not found",
         ):
             access_control_service.get_access_control_user(
-                actor_id=user.id,
+                actor_id=actor.id,
                 user_id=999999,
             )
 
@@ -880,53 +909,6 @@ class TestGetAccessControlUser:
 
 
 class TestListAccessControlUsers:
-    def test_admin_lists_only_same_clinic_users(
-        self,
-        app,
-        user,
-        make_user,
-        make_clinic,
-        clinic,
-    ):
-        second_clinic = make_clinic()
-
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        same_one = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="list-same-one@test.com",
-        )
-
-        same_two = make_user(
-            clinic,
-            role=Role.DOCTOR,
-            email="list-same-two@test.com",
-        )
-
-        other_clinic_user = make_user(
-            second_clinic,
-            role=Role.PATIENT,
-            email="list-other-clinic@test.com",
-        )
-
-        result, total = (
-            access_control_service.list_access_control_users(
-                actor_id=user.id,
-                query=make_query(),
-            )
-        )
-
-        ids = [item.id for item in result]
-
-        assert user.id in ids
-        assert same_one.id in ids
-        assert same_two.id in ids
-        assert other_clinic_user.id not in ids
-
-        assert total == 3
-
     def test_super_admin_lists_users_across_clinics(
         self,
         app,
@@ -976,32 +958,63 @@ class TestListAccessControlUsers:
 
         assert total == 4
 
-    def test_admin_without_clinic_cannot_list(
+    def test_regular_admin_is_denied(
         self,
         app,
         user,
+        clinic,
     ):
         user.role = Role.ADMIN
-        user.clinic_id = None
+        user.is_active = True
+        user.clinic_id = clinic.id
 
         with pytest.raises(
             ValidationError,
-            match="Administrator must belong to a clinic",
+            match=(
+                "Only a super administrator can access "
+                "access-control administration"
+            ),
         ):
             access_control_service.list_access_control_users(
                 actor_id=user.id,
                 query=make_query(),
             )
 
+    def test_inactive_super_admin_is_denied(
+        self,
+        app,
+        make_user,
+        db_session,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="inactive-list-admin@test.com",
+            is_active=False,
+        )
+
+        db_session.commit()
+
+        with pytest.raises(
+            ValidationError,
+            match="Authenticated administrator is inactive",
+        ):
+            access_control_service.list_access_control_users(
+                actor_id=actor.id,
+                query=make_query(),
+            )
+
     def test_filters_by_role(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="role-filter-actor@test.com",
+        )
 
         patient = make_user(
             clinic,
@@ -1017,7 +1030,7 @@ class TestListAccessControlUsers:
 
         result, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     role=Role.DOCTOR,
                 ),
@@ -1028,19 +1041,21 @@ class TestListAccessControlUsers:
 
         assert doctor.id in ids
         assert patient.id not in ids
-        assert user.id not in ids
+        assert actor.id not in ids
         assert total == 1
 
     def test_filters_by_active_status(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="active-filter-actor@test.com",
+        )
 
         active_user = make_user(
             clinic,
@@ -1059,7 +1074,7 @@ class TestListAccessControlUsers:
 
         result, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     is_active=True,
                 ),
@@ -1070,19 +1085,21 @@ class TestListAccessControlUsers:
 
         assert active_user.id in ids
         assert inactive_user.id not in ids
-        assert user.id in ids
+        assert actor.id in ids
         assert total == 2
 
     def test_filters_by_role_and_status_together(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="combined-filter-actor@test.com",
+        )
 
         active_doctor = make_user(
             clinic,
@@ -1107,7 +1124,7 @@ class TestListAccessControlUsers:
 
         result, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     role=Role.DOCTOR,
                     is_active=True,
@@ -1120,39 +1137,41 @@ class TestListAccessControlUsers:
         assert active_doctor.id in ids
         assert inactive_doctor.id not in ids
         assert active_patient.id not in ids
+        assert actor.id not in ids
         assert total == 1
 
     def test_list_is_deterministically_ordered_by_id(
         self,
         app,
-        user,
         make_user,
-        clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="order-actor@test.com",
+        )
 
         first = make_user(
-            clinic,
+            None,
             role=Role.PATIENT,
             email="order-first@test.com",
         )
 
         second = make_user(
-            clinic,
+            None,
             role=Role.PATIENT,
             email="order-second@test.com",
         )
 
         third = make_user(
-            clinic,
+            None,
             role=Role.PATIENT,
             email="order-third@test.com",
         )
 
         result, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(),
             )
         )
@@ -1161,6 +1180,7 @@ class TestListAccessControlUsers:
 
         assert ids == sorted(ids)
         assert total == 4
+        assert actor.id in ids
         assert first.id in ids
         assert second.id in ids
         assert third.id in ids
@@ -1168,16 +1188,17 @@ class TestListAccessControlUsers:
     def test_paginates_results(
         self,
         app,
-        user,
         make_user,
-        clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="pagination-actor@test.com",
+        )
 
         created_users = [
             make_user(
-                clinic,
+                None,
                 role=Role.PATIENT,
                 email=f"pagination-{index}@test.com",
             )
@@ -1186,7 +1207,7 @@ class TestListAccessControlUsers:
 
         result_page_one, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     page=1,
                     per_page=3,
@@ -1196,7 +1217,7 @@ class TestListAccessControlUsers:
 
         result_page_two, total_again = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     page=2,
                     per_page=3,
@@ -1215,7 +1236,7 @@ class TestListAccessControlUsers:
         ]
 
         expected_ids = {
-            user.id,
+            actor.id,
             *[
                 created.id
                 for created in created_users
@@ -1248,15 +1269,17 @@ class TestListAccessControlUsers:
     def test_empty_page_returns_empty_list_and_total(
         self,
         app,
-        user,
-        clinic,
+        make_user,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="empty-page-actor@test.com",
+        )
 
         result, total = (
             access_control_service.list_access_control_users(
-                actor_id=user.id,
+                actor_id=actor.id,
                 query=make_query(
                     page=999,
                     per_page=50,
@@ -1274,17 +1297,19 @@ class TestListAccessControlUsers:
 
 
 class TestChangeUserRole:
-    def test_admin_changes_regular_user_role(
+    def test_super_admin_changes_regular_user_role(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="role-change-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1305,7 +1330,7 @@ class TestChangeUserRole:
         )
 
         result = access_control_service.change_user_role(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             new_role=Role.DOCTOR,
             reason="  Clinical promotion  ",
@@ -1332,7 +1357,7 @@ class TestChangeUserRole:
         assert call["action"] is AuditAction.UPDATE
         assert call["entity_type"] == "User"
         assert call["entity_id"] == target.id
-        assert call["user_id"] == user.id
+        assert call["user_id"] == actor.id
 
         assert call["old_value"] == {
             "role": Role.PATIENT.value,
@@ -1348,12 +1373,14 @@ class TestChangeUserRole:
     def test_role_change_without_reason(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="role-no-reason-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1362,7 +1389,7 @@ class TestChangeUserRole:
         )
 
         result = access_control_service.change_user_role(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             new_role=Role.DOCTOR,
         )
@@ -1374,12 +1401,14 @@ class TestChangeUserRole:
     def test_rejects_invalid_new_role(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-role-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1392,7 +1421,7 @@ class TestChangeUserRole:
             match="Invalid user role",
         ):
             access_control_service.change_user_role(
-                actor_id=user.id,
+                actor_id=actor.id,
                 user_id=target.id,
                 new_role="doctor",
             )
@@ -1400,31 +1429,35 @@ class TestChangeUserRole:
     def test_rejects_self_role_change(
         self,
         app,
-        user,
-        clinic,
+        make_user,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="self-role-change@test.com",
+        )
 
         with pytest.raises(
             ConflictError,
-            match="Users cannot change their own role",
+            match="Super administrators cannot change their own role",
         ):
             access_control_service.change_user_role(
-                actor_id=user.id,
-                user_id=user.id,
-                new_role=Role.DOCTOR,
+                actor_id=actor.id,
+                user_id=actor.id,
+                new_role=Role.ADMIN,
             )
 
     def test_rejects_same_existing_role(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="same-role-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1437,12 +1470,12 @@ class TestChangeUserRole:
             match=r"User already has role 'doctor'",
         ):
             access_control_service.change_user_role(
-                actor_id=user.id,
+                actor_id=actor.id,
                 user_id=target.id,
                 new_role=Role.DOCTOR,
             )
 
-    def test_admin_cannot_change_admin_role(
+    def test_regular_admin_is_denied(
         self,
         app,
         user,
@@ -1450,80 +1483,26 @@ class TestChangeUserRole:
         clinic,
     ):
         user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.ADMIN,
-            email="admin-target@test.com",
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=(
-                "Administrator cannot modify another administrator"
-            ),
-        ):
-            access_control_service.change_user_role(
-                actor_id=user.id,
-                user_id=target.id,
-                new_role=Role.DOCTOR,
-            )
-
-    def test_admin_cannot_grant_admin_role(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
+        user.is_active = True
         user.clinic_id = clinic.id
 
         target = make_user(
             clinic,
             role=Role.PATIENT,
-            email="grant-admin@test.com",
+            email="admin-denied-role@test.com",
         )
 
         with pytest.raises(
-            ConflictError,
+            ValidationError,
             match=(
-                "Administrator cannot assign administrator privileges"
+                "Only a super administrator can access "
+                "access-control administration"
             ),
         ):
             access_control_service.change_user_role(
                 actor_id=user.id,
                 user_id=target.id,
-                new_role=Role.ADMIN,
-            )
-
-    def test_admin_cannot_grant_super_admin_role(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.PATIENT,
-            email="grant-super-admin@test.com",
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=(
-                "Administrator cannot assign administrator privileges"
-            ),
-        ):
-            access_control_service.change_user_role(
-                actor_id=user.id,
-                user_id=target.id,
-                new_role=Role.SUPER_ADMIN,
+                new_role=Role.DOCTOR,
             )
 
     def test_super_admin_can_demote_admin(
@@ -1628,48 +1607,18 @@ class TestChangeUserRole:
                 new_role=Role.SUPER_ADMIN,
             )
 
-    def test_admin_cannot_change_user_in_other_clinic(
-        self,
-        app,
-        user,
-        make_user,
-        make_clinic,
-        clinic,
-    ):
-        second_clinic = make_clinic()
-
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            second_clinic,
-            role=Role.PATIENT,
-            email="role-other-clinic@test.com",
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match=(
-                "Administrator and target user must belong "
-                "to the same clinic"
-            ),
-        ):
-            access_control_service.change_user_role(
-                actor_id=user.id,
-                user_id=target.id,
-                new_role=Role.DOCTOR,
-            )
-
     def test_role_change_increments_token_version(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="role-token-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1682,7 +1631,7 @@ class TestChangeUserRole:
         )
 
         access_control_service.change_user_role(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             new_role=Role.DOCTOR,
         )
@@ -1693,6 +1642,58 @@ class TestChangeUserRole:
             original_version + 1
         )
 
+    def test_role_change_is_atomic_when_audit_log_fails(
+        self,
+        app,
+        make_user,
+        clinic,
+        db_session,
+        monkeypatch,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="role-rollback-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            email="role-rollback-target@test.com",
+        )
+
+        original_role = target.role
+        original_version = target.token_version
+
+        db_session.commit()
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError(
+                "audit failure"
+            )
+
+        monkeypatch.setattr(
+            access_control_service,
+            "create_audit_log",
+            fail_audit,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="audit failure",
+        ):
+            access_control_service.change_user_role(
+                actor_id=actor.id,
+                user_id=target.id,
+                new_role=Role.DOCTOR,
+                reason="Rollback test",
+            )
+
+        db_session.refresh(target)
+
+        assert target.role is original_role
+        assert target.token_version == original_version
+
 
 # ============================================================================
 # CHANGE USER STATUS
@@ -1700,17 +1701,19 @@ class TestChangeUserRole:
 
 
 class TestChangeUserStatus:
-    def test_admin_deactivates_regular_user(
+    def test_super_admin_deactivates_regular_user(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
         monkeypatch,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-change-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1731,7 +1734,7 @@ class TestChangeUserStatus:
         )
 
         result = access_control_service.change_user_status(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             is_active=False,
             reason="  Access suspended  ",
@@ -1758,7 +1761,7 @@ class TestChangeUserStatus:
         assert call["action"] is AuditAction.UPDATE
         assert call["entity_type"] == "User"
         assert call["entity_id"] == target.id
-        assert call["user_id"] == user.id
+        assert call["user_id"] == actor.id
 
         assert call["old_value"] == {
             "is_active": True,
@@ -1771,16 +1774,18 @@ class TestChangeUserStatus:
             "reason": "Access suspended",
         }
 
-    def test_admin_reactivates_regular_user(
+    def test_super_admin_reactivates_regular_user(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-reactivate-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1794,7 +1799,7 @@ class TestChangeUserStatus:
         )
 
         result = access_control_service.change_user_status(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             is_active=True,
         )
@@ -1813,12 +1818,14 @@ class TestChangeUserStatus:
     def test_rejects_non_boolean_status(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="invalid-status-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1831,7 +1838,7 @@ class TestChangeUserStatus:
             match="is_active must be a boolean",
         ):
             access_control_service.change_user_status(
-                actor_id=user.id,
+                actor_id=actor.id,
                 user_id=target.id,
                 is_active=1,
             )
@@ -1839,31 +1846,38 @@ class TestChangeUserStatus:
     def test_rejects_self_status_change(
         self,
         app,
-        user,
-        clinic,
+        make_user,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-self-change@test.com",
+        )
 
         with pytest.raises(
             ConflictError,
-            match="Users cannot change their own account status",
+            match=(
+                "Super administrators cannot change their own "
+                "account status"
+            ),
         ):
             access_control_service.change_user_status(
-                actor_id=user.id,
-                user_id=user.id,
+                actor_id=actor.id,
+                user_id=actor.id,
                 is_active=False,
             )
 
     def test_rejects_same_existing_status(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="same-status-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -1879,12 +1893,12 @@ class TestChangeUserStatus:
             ),
         ):
             access_control_service.change_user_status(
-                actor_id=user.id,
+                actor_id=actor.id,
                 user_id=target.id,
                 is_active=True,
             )
 
-    def test_admin_cannot_change_admin_status(
+    def test_regular_admin_is_denied(
         self,
         app,
         user,
@@ -1892,46 +1906,20 @@ class TestChangeUserStatus:
         clinic,
     ):
         user.role = Role.ADMIN
+        user.is_active = True
         user.clinic_id = clinic.id
 
         target = make_user(
             clinic,
-            role=Role.ADMIN,
-            email="status-admin-target@test.com",
+            role=Role.PATIENT,
+            email="admin-denied-status@test.com",
         )
 
         with pytest.raises(
-            ConflictError,
+            ValidationError,
             match=(
-                "Administrator cannot modify another administrator"
-            ),
-        ):
-            access_control_service.change_user_status(
-                actor_id=user.id,
-                user_id=target.id,
-                is_active=False,
-            )
-
-    def test_admin_cannot_change_super_admin_status(
-        self,
-        app,
-        user,
-        make_user,
-        clinic,
-    ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            clinic,
-            role=Role.SUPER_ADMIN,
-            email="status-super-target@test.com",
-        )
-
-        with pytest.raises(
-            ConflictError,
-            match=(
-                "Administrator cannot modify another administrator"
+                "Only a super administrator can access "
+                "access-control administration"
             ),
         ):
             access_control_service.change_user_status(
@@ -1999,7 +1987,7 @@ class TestChangeUserStatus:
             None,
             role=Role.SUPER_ADMIN,
             is_active=True,
-            email="status-super-target2@test.com",
+            email="status-super-target@test.com",
         )
 
         with pytest.raises(
@@ -2015,48 +2003,18 @@ class TestChangeUserStatus:
                 is_active=False,
             )
 
-    def test_admin_cannot_change_user_in_other_clinic_status(
-        self,
-        app,
-        user,
-        make_user,
-        make_clinic,
-        clinic,
-    ):
-        second_clinic = make_clinic()
-
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
-
-        target = make_user(
-            second_clinic,
-            role=Role.PATIENT,
-            email="status-other-clinic@test.com",
-        )
-
-        with pytest.raises(
-            ValidationError,
-            match=(
-                "Administrator and target user must belong "
-                "to the same clinic"
-            ),
-        ):
-            access_control_service.change_user_status(
-                actor_id=user.id,
-                user_id=target.id,
-                is_active=False,
-            )
-
     def test_status_change_increments_token_version(
         self,
         app,
-        user,
         make_user,
         clinic,
         db_session,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-token-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -2070,7 +2028,7 @@ class TestChangeUserStatus:
         )
 
         access_control_service.change_user_status(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             is_active=False,
         )
@@ -2084,12 +2042,14 @@ class TestChangeUserStatus:
     def test_status_change_without_reason(
         self,
         app,
-        user,
         make_user,
         clinic,
     ):
-        user.role = Role.ADMIN
-        user.clinic_id = clinic.id
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-no-reason-actor@test.com",
+        )
 
         target = make_user(
             clinic,
@@ -2098,12 +2058,65 @@ class TestChangeUserStatus:
         )
 
         result = access_control_service.change_user_status(
-            actor_id=user.id,
+            actor_id=actor.id,
             user_id=target.id,
             is_active=False,
         )
 
         assert result.reason is None
+
+    def test_status_change_is_atomic_when_audit_log_fails(
+        self,
+        app,
+        make_user,
+        clinic,
+        db_session,
+        monkeypatch,
+    ):
+        actor = make_user(
+            None,
+            role=Role.SUPER_ADMIN,
+            email="status-rollback-actor@test.com",
+        )
+
+        target = make_user(
+            clinic,
+            role=Role.PATIENT,
+            is_active=True,
+            email="status-rollback-target@test.com",
+        )
+
+        original_status = target.is_active
+        original_version = target.token_version
+
+        db_session.commit()
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError(
+                "audit failure"
+            )
+
+        monkeypatch.setattr(
+            access_control_service,
+            "create_audit_log",
+            fail_audit,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="audit failure",
+        ):
+            access_control_service.change_user_status(
+                actor_id=actor.id,
+                user_id=target.id,
+                is_active=False,
+                reason="Rollback test",
+            )
+
+        db_session.refresh(target)
+
+        assert target.is_active is original_status
+        assert target.token_version == original_version
 
 
 # ============================================================================
@@ -2112,7 +2125,7 @@ class TestChangeUserStatus:
 
 
 class TestValidateClinicTransferPermissions:
-    def test_admin_cannot_transfer_user_between_clinics(
+    def test_non_super_admin_is_rejected(
         self,
         app,
         user,
@@ -2120,7 +2133,6 @@ class TestValidateClinicTransferPermissions:
         clinic,
     ):
         user.role = Role.ADMIN
-        user.clinic_id = clinic.id
 
         target = make_user(
             clinic,
@@ -2516,10 +2528,10 @@ class TestTransferUserClinic:
         )
 
         with pytest.raises(
-            ConflictError,
+            ValidationError,
             match=(
-                "Only a super administrator can transfer users "
-                "between clinics"
+                "Only a super administrator can access "
+                "access-control administration"
             ),
         ):
             access_control_service.transfer_user_clinic(
@@ -2772,8 +2784,6 @@ class TestTransferUserClinic:
         make_user,
         clinic,
     ):
-        destination = clinic
-
         actor = make_user(
             None,
             role=Role.SUPER_ADMIN,
@@ -2787,7 +2797,7 @@ class TestTransferUserClinic:
             access_control_service.transfer_user_clinic(
                 actor_id=actor.id,
                 user_id=999999,
-                destination_clinic_id=destination.id,
+                destination_clinic_id=clinic.id,
             )
 
     def test_rejects_invalid_actor_id(
