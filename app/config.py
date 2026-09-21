@@ -97,7 +97,7 @@ class Config:
     # Flask-Limiter
     RATELIMIT_STORAGE_URI = REDIS_URL
 
-    # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
     # AI
     # ------------------------------------------------------------------
 
@@ -108,6 +108,21 @@ class Config:
     OPENAI_MODEL = os.environ.get(
         "OPENAI_MODEL",
         "gpt-4o-mini",
+    )
+
+    AI_LOAD_TEST_MODE = os.environ.get(
+        "AI_LOAD_TEST_MODE",
+        "false",
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    AI_LOAD_TEST_RATE_LIMIT = os.environ.get(
+        "AI_LOAD_TEST_RATE_LIMIT",
+        "1000 per second",
     )
 
     # ------------------------------------------------------------------
