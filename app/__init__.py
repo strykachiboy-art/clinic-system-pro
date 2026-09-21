@@ -10,6 +10,10 @@ from app.extensions import db, init_extensions
 from app.core.api import register_api_blueprint
 from app.core.api.versioning import validate_api_version
 from app.core.error_handlers import register_error_handlers
+from app.core.observability import (
+    init_db_metrics,
+    init_request_metrics,
+)
 
 
 _API_VERSION_PATH_PATTERN = re.compile(
@@ -35,6 +39,9 @@ def create_app(config_name=None):
     )
 
     init_extensions(app)
+
+    init_db_metrics(app)
+    init_request_metrics(app)
 
     with app.app_context():
         from app import models_registry  # noqa: F401

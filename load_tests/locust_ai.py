@@ -8,14 +8,31 @@ from gevent.lock import Semaphore
 from locust import HttpUser, between, task
 
 
+def _create_load_test_id() -> str:
+    timestamp = datetime.now(
+        timezone.utc
+    ).strftime("%Y%m%dT%H%M%SZ")
+
+    return (
+        f"locust-{timestamp}-{uuid4().hex[:8]}"
+    )
+
+
 class AIUser(HttpUser):
     wait_time = between(6.0, 7.0)
 
     access_token = None
     token_lock = Semaphore()
 
+    load_test_id = os.getenv(
+        "LOCUST_RUN_ID"
+    ) or _create_load_test_id()
+
     def on_start(self):
-        patient_id = os.getenv("LOCUST_PATIENT_ID")
+        patient_id = os.getenv(
+            "LOCUST_PATIENT_ID"
+        )
+
         raw_drugs = os.getenv(
             "LOCUST_DRUGS",
             "aspirin,ibuprofen",
@@ -44,32 +61,30 @@ class AIUser(HttpUser):
                 "LOCUST_DRUGS must contain at least one drug name"
             )
 
-        self.load_test_id = os.getenv("LOCUST_RUN_ID")
-
-        if not self.load_test_id:
-            timestamp = datetime.now(
-                timezone.utc
-            ).strftime("%Y%m%dT%H%M%SZ")
-
-            self.load_test_id = (
-                f"locust-{timestamp}-{uuid4().hex[:8]}"
-            )
+        self.headers = {
+            "Authorization": "",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Load-Test-ID": AIUser.load_test_id,
+        }
 
         if AIUser.access_token is None:
             with AIUser.token_lock:
                 if AIUser.access_token is None:
                     self._login_once()
 
-        self.headers = {
-            "Authorization": f"Bearer {AIUser.access_token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-Load-Test-ID": self.load_test_id,
-        }
+        self.headers["Authorization"] = (
+            f"Bearer {AIUser.access_token}"
+        )
 
     def _login_once(self):
-        email = os.getenv("LOCUST_EMAIL")
-        password = os.getenv("LOCUST_PASSWORD")
+        email = os.getenv(
+            "LOCUST_EMAIL"
+        )
+
+        password = os.getenv(
+            "LOCUST_PASSWORD"
+        )
 
         if not email:
             raise RuntimeError(
@@ -89,7 +104,7 @@ class AIUser(HttpUser):
         login_headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-Load-Test-ID": self.load_test_id,
+            "X-Load-Test-ID": AIUser.load_test_id,
         }
 
         with self.client.post(
@@ -101,7 +116,8 @@ class AIUser(HttpUser):
         ) as response:
             if response.status_code != 200:
                 response.failure(
-                    f"Login failed: HTTP {response.status_code}: "
+                    f"Login failed: HTTP "
+                    f"{response.status_code}: "
                     f"{response.text[:200]}"
                 )
                 raise RuntimeError(
@@ -119,7 +135,10 @@ class AIUser(HttpUser):
                 ) from exc
 
             data = body.get("data") or {}
-            access_token = data.get("access_token")
+
+            access_token = data.get(
+                "access_token"
+            )
 
             if not access_token:
                 response.failure(
@@ -176,6 +195,7 @@ class AIUser(HttpUser):
                 return
 
             response.failure(
-                f"Unexpected HTTP {response.status_code}: "
+                f"Unexpected HTTP "
+                f"{response.status_code}: "
                 f"{response.text[:200]}"
             )
