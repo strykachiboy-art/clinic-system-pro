@@ -17,3 +17,4 @@ openai>=1.0,<4
 stripe>=11.0,<13
 requests>=2.31,<3
 pytest>=7.4,<9
+psutil>=5.9,<8
