@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -190,7 +190,7 @@ def test_create_prescription_success(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "consultation_id": 3,
@@ -287,7 +287,7 @@ def test_create_prescription_returns_interaction_warnings(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "items": [
@@ -337,7 +337,7 @@ def test_create_prescription_does_not_require_client_prescriber_id(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "items": [
@@ -390,7 +390,7 @@ def test_create_prescription_does_not_trust_client_clinic_id(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "clinic_id": clinic.id + 999,
             "patient_id": 2,
@@ -422,7 +422,7 @@ def test_create_prescription_rejects_client_prescribed_by_id(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "prescribed_by_id": staff.id,
@@ -452,7 +452,7 @@ def test_create_prescription_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "clinic_id": clinic.id,
             "patient_id": 2,
@@ -482,7 +482,7 @@ def test_create_prescription_requires_object_json(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json=[
             {
                 "patient_id": 2,
@@ -510,7 +510,7 @@ def test_create_prescription_rejects_extra_item_fields(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "items": [
@@ -542,7 +542,7 @@ def test_create_prescription_rejects_top_level_extra_fields(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "items": [
@@ -592,7 +592,7 @@ def test_get_prescription_success(
     )
 
     response = client.get(
-        f"/prescriptions/{prescription.id}",
+        f"/api/v1/prescriptions/{prescription.id}",
         headers=headers,
     )
 
@@ -635,7 +635,7 @@ def test_get_prescription_rejects_cross_clinic_access(
     )
 
     response = client.get(
-        f"/prescriptions/{prescription.id}",
+        f"/api/v1/prescriptions/{prescription.id}",
         headers=headers,
     )
 
@@ -676,7 +676,7 @@ def test_get_prescription_allows_historical_read_for_inactive_clinic(
     )
 
     response = client.get(
-        f"/prescriptions/{prescription.id}",
+        f"/api/v1/prescriptions/{prescription.id}",
         headers=headers,
     )
 
@@ -706,7 +706,7 @@ def test_get_prescription_not_found(
     )
 
     response = client.get(
-        "/prescriptions/999",
+        "/api/v1/prescriptions/999",
         headers=headers,
     )
 
@@ -760,7 +760,7 @@ def test_list_patient_prescriptions_success(
     )
 
     response = client.get(
-        "/prescriptions/patients/2",
+        "/api/v1/prescriptions/patients/2",
         headers=headers,
     )
 
@@ -811,7 +811,7 @@ def test_list_patient_prescriptions_active_only(
     )
 
     response = client.get(
-        "/prescriptions/patients/2?active_only=true",
+        "/api/v1/prescriptions/patients/2?active_only=true",
         headers=headers,
     )
 
@@ -858,7 +858,7 @@ def test_list_patient_prescriptions_active_only_false(
     )
 
     response = client.get(
-        "/prescriptions/patients/2?active_only=false",
+        "/api/v1/prescriptions/patients/2?active_only=false",
         headers=headers,
     )
 
@@ -912,7 +912,7 @@ def test_list_patient_prescriptions_supports_pagination(
     )
 
     response = client.get(
-        "/prescriptions/patients/2?page=3&per_page=2",
+        "/api/v1/prescriptions/patients/2?page=3&per_page=2",
         headers=headers,
     )
 
@@ -963,7 +963,7 @@ def test_list_patient_prescriptions_supports_combined_filters_and_pagination(
     )
 
     response = client.get(
-        "/prescriptions/patients/2"
+        "/api/v1/prescriptions/patients/2"
         "?active_only=true&page=4&per_page=25",
         headers=headers,
     )
@@ -1001,7 +1001,7 @@ def test_list_patient_prescriptions_rejects_invalid_pagination(
     )
 
     response = client.get(
-        f"/prescriptions/patients/2{query}",
+        f"/api/v1/prescriptions/patients/2{query}",
         headers=headers,
     )
 
@@ -1024,7 +1024,7 @@ def test_list_patient_prescriptions_rejects_unknown_query_fields(
     )
 
     response = client.get(
-        "/prescriptions/patients/2?unknown=value",
+        "/api/v1/prescriptions/patients/2?unknown=value",
         headers=headers,
     )
 
@@ -1069,7 +1069,7 @@ def test_cancel_prescription_success(
     )
 
     response = client.post(
-        f"/prescriptions/{prescription.id}/cancel",
+        f"/api/v1/prescriptions/{prescription.id}/cancel",
         json={
             "reason": "Patient requested cancellation",
         },
@@ -1123,7 +1123,7 @@ def test_cancel_prescription_without_reason(
     )
 
     response = client.post(
-        f"/prescriptions/{prescription.id}/cancel",
+        f"/api/v1/prescriptions/{prescription.id}/cancel",
         json={},
         headers=headers,
     )
@@ -1149,7 +1149,7 @@ def test_cancel_prescription_rejects_extra_fields(
     )
 
     response = client.post(
-        "/prescriptions/1/cancel",
+        "/api/v1/prescriptions/1/cancel",
         json={
             "reason": "No longer required",
             "status": "cancelled",
@@ -1176,7 +1176,7 @@ def test_cancel_prescription_rejects_non_object_json(
     )
 
     response = client.post(
-        "/prescriptions/1/cancel",
+        "/api/v1/prescriptions/1/cancel",
         json=[
             {
                 "reason": "Invalid body"
@@ -1225,7 +1225,7 @@ def test_complete_prescription_success(
     )
 
     response = client.post(
-        f"/prescriptions/{prescription.id}/complete",
+        f"/api/v1/prescriptions/{prescription.id}/complete",
         headers=headers,
     )
 
@@ -1287,7 +1287,7 @@ def test_check_drug_interactions_success(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 7,
@@ -1343,7 +1343,7 @@ def test_check_drug_interactions_no_interactions(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 7,
@@ -1373,7 +1373,7 @@ def test_check_drug_interactions_requires_at_least_two_drugs(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 7
@@ -1401,7 +1401,7 @@ def test_check_drug_interactions_rejects_duplicate_drugs(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 7,
@@ -1430,7 +1430,7 @@ def test_check_drug_interactions_rejects_zero_id(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 0,
@@ -1459,7 +1459,7 @@ def test_check_drug_interactions_rejects_extra_fields(
     )
 
     response = client.post(
-        "/prescriptions/interactions/check",
+        "/api/v1/prescriptions/interactions/check",
         json={
             "drug_ids": [
                 7,
@@ -1507,7 +1507,7 @@ def test_create_drug_interaction_success(
     )
 
     response = client.post(
-        "/prescriptions/interactions",
+        "/api/v1/prescriptions/interactions",
         json={
             "drug_a_id": 7,
             "drug_b_id": 8,
@@ -1555,7 +1555,7 @@ def test_create_drug_interaction_rejects_self_interaction(
     )
 
     response = client.post(
-        "/prescriptions/interactions",
+        "/api/v1/prescriptions/interactions",
         json={
             "drug_a_id": 7,
             "drug_b_id": 7,
@@ -1583,7 +1583,7 @@ def test_create_drug_interaction_rejects_invalid_severity(
     )
 
     response = client.post(
-        "/prescriptions/interactions",
+        "/api/v1/prescriptions/interactions",
         json={
             "drug_a_id": 7,
             "drug_b_id": 8,
@@ -1611,7 +1611,7 @@ def test_create_drug_interaction_rejects_extra_fields(
     )
 
     response = client.post(
-        "/prescriptions/interactions",
+        "/api/v1/prescriptions/interactions",
         json={
             "drug_a_id": 7,
             "drug_b_id": 8,
@@ -1640,7 +1640,7 @@ def test_create_drug_interaction_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/prescriptions/interactions",
+        "/api/v1/prescriptions/interactions",
         json={
             "drug_a_id": 7,
             "drug_b_id": 8,
@@ -1685,7 +1685,7 @@ def test_create_prescription_service_validation_error(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 999,
             "items": [
@@ -1729,7 +1729,7 @@ def test_create_prescription_unexpected_exception_is_generic_500(
     )
 
     response = client.post(
-        "/prescriptions",
+        "/api/v1/prescriptions",
         json={
             "patient_id": 2,
             "items": [
@@ -1796,7 +1796,7 @@ def test_serialize_prescription_includes_items(
     )
 
     response = client.get(
-        "/prescriptions/10",
+        "/api/v1/prescriptions/10",
         headers=headers,
     )
 
@@ -1851,7 +1851,7 @@ def test_serialize_prescription_handles_nullable_dates(
     )
 
     response = client.get(
-        "/prescriptions/1",
+        "/api/v1/prescriptions/1",
         headers=headers,
     )
 
@@ -1897,7 +1897,7 @@ def test_list_prescriptions_response_shape(
     )
 
     response = client.get(
-        "/prescriptions/patients/2",
+        "/api/v1/prescriptions/patients/2",
         headers=headers,
     )
 
@@ -1940,31 +1940,31 @@ def test_list_prescriptions_response_shape(
     [
         (
             "GET",
-            "/prescriptions/1",
+            "/api/v1/prescriptions/1",
         ),
         (
             "GET",
-            "/prescriptions/patients/1",
+            "/api/v1/prescriptions/patients/1",
         ),
         (
             "POST",
-            "/prescriptions",
+            "/api/v1/prescriptions",
         ),
         (
             "POST",
-            "/prescriptions/1/cancel",
+            "/api/v1/prescriptions/1/cancel",
         ),
         (
             "POST",
-            "/prescriptions/1/complete",
+            "/api/v1/prescriptions/1/complete",
         ),
         (
             "POST",
-            "/prescriptions/interactions/check",
+            "/api/v1/prescriptions/interactions/check",
         ),
         (
             "POST",
-            "/prescriptions/interactions",
+            "/api/v1/prescriptions/interactions",
         ),
     ],
 )

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -220,7 +220,7 @@ def test_list_drugs_success(
     )
 
     response = client.get(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
     )
 
@@ -274,7 +274,7 @@ def test_list_drugs_include_inactive_true(
     )
 
     response = client.get(
-        "/pharmacy/drugs?include_inactive=true",
+        "/api/v1/pharmacy/drugs?include_inactive=true",
         headers=headers,
     )
 
@@ -326,7 +326,7 @@ def test_list_drugs_forwards_pagination(
     )
 
     response = client.get(
-        "/pharmacy/drugs?page=2&per_page=5",
+        "/api/v1/pharmacy/drugs?page=2&per_page=5",
         headers=headers,
     )
 
@@ -370,7 +370,7 @@ def test_list_drugs_default_excludes_inactive(
     )
 
     response = client.get(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
     )
 
@@ -415,7 +415,7 @@ def test_list_drugs_rejects_invalid_pagination(
     )
 
     response = client.get(
-        f"/pharmacy/drugs?{query_string}",
+        f"/api/v1/pharmacy/drugs?{query_string}",
         headers=headers,
     )
 
@@ -453,7 +453,7 @@ def test_get_drug_success(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
     )
 
@@ -496,7 +496,7 @@ def test_get_drug_forwards_authenticated_clinic(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
     )
 
@@ -540,7 +540,7 @@ def test_create_drug_success(
     )
 
     response = client.post(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
         json={
             "name": "Paracetamol",
@@ -577,7 +577,7 @@ def test_create_drug_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
         json={
             "name": "Paracetamol",
@@ -616,7 +616,7 @@ def test_create_drug_rejects_invalid_payload(
     )
 
     response = client.post(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
         json=payload,
     )
@@ -636,7 +636,7 @@ def test_create_drug_rejects_unknown_fields(
     )
 
     response = client.post(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
         json={
             "name": "Paracetamol",
@@ -679,7 +679,7 @@ def test_update_drug_success(
     )
 
     response = client.patch(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
         json={
             "name": "Updated Drug",
@@ -712,7 +712,7 @@ def test_update_drug_rejects_client_clinic_id(
     )
 
     response = client.patch(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
         json={
             "name": "Updated",
@@ -735,7 +735,7 @@ def test_update_drug_rejects_unknown_fields(
     )
 
     response = client.patch(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
         json={
             "name": "Updated",
@@ -778,7 +778,7 @@ def test_activate_drug_success(
     )
 
     response = client.post(
-        "/pharmacy/drugs/7/activate",
+        "/api/v1/pharmacy/drugs/7/activate",
         headers=headers,
     )
 
@@ -818,7 +818,7 @@ def test_deactivate_drug_success(
     )
 
     response = client.post(
-        "/pharmacy/drugs/7/deactivate",
+        "/api/v1/pharmacy/drugs/7/deactivate",
         headers=headers,
     )
 
@@ -843,7 +843,7 @@ def test_activate_drug_is_admin_only(
     )
 
     response = client.post(
-        "/pharmacy/drugs/7/activate",
+        "/api/v1/pharmacy/drugs/7/activate",
         headers=headers,
     )
 
@@ -862,7 +862,7 @@ def test_deactivate_drug_is_admin_only(
     )
 
     response = client.post(
-        "/pharmacy/drugs/7/deactivate",
+        "/api/v1/pharmacy/drugs/7/deactivate",
         headers=headers,
     )
 
@@ -914,7 +914,7 @@ def test_list_batches_success(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/batches",
+        "/api/v1/pharmacy/drugs/7/batches",
         headers=headers,
     )
 
@@ -968,7 +968,7 @@ def test_list_batches_can_exclude_expired(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/batches?include_expired=false",
+        "/api/v1/pharmacy/drugs/7/batches?include_expired=false",
         headers=headers,
     )
 
@@ -1017,7 +1017,7 @@ def test_list_batches_forwards_pagination(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/batches?page=2&per_page=5",
+        "/api/v1/pharmacy/drugs/7/batches?page=2&per_page=5",
         headers=headers,
     )
 
@@ -1061,7 +1061,7 @@ def test_list_batches_rejects_invalid_pagination(
     )
 
     response = client.get(
-        f"/pharmacy/drugs/7/batches?{query_string}",
+        f"/api/v1/pharmacy/drugs/7/batches?{query_string}",
         headers=headers,
     )
 
@@ -1099,7 +1099,7 @@ def test_get_batch_success(
     )
 
     response = client.get(
-        "/pharmacy/batches/12",
+        "/api/v1/pharmacy/batches/12",
         headers=headers,
     )
 
@@ -1155,7 +1155,7 @@ def test_list_expiring_batches_success(
     )
 
     response = client.get(
-        "/pharmacy/batches/expiring",
+        "/api/v1/pharmacy/batches/expiring",
         headers=headers,
     )
 
@@ -1200,7 +1200,7 @@ def test_list_expiring_batches_forwards_days(
     )
 
     response = client.get(
-        "/pharmacy/batches/expiring?days=14",
+        "/api/v1/pharmacy/batches/expiring?days=14",
         headers=headers,
     )
 
@@ -1247,7 +1247,7 @@ def test_list_expiring_batches_forwards_pagination(
     )
 
     response = client.get(
-        "/pharmacy/batches/expiring?days=14&page=2&per_page=4",
+        "/api/v1/pharmacy/batches/expiring?days=14&page=2&per_page=4",
         headers=headers,
     )
 
@@ -1288,7 +1288,7 @@ def test_list_expiring_batches_rejects_invalid_days(
     )
 
     response = client.get(
-        f"/pharmacy/batches/expiring?days={days}",
+        f"/api/v1/pharmacy/batches/expiring?days={days}",
         headers=headers,
     )
 
@@ -1318,7 +1318,7 @@ def test_list_expiring_batches_rejects_invalid_pagination(
     )
 
     response = client.get(
-        f"/pharmacy/batches/expiring?{query_string}",
+        f"/api/v1/pharmacy/batches/expiring?{query_string}",
         headers=headers,
     )
 
@@ -1362,7 +1362,7 @@ def test_create_batch_success(
     )
 
     response = client.post(
-        "/pharmacy/batches",
+        "/api/v1/pharmacy/batches",
         headers=headers,
         json={
             "drug_id": 7,
@@ -1454,7 +1454,7 @@ def test_create_batch_rejects_invalid_payload(
     )
 
     response = client.post(
-        "/pharmacy/batches",
+        "/api/v1/pharmacy/batches",
         headers=headers,
         json=payload,
     )
@@ -1474,7 +1474,7 @@ def test_create_batch_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/pharmacy/batches",
+        "/api/v1/pharmacy/batches",
         headers=headers,
         json={
             "clinic_id": 999,
@@ -1524,7 +1524,7 @@ def test_get_stock_summary_success(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/stock-summary",
+        "/api/v1/pharmacy/drugs/7/stock-summary",
         headers=headers,
     )
 
@@ -1581,7 +1581,7 @@ def test_create_dispense_record_success(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json={
             "prescription_id": 10,
@@ -1644,7 +1644,7 @@ def test_create_dispense_record_derives_actor_from_auth(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json={
             "prescription_id": 10,
@@ -1678,7 +1678,7 @@ def test_create_dispense_record_rejects_client_clinic_id(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json={
             "clinic_id": 999,
@@ -1708,7 +1708,7 @@ def test_create_dispense_record_rejects_client_actor(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json={
             "dispensed_by_id": 999,
@@ -1789,7 +1789,7 @@ def test_create_dispense_record_rejects_invalid_payload(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json=payload,
     )
@@ -1809,7 +1809,7 @@ def test_create_dispense_record_rejects_unknown_fields(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json={
             "prescription_id": 10,
@@ -1859,7 +1859,7 @@ def test_get_dispense_record_success(
     )
 
     response = client.get(
-        "/pharmacy/dispense/15",
+        "/api/v1/pharmacy/dispense/15",
         headers=headers,
     )
 
@@ -1902,7 +1902,7 @@ def test_get_dispense_record_is_tenant_scoped(
     )
 
     response = client.get(
-        "/pharmacy/dispense/15",
+        "/api/v1/pharmacy/dispense/15",
         headers=headers,
     )
 
@@ -1956,7 +1956,7 @@ def test_list_dispense_records_for_prescription_success(
     )
 
     response = client.get(
-        "/pharmacy/prescriptions/10/dispense-records",
+        "/api/v1/pharmacy/prescriptions/10/dispense-records",
         headers=headers,
     )
 
@@ -2011,7 +2011,7 @@ def test_list_dispense_records_for_prescription_forwards_pagination(
     )
 
     response = client.get(
-        "/pharmacy/prescriptions/10/dispense-records"
+        "/api/v1/pharmacy/prescriptions/10/dispense-records"
         "?page=2&per_page=4",
         headers=headers,
     )
@@ -2055,7 +2055,7 @@ def test_list_dispense_records_rejects_invalid_pagination(
     )
 
     response = client.get(
-        "/pharmacy/prescriptions/10/dispense-records"
+        "/api/v1/pharmacy/prescriptions/10/dispense-records"
         f"?{query_string}",
         headers=headers,
     )
@@ -2095,7 +2095,7 @@ def test_cancel_dispense_record_success(
     )
 
     response = client.post(
-        "/pharmacy/dispense/20/cancel",
+        "/api/v1/pharmacy/dispense/20/cancel",
         headers=headers,
         json={},
     )
@@ -2139,7 +2139,7 @@ def test_cancel_dispense_record_is_tenant_scoped(
     )
 
     response = client.post(
-        "/pharmacy/dispense/20/cancel",
+        "/api/v1/pharmacy/dispense/20/cancel",
         headers=headers,
         json={},
     )
@@ -2164,7 +2164,7 @@ def test_cancel_dispense_record_rejects_unknown_fields(
     )
 
     response = client.post(
-        "/pharmacy/dispense/20/cancel",
+        "/api/v1/pharmacy/dispense/20/cancel",
         headers=headers,
         json={
             "unknown_field": "attack",
@@ -2182,24 +2182,24 @@ def test_cancel_dispense_record_rejects_unknown_fields(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("get", "/pharmacy/drugs"),
-        ("get", "/pharmacy/drugs/1"),
-        ("post", "/pharmacy/drugs"),
-        ("patch", "/pharmacy/drugs/1"),
-        ("post", "/pharmacy/drugs/1/activate"),
-        ("post", "/pharmacy/drugs/1/deactivate"),
-        ("get", "/pharmacy/drugs/1/batches"),
-        ("get", "/pharmacy/batches/1"),
-        ("post", "/pharmacy/batches"),
-        ("get", "/pharmacy/batches/expiring"),
-        ("get", "/pharmacy/drugs/1/stock-summary"),
-        ("post", "/pharmacy/dispense"),
-        ("get", "/pharmacy/dispense/1"),
+        ("get", "/api/v1/pharmacy/drugs"),
+        ("get", "/api/v1/pharmacy/drugs/1"),
+        ("post", "/api/v1/pharmacy/drugs"),
+        ("patch", "/api/v1/pharmacy/drugs/1"),
+        ("post", "/api/v1/pharmacy/drugs/1/activate"),
+        ("post", "/api/v1/pharmacy/drugs/1/deactivate"),
+        ("get", "/api/v1/pharmacy/drugs/1/batches"),
+        ("get", "/api/v1/pharmacy/batches/1"),
+        ("post", "/api/v1/pharmacy/batches"),
+        ("get", "/api/v1/pharmacy/batches/expiring"),
+        ("get", "/api/v1/pharmacy/drugs/1/stock-summary"),
+        ("post", "/api/v1/pharmacy/dispense"),
+        ("get", "/api/v1/pharmacy/dispense/1"),
         (
             "get",
-            "/pharmacy/prescriptions/1/dispense-records",
+            "/api/v1/pharmacy/prescriptions/1/dispense-records",
         ),
-        ("post", "/pharmacy/dispense/1/cancel"),
+        ("post", "/api/v1/pharmacy/dispense/1/cancel"),
     ],
 )
 def test_pharmacy_endpoints_require_auth(
@@ -2215,14 +2215,14 @@ def test_pharmacy_endpoints_require_auth(
 @pytest.mark.parametrize(
     "path",
     [
-        "/pharmacy/drugs",
-        "/pharmacy/drugs/1",
-        "/pharmacy/drugs/1/batches",
-        "/pharmacy/batches/1",
-        "/pharmacy/batches/expiring",
-        "/pharmacy/drugs/1/stock-summary",
-        "/pharmacy/dispense/1",
-        "/pharmacy/prescriptions/1/dispense-records",
+        "/api/v1/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs/1",
+        "/api/v1/pharmacy/drugs/1/batches",
+        "/api/v1/pharmacy/batches/1",
+        "/api/v1/pharmacy/batches/expiring",
+        "/api/v1/pharmacy/drugs/1/stock-summary",
+        "/api/v1/pharmacy/dispense/1",
+        "/api/v1/pharmacy/prescriptions/1/dispense-records",
     ],
 )
 def test_pharmacist_can_read_pharmacy_resources(
@@ -2252,7 +2252,7 @@ def test_pharmacist_can_read_pharmacy_resources(
 
 def test_invalid_token_is_rejected(client):
     response = client.get(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers={
             "Authorization": "Bearer definitely-invalid-token",
         },
@@ -2295,7 +2295,7 @@ def test_get_drug_maps_domain_errors(
     )
 
     response = client.get(
-        "/pharmacy/drugs/1",
+        "/api/v1/pharmacy/drugs/1",
         headers=headers,
     )
 
@@ -2336,7 +2336,7 @@ def test_get_batch_maps_domain_errors(
     )
 
     response = client.get(
-        "/pharmacy/batches/1",
+        "/api/v1/pharmacy/batches/1",
         headers=headers,
     )
 
@@ -2377,7 +2377,7 @@ def test_get_dispense_record_maps_domain_errors(
     )
 
     response = client.get(
-        "/pharmacy/dispense/1",
+        "/api/v1/pharmacy/dispense/1",
         headers=headers,
     )
 
@@ -2417,7 +2417,7 @@ def test_unexpected_exception_does_not_expose_secret(
     )
 
     response = client.get(
-        "/pharmacy/drugs/1",
+        "/api/v1/pharmacy/drugs/1",
         headers=headers,
     )
 
@@ -2450,7 +2450,7 @@ def test_create_drug_rejects_non_object_json(
     )
 
     response = client.post(
-        "/pharmacy/drugs",
+        "/api/v1/pharmacy/drugs",
         headers=headers,
         json=[
             "not",
@@ -2474,7 +2474,7 @@ def test_update_drug_rejects_non_object_json(
     )
 
     response = client.patch(
-        "/pharmacy/drugs/1",
+        "/api/v1/pharmacy/drugs/1",
         headers=headers,
         json=[
             "not",
@@ -2498,7 +2498,7 @@ def test_create_batch_rejects_non_object_json(
     )
 
     response = client.post(
-        "/pharmacy/batches",
+        "/api/v1/pharmacy/batches",
         headers=headers,
         json=[
             "not",
@@ -2522,7 +2522,7 @@ def test_create_dispense_rejects_non_object_json(
     )
 
     response = client.post(
-        "/pharmacy/dispense",
+        "/api/v1/pharmacy/dispense",
         headers=headers,
         json=[
             "not",
@@ -2546,7 +2546,7 @@ def test_cancel_dispense_rejects_non_object_json(
     )
 
     response = client.post(
-        "/pharmacy/dispense/1/cancel",
+        "/api/v1/pharmacy/dispense/1/cancel",
         headers=headers,
         json=[
             "not",
@@ -2575,7 +2575,7 @@ def test_drug_endpoint_rejects_unsupported_method(
     )
 
     response = client.delete(
-        "/pharmacy/drugs/1",
+        "/api/v1/pharmacy/drugs/1",
         headers=headers,
     )
 
@@ -2594,7 +2594,7 @@ def test_batch_endpoint_rejects_unsupported_method(
     )
 
     response = client.delete(
-        "/pharmacy/batches/1",
+        "/api/v1/pharmacy/batches/1",
         headers=headers,
     )
 
@@ -2613,7 +2613,7 @@ def test_dispense_endpoint_rejects_unsupported_method(
     )
 
     response = client.delete(
-        "/pharmacy/dispense/1",
+        "/api/v1/pharmacy/dispense/1",
         headers=headers,
     )
 
@@ -2649,7 +2649,7 @@ def test_get_drug_response_has_expected_shape(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7",
+        "/api/v1/pharmacy/drugs/7",
         headers=headers,
     )
 
@@ -2696,7 +2696,7 @@ def test_list_drugs_response_has_paginated_shape(
     )
 
     response = client.get(
-        "/pharmacy/drugs?page=2&per_page=5",
+        "/api/v1/pharmacy/drugs?page=2&per_page=5",
         headers=headers,
     )
 
@@ -2746,7 +2746,7 @@ def test_get_batch_response_has_expected_shape(
     )
 
     response = client.get(
-        "/pharmacy/batches/12",
+        "/api/v1/pharmacy/batches/12",
         headers=headers,
     )
 
@@ -2794,7 +2794,7 @@ def test_list_batches_response_has_paginated_shape(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/batches?page=2&per_page=4",
+        "/api/v1/pharmacy/drugs/7/batches?page=2&per_page=4",
         headers=headers,
     )
 
@@ -2851,7 +2851,7 @@ def test_expiring_batches_response_has_paginated_shape(
     )
 
     response = client.get(
-        "/pharmacy/batches/expiring?per_page=2",
+        "/api/v1/pharmacy/batches/expiring?per_page=2",
         headers=headers,
     )
 
@@ -2902,7 +2902,7 @@ def test_stock_summary_response_has_expected_shape(
     )
 
     response = client.get(
-        "/pharmacy/drugs/7/stock-summary",
+        "/api/v1/pharmacy/drugs/7/stock-summary",
         headers=headers,
     )
 
@@ -2955,7 +2955,7 @@ def test_list_dispense_records_response_has_paginated_shape(
     )
 
     response = client.get(
-        "/pharmacy/prescriptions/10/dispense-records"
+        "/api/v1/pharmacy/prescriptions/10/dispense-records"
         "?page=2&per_page=3",
         headers=headers,
     )
@@ -3007,7 +3007,7 @@ def test_dispense_response_has_expected_shape(
     )
 
     response = client.get(
-        "/pharmacy/dispense/20",
+        "/api/v1/pharmacy/dispense/20",
         headers=headers,
     )
 
