@@ -32,7 +32,11 @@ def init_db_metrics(app: Flask) -> None:
         if not has_request_context():
             return
 
-        state = getattr(g, "_db_metrics_state", None)
+        state = getattr(
+            g,
+            "_db_metrics_state",
+            None,
+        )
 
         if state is None:
             state = {
@@ -43,7 +47,9 @@ def init_db_metrics(app: Flask) -> None:
             g._db_metrics_state = state
 
         state["query_count"] += 1
-        state["query_stack"].append(time.perf_counter())
+        state["query_stack"].append(
+            time.perf_counter()
+        )
 
     def after_cursor_execute(
         conn,
@@ -56,7 +62,11 @@ def init_db_metrics(app: Flask) -> None:
         if not has_request_context():
             return
 
-        state = getattr(g, "_db_metrics_state", None)
+        state = getattr(
+            g,
+            "_db_metrics_state",
+            None,
+        )
 
         if not state or not state["query_stack"]:
             return
@@ -129,10 +139,16 @@ def init_request_metrics(app: Flask) -> None:
             db_time_ms = 0.0
         else:
             query_count = int(
-                db_state.get("query_count", 0)
+                db_state.get(
+                    "query_count",
+                    0,
+                )
             )
             db_time_ms = float(
-                db_state.get("db_time_ms", 0.0)
+                db_state.get(
+                    "db_time_ms",
+                    0.0,
+                )
             )
 
         route = None
@@ -140,14 +156,21 @@ def init_request_metrics(app: Flask) -> None:
         if request.url_rule is not None:
             route = request.url_rule.rule
 
-        response_size_bytes = response.calculate_content_length()
+        response_size_bytes = (
+            response.calculate_content_length()
+        )
 
         if response_size_bytes is None:
             response_size_bytes = 0
 
+        load_test_id = request.headers.get(
+            "X-Load-Test-ID"
+        )
+
         logger.info(
             "performance.request",
             extra={
+                "load_test_id": load_test_id,
                 "method": request.method,
                 "route": route,
                 "status": response.status_code,
@@ -177,7 +200,10 @@ def _percentile(
 
     ordered = sorted(values)
 
-    position = (len(ordered) - 1) * percentile
+    position = (
+        len(ordered) - 1
+    ) * percentile
+
     lower = int(position)
     upper = lower + 1
 
@@ -196,7 +222,9 @@ def _percentile(
     )
 
 
-def aggregate_performance_metrics(records) -> dict[str, float | int]:
+def aggregate_performance_metrics(
+    records,
+) -> dict[str, float | int]:
     records = list(records)
 
     if not records:
@@ -294,11 +322,18 @@ def aggregate_performance_metrics(records) -> dict[str, float | int]:
         for record in records
     ]
 
-    window_seconds = max(ends) - min(starts)
+    window_seconds = (
+        max(ends)
+        - min(starts)
+    )
 
     if window_seconds <= 0:
         window_seconds = max(
-            max(durations, default=0.0) / 1000.0,
+            max(
+                durations,
+                default=0.0,
+            )
+            / 1000.0,
             0.001,
         )
 
@@ -306,14 +341,18 @@ def aggregate_performance_metrics(records) -> dict[str, float | int]:
         "total_requests": total_requests,
         "total_failures": total_failures,
         "failure_rate": (
-            total_failures / total_requests
+            total_failures
+            / total_requests
         ),
-        "rps": total_requests / window_seconds,
-        "average_duration_ms": statistics.fmean(
-            durations
+        "rps": (
+            total_requests
+            / window_seconds
         ),
-        "median_duration_ms": statistics.median(
-            durations
+        "average_duration_ms": (
+            statistics.fmean(durations)
+        ),
+        "median_duration_ms": (
+            statistics.median(durations)
         ),
         "p95_duration_ms": _percentile(
             durations,
@@ -325,11 +364,15 @@ def aggregate_performance_metrics(records) -> dict[str, float | int]:
         ),
         "min_duration_ms": min(durations),
         "max_duration_ms": max(durations),
-        "average_response_size_bytes": statistics.fmean(
-            response_sizes
+        "average_response_size_bytes": (
+            statistics.fmean(
+                response_sizes
+            )
         ),
         "total_db_queries": sum(
             db_query_counts
         ),
-        "total_db_time_ms": sum(db_times),
+        "total_db_time_ms": sum(
+            db_times
+        ),
     }

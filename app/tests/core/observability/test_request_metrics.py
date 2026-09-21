@@ -122,6 +122,51 @@ def test_request_metrics_records_db_fields(
     assert db_time_ms >= 0
 
 
+def test_request_metrics_records_load_test_id(
+    app,
+    client,
+    caplog,
+):
+    init_request_metrics(app)
+    _add_test_route(app)
+
+    load_test_id = "clinic-load-20260921-001"
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        response = client.get(
+            "/__test/observability/request/123",
+            headers={
+                "X-Load-Test-ID": load_test_id,
+            },
+        )
+
+    assert response.status_code == 200
+
+    record = _get_performance_request_record(caplog)
+
+    assert getattr(record, "load_test_id", None) == load_test_id
+
+
+def test_request_metrics_does_not_create_load_test_id_when_missing(
+    app,
+    client,
+    caplog,
+):
+    init_request_metrics(app)
+    _add_test_route(app)
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        response = client.get(
+            "/__test/observability/request/123"
+        )
+
+    assert response.status_code == 200
+
+    record = _get_performance_request_record(caplog)
+
+    assert getattr(record, "load_test_id", None) is None
+
+
 def test_request_metrics_records_client_error_status(
     app,
     client,
@@ -235,10 +280,16 @@ def test_request_metrics_records_each_request_separately(
 
     with caplog.at_level(logging.INFO, logger=app.logger.name):
         first_response = client.get(
-            "/__test/observability/request/1"
+            "/__test/observability/request/1",
+            headers={
+                "X-Load-Test-ID": "load-test-001",
+            },
         )
         second_response = client.get(
-            "/__test/observability/request/2"
+            "/__test/observability/request/2",
+            headers={
+                "X-Load-Test-ID": "load-test-002",
+            },
         )
 
     assert first_response.status_code == 200
@@ -253,12 +304,18 @@ def test_request_metrics_records_each_request_separately(
         "/__test/observability/request/<int:item_id>"
     )
     assert getattr(records[0], "status", None) == 200
+    assert getattr(records[0], "load_test_id", None) == (
+        "load-test-001"
+    )
 
     assert getattr(records[1], "method", None) == "GET"
     assert getattr(records[1], "route", None) == (
         "/__test/observability/request/<int:item_id>"
     )
     assert getattr(records[1], "status", None) == 200
+    assert getattr(records[1], "load_test_id", None) == (
+        "load-test-002"
+    )
 
     assert getattr(records[0], "duration_ms", None) >= 0
     assert getattr(records[1], "duration_ms", None) >= 0
@@ -275,7 +332,10 @@ def test_request_metrics_does_not_register_twice(
 
     with caplog.at_level(logging.INFO, logger=app.logger.name):
         response = client.get(
-            "/__test/observability/request/1"
+            "/__test/observability/request/1",
+            headers={
+                "X-Load-Test-ID": "load-test-001",
+            },
         )
 
     assert response.status_code == 200
