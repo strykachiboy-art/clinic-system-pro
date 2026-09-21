@@ -30,7 +30,9 @@ def _get_load_test_id() -> str | None:
 
 
 def init_request_metrics(app: Flask) -> None:
-    if app.extensions.get(REQUEST_METRICS_STATE_KEY):
+    if app.extensions.get(
+        REQUEST_METRICS_STATE_KEY
+    ):
         return
 
     logger = app.logger
@@ -63,7 +65,8 @@ def init_request_metrics(app: Flask) -> None:
             duration_ms = 0.0
         else:
             duration_ms = (
-                time.perf_counter() - started_at
+                time.perf_counter()
+                - started_at
             ) * 1000.0
 
         db_state = getattr(
@@ -102,10 +105,31 @@ def init_request_metrics(app: Flask) -> None:
         if response_size_bytes is None:
             response_size_bytes = 0
 
+        load_test_id = _get_load_test_id()
+
         logger.info(
-            "performance.request",
+            (
+                "performance.request "
+                "load_test_id=%s "
+                "method=%s "
+                "route=%s "
+                "status=%s "
+                "duration_ms=%.3f "
+                "response_size_bytes=%s "
+                "db_query_count=%s "
+                "db_time_ms=%.3f"
+            ),
+            load_test_id,
+            request.method,
+            route,
+            response.status_code,
+            duration_ms,
+            int(response_size_bytes),
+            query_count,
+            db_time_ms,
             extra={
-                "load_test_id": _get_load_test_id(),
+                "performance_event": True,
+                "load_test_id": load_test_id,
                 "method": request.method,
                 "route": route,
                 "status": response.status_code,

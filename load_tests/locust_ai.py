@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from gevent.lock import Semaphore
@@ -18,15 +19,72 @@ def _create_load_test_id() -> str:
     )
 
 
+def _env_float(
+    name: str,
+    default: float,
+) -> float:
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{name} must be a number"
+        ) from exc
+
+    if parsed < 0:
+        raise RuntimeError(
+            f"{name} must be greater than or equal to zero"
+        )
+
+    return parsed
+
+
 class AIUser(HttpUser):
-    wait_time = between(6.0, 7.0)
+    wait_min = _env_float(
+        "LOCUST_WAIT_MIN",
+        6.0,
+    )
 
-    access_token = None
+    wait_max = _env_float(
+        "LOCUST_WAIT_MAX",
+        7.0,
+    )
+
+    if wait_min > wait_max:
+        raise RuntimeError(
+            "LOCUST_WAIT_MIN must be less than or equal to "
+            "LOCUST_WAIT_MAX"
+        )
+
+    wait_time = between(
+        wait_min,
+        wait_max,
+    )
+
+    load_test_id = (
+        os.getenv("LOCUST_RUN_ID")
+        or _create_load_test_id()
+    )
+
+    mode = os.getenv(
+        "LOCUST_AI_MODE",
+        "capacity",
+    ).strip().lower()
+
+    tokens_file = os.getenv(
+        "LOCUST_TOKENS_FILE"
+    )
+
+    shared_access_token = None
+    shared_token_lock = Semaphore()
+
+    tokens = None
+    token_index = 0
     token_lock = Semaphore()
-
-    load_test_id = os.getenv(
-        "LOCUST_RUN_ID"
-    ) or _create_load_test_id()
 
     def on_start(self):
         patient_id = os.getenv(
@@ -37,6 +95,15 @@ class AIUser(HttpUser):
             "LOCUST_DRUGS",
             "aspirin,ibuprofen",
         )
+
+        if self.mode not in {
+            "capacity",
+            "protection",
+        }:
+            raise RuntimeError(
+                "LOCUST_AI_MODE must be "
+                "'capacity' or 'protection'"
+            )
 
         if not patient_id:
             raise RuntimeError(
@@ -50,6 +117,11 @@ class AIUser(HttpUser):
                 "LOCUST_PATIENT_ID must be an integer"
             ) from exc
 
+        if self.patient_id <= 0:
+            raise RuntimeError(
+                "LOCUST_PATIENT_ID must be greater than zero"
+            )
+
         self.drug_names = [
             drug.strip()
             for drug in raw_drugs.split(",")
@@ -61,23 +133,91 @@ class AIUser(HttpUser):
                 "LOCUST_DRUGS must contain at least one drug name"
             )
 
+        access_token = self._get_access_token()
+
         self.headers = {
-            "Authorization": "",
+            "Authorization": (
+                f"Bearer {access_token}"
+            ),
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-Load-Test-ID": AIUser.load_test_id,
+            "X-Load-Test-ID": self.load_test_id,
         }
 
-        if AIUser.access_token is None:
+    def _get_access_token(self) -> str:
+        if self.mode == "capacity":
+            return self._get_capacity_token()
+
+        return self._get_protection_token()
+
+    def _get_capacity_token(self) -> str:
+        if not self.tokens_file:
+            raise RuntimeError(
+                "LOCUST_TOKENS_FILE is required "
+                "in capacity mode"
+            )
+
+        if AIUser.tokens is None:
             with AIUser.token_lock:
-                if AIUser.access_token is None:
-                    self._login_once()
+                if AIUser.tokens is None:
+                    path = Path(
+                        self.tokens_file
+                    ).expanduser()
 
-        self.headers["Authorization"] = (
-            f"Bearer {AIUser.access_token}"
-        )
+                    if not path.is_file():
+                        raise RuntimeError(
+                            f"Token file not found: {path}"
+                        )
 
-    def _login_once(self):
+                    tokens = [
+                        line.strip()
+                        for line in path.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                        if line.strip()
+                    ]
+
+                    if not tokens:
+                        raise RuntimeError(
+                            "LOCUST_TOKENS_FILE contains no tokens"
+                        )
+
+                    AIUser.tokens = tokens
+
+        with AIUser.token_lock:
+            index = AIUser.token_index
+
+            if index >= len(AIUser.tokens):
+                raise RuntimeError(
+                    "Not enough synthetic JWTs for "
+                    "the requested Locust users"
+                )
+
+            access_token = AIUser.tokens[index]
+            AIUser.token_index += 1
+
+        if not access_token:
+            raise RuntimeError(
+                "Synthetic JWT is empty"
+            )
+
+        return access_token
+
+    def _get_protection_token(self) -> str:
+        if AIUser.shared_access_token is not None:
+            return AIUser.shared_access_token
+
+        with AIUser.shared_token_lock:
+            if AIUser.shared_access_token is not None:
+                return AIUser.shared_access_token
+
+            AIUser.shared_access_token = (
+                self._login_once()
+            )
+
+            return AIUser.shared_access_token
+
+    def _login_once(self) -> str:
         email = os.getenv(
             "LOCUST_EMAIL"
         )
@@ -96,30 +236,32 @@ class AIUser(HttpUser):
                 "LOCUST_PASSWORD is required"
             )
 
-        login_payload = {
+        payload = {
             "email": email,
             "password": password,
         }
 
-        login_headers = {
+        headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-Load-Test-ID": AIUser.load_test_id,
+            "X-Load-Test-ID": self.load_test_id,
         }
 
         with self.client.post(
             "/api/v1/auth/login",
-            json=login_payload,
-            headers=login_headers,
-            name="POST /api/v1/auth/login",
+            json=payload,
+            headers=headers,
+            name="POST /api/v1/auth/login [setup]",
             catch_response=True,
         ) as response:
+
             if response.status_code != 200:
                 response.failure(
                     f"Login failed: HTTP "
                     f"{response.status_code}: "
                     f"{response.text[:200]}"
                 )
+
                 raise RuntimeError(
                     "Locust login failed"
                 )
@@ -130,9 +272,19 @@ class AIUser(HttpUser):
                 response.failure(
                     "Login response was not JSON"
                 )
+
                 raise RuntimeError(
                     "Locust login returned non-JSON"
                 ) from exc
+
+            if body.get("success") is not True:
+                response.failure(
+                    "Login response success != true"
+                )
+
+                raise RuntimeError(
+                    "Locust login was unsuccessful"
+                )
 
             data = body.get("data") or {}
 
@@ -144,13 +296,14 @@ class AIUser(HttpUser):
                 response.failure(
                     "Login response has no access_token"
                 )
+
                 raise RuntimeError(
                     "Locust login returned no access token"
                 )
 
-            AIUser.access_token = access_token
-
             response.success()
+
+            return access_token
 
     @task
     def drug_interactions(self):
@@ -166,6 +319,7 @@ class AIUser(HttpUser):
             name="POST /api/v1/ai/drug-interactions",
             catch_response=True,
         ) as response:
+
             if response.status_code == 200:
                 try:
                     body = response.json()
@@ -191,7 +345,13 @@ class AIUser(HttpUser):
                 return
 
             if response.status_code == 429:
-                response.success()
+                if self.mode == "protection":
+                    response.success()
+                else:
+                    response.failure(
+                        "HTTP 429 rate limited during capacity test"
+                    )
+
                 return
 
             response.failure(

@@ -1,4 +1,12 @@
-from flask import Blueprint, jsonify, request, g
+from __future__ import annotations
+
+from flask import (
+    Blueprint,
+    current_app,
+    jsonify,
+    request,
+    g,
+)
 from flask_jwt_extended import get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
@@ -45,6 +53,28 @@ AI_ROLES = (
 
 
 AI_RATE_LIMIT = "10 per minute"
+
+
+def _ai_rate_limit() -> str:
+    """
+    Return the AI endpoint rate limit.
+
+    Production defaults to the normal protected limit.
+    Explicit load-test mode may use a configured override.
+    """
+
+    if current_app.config.get(
+        "AI_LOAD_TEST_MODE",
+        False,
+    ):
+        return str(
+            current_app.config.get(
+                "AI_LOAD_TEST_RATE_LIMIT",
+                "1000 per second",
+            )
+        )
+
+    return AI_RATE_LIMIT
 
 
 def _pydantic_error_details(
@@ -174,7 +204,7 @@ def _serialize_ai_response(
 
 
 @ai_bp.post("/drug-interactions")
-@limiter.limit(AI_RATE_LIMIT)
+@limiter.limit(_ai_rate_limit)
 @role_required(*AI_ROLES)
 def drug_interactions():
     try:
@@ -221,7 +251,7 @@ def drug_interactions():
 
 
 @ai_bp.post("/triage")
-@limiter.limit(AI_RATE_LIMIT)
+@limiter.limit(_ai_rate_limit)
 @role_required(*AI_ROLES)
 def triage():
     try:
@@ -269,7 +299,7 @@ def triage():
 
 
 @ai_bp.post("/lab-results/interpret")
-@limiter.limit(AI_RATE_LIMIT)
+@limiter.limit(_ai_rate_limit)
 @role_required(*AI_ROLES)
 def lab_results():
     try:

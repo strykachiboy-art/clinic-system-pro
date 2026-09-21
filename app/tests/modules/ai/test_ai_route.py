@@ -253,8 +253,6 @@ def test_invalid_jwt_identity_is_rejected(
             json=valid_drug_payload(),
         )
 
-        # The token is rejected by the fail-closed JWT validation layer
-        # before the route-level authentication identity validation runs.
         assert response.status_code == 401
 
 
@@ -281,9 +279,6 @@ def test_non_positive_jwt_identity_is_rejected(
             json=valid_drug_payload(),
         )
 
-        # There is no real user with ID -1. The fail-closed JWT blocklist
-        # validation therefore rejects the token before _load_auth_context()
-        # can validate the identity.
         assert response.status_code == 401
 
 
@@ -346,8 +341,6 @@ def test_current_user_rejects_nonexistent_user(
             json=valid_drug_payload(),
         )
 
-        # The token blocklist/security layer intentionally fails closed
-        # when the authenticated user cannot be resolved.
         assert response.status_code == 401
 
 
@@ -375,8 +368,6 @@ def test_current_user_rejects_inactive_user(
             valid_drug_payload(),
         )
 
-        # Inactive users are rejected by is_token_revoked() before
-        # route-level _current_user() validation.
         assert response.status_code == 401
 
         body = response.get_json()
@@ -1548,6 +1539,90 @@ def test_lab_results_rejects_empty_result_data(
 # ============================================================================
 
 
+def test_ai_rate_limit_defaults_to_production_limit(
+    app,
+):
+    with app.app_context():
+        from app.modules.ai.routes.ai_route import (
+            AI_RATE_LIMIT,
+            _ai_rate_limit,
+        )
+
+        assert AI_RATE_LIMIT == "10 per minute"
+        assert _ai_rate_limit() == "10 per minute"
+
+
+def test_ai_rate_limit_uses_load_test_override(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_MODE",
+            True,
+        )
+
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_RATE_LIMIT",
+            "1000 per second",
+        )
+
+        from app.modules.ai.routes.ai_route import (
+            _ai_rate_limit,
+        )
+
+        assert _ai_rate_limit() == "1000 per second"
+
+
+def test_ai_rate_limit_load_test_mode_uses_default_override(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_MODE",
+            True,
+        )
+
+        app.config.pop(
+            "AI_LOAD_TEST_RATE_LIMIT",
+            None,
+        )
+
+        from app.modules.ai.routes.ai_route import (
+            _ai_rate_limit,
+        )
+
+        assert _ai_rate_limit() == "1000 per second"
+
+
+def test_ai_rate_limit_production_limit_ignores_load_test_rate(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_MODE",
+            False,
+        )
+
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_RATE_LIMIT",
+            "1000 per second",
+        )
+
+        from app.modules.ai.routes.ai_route import (
+            _ai_rate_limit,
+        )
+
+        assert _ai_rate_limit() == "10 per minute"
+
+
 def test_ai_rate_limit_is_enforced(
     app,
     clinic,
@@ -1590,3 +1665,56 @@ def test_ai_rate_limit_is_enforced(
         )
 
         assert responses[10].status_code == 429
+
+
+def test_ai_rate_limit_load_test_mode_changes_enforcement(
+    app,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    with app.app_context():
+        register_ai_blueprint(app)
+
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_MODE",
+            True,
+        )
+
+        monkeypatch.setitem(
+            app.config,
+            "AI_LOAD_TEST_RATE_LIMIT",
+            "2 per minute",
+        )
+
+        user = make_user(
+            clinic=clinic,
+            role=Role.DOCTOR,
+        )
+
+        monkeypatch.setattr(
+            "app.modules.ai.routes.ai_route.check_drug_interactions",
+            lambda **kwargs: {
+                "summary": "No interaction found.",
+                "interactions": [],
+                "recommendations": [],
+            },
+        )
+
+        client = app.test_client()
+        headers = auth_headers_for(user)
+
+        responses = [
+            client.post(
+                "/api/v1/ai/drug-interactions",
+                headers=headers,
+                json=valid_drug_payload(),
+            )
+            for _ in range(3)
+        ]
+
+        assert responses[0].status_code == 200
+        assert responses[1].status_code == 200
+        assert responses[2].status_code == 429
