@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import os
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from gevent.lock import Semaphore
 from locust import HttpUser, between, task
@@ -40,6 +44,17 @@ class AIUser(HttpUser):
                 "LOCUST_DRUGS must contain at least one drug name"
             )
 
+        self.load_test_id = os.getenv("LOCUST_RUN_ID")
+
+        if not self.load_test_id:
+            timestamp = datetime.now(
+                timezone.utc
+            ).strftime("%Y%m%dT%H%M%SZ")
+
+            self.load_test_id = (
+                f"locust-{timestamp}-{uuid4().hex[:8]}"
+            )
+
         if AIUser.access_token is None:
             with AIUser.token_lock:
                 if AIUser.access_token is None:
@@ -49,6 +64,7 @@ class AIUser(HttpUser):
             "Authorization": f"Bearer {AIUser.access_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "X-Load-Test-ID": self.load_test_id,
         }
 
     def _login_once(self):
@@ -70,9 +86,16 @@ class AIUser(HttpUser):
             "password": password,
         }
 
+        login_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Load-Test-ID": self.load_test_id,
+        }
+
         with self.client.post(
             "/api/v1/auth/login",
             json=login_payload,
+            headers=login_headers,
             name="POST /api/v1/auth/login",
             catch_response=True,
         ) as response:
