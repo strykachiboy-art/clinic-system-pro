@@ -7,7 +7,6 @@ from locust import HttpUser, between, task
 class AIUser(HttpUser):
     wait_time = between(6.0, 7.0)
 
-    # Shared across all AIUser instances in this Locust process.
     access_token = None
     token_lock = Semaphore()
 
@@ -19,7 +18,9 @@ class AIUser(HttpUser):
         )
 
         if not patient_id:
-            raise RuntimeError("LOCUST_PATIENT_ID is required")
+            raise RuntimeError(
+                "LOCUST_PATIENT_ID is required"
+            )
 
         try:
             self.patient_id = int(patient_id)
@@ -39,8 +40,6 @@ class AIUser(HttpUser):
                 "LOCUST_DRUGS must contain at least one drug name"
             )
 
-        # Only the first virtual user logs in.
-        # All other users reuse the same access token.
         if AIUser.access_token is None:
             with AIUser.token_lock:
                 if AIUser.access_token is None:
@@ -57,10 +56,14 @@ class AIUser(HttpUser):
         password = os.getenv("LOCUST_PASSWORD")
 
         if not email:
-            raise RuntimeError("LOCUST_EMAIL is required")
+            raise RuntimeError(
+                "LOCUST_EMAIL is required"
+            )
 
         if not password:
-            raise RuntimeError("LOCUST_PASSWORD is required")
+            raise RuntimeError(
+                "LOCUST_PASSWORD is required"
+            )
 
         login_payload = {
             "email": email,
@@ -68,9 +71,9 @@ class AIUser(HttpUser):
         }
 
         with self.client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json=login_payload,
-            name="POST /api/auth/login",
+            name="POST /api/v1/auth/login",
             catch_response=True,
         ) as response:
             if response.status_code != 200:
@@ -78,7 +81,9 @@ class AIUser(HttpUser):
                     f"Login failed: HTTP {response.status_code}: "
                     f"{response.text[:200]}"
                 )
-                raise RuntimeError("Locust login failed")
+                raise RuntimeError(
+                    "Locust login failed"
+                )
 
             try:
                 body = response.json()
@@ -113,13 +118,12 @@ class AIUser(HttpUser):
         }
 
         with self.client.post(
-            "/api/ai/drug-interactions",
+            "/api/v1/ai/drug-interactions",
             json=payload,
             headers=self.headers,
-            name="POST /api/ai/drug-interactions",
+            name="POST /api/v1/ai/drug-interactions",
             catch_response=True,
         ) as response:
-
             if response.status_code == 200:
                 try:
                     body = response.json()
@@ -145,8 +149,6 @@ class AIUser(HttpUser):
                 return
 
             if response.status_code == 429:
-                # Expected when the AI route rate limiter is triggered
-                # during high-concurrency load testing.
                 response.success()
                 return
 
