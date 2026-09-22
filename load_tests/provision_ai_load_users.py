@@ -152,7 +152,7 @@ def main() -> None:
             args.users + 1,
         ):
             email = (
-                f"ai-load-{index}@test.local"
+                f"ai-load-{index}@example.com"
             )
 
             user = db.session.scalar(

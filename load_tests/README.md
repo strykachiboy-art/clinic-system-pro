@@ -71,7 +71,9 @@ $env:LOCUST_EMAIL="loadtest@clinicload.com"
 $env:LOCUST_PASSWORD="LoadTestPassword123!"
 ```
 
-Benchmark staff accounts use the `example.com` domain because reserved `.local` email domains are rejected by the application's email validation.
+Benchmark staff and other synthetic load-test accounts should use valid non-reserved domains such as `example.com` because reserved `.local` and `.test` domains are rejected by the application's email validation.
+
+Existing synthetic accounts were normalized to valid domains before the Access Control baseline was recorded. New load-test provisioners must not generate `.local` or `.test` email addresses.
 
 Example:
 
@@ -241,6 +243,27 @@ That run returned approximately:
 ```
 
 and became the official representative Notifications baseline.
+
+Asset Control was also benchmarked against a populated synthetic workload:
+
+```text
+50 synthetic assets
+39,324-byte average response
+```
+
+Access Control was benchmarked against the populated user table:
+
+```text
+5,019 users
+4,578-byte average response
+```
+
+Audit was benchmarked against the existing populated audit log dataset:
+
+```text
+120 successful requests
+5,106-byte average response
+```
 
 Therefore:
 
@@ -480,8 +503,48 @@ Current server-side records:
 | Reports                |      123 |        0 |        — |   16.410 |        — |   27.218 |   35.528 |        — |           — |           — |          — |             — |
 | Profile                |      105 |        0 |        — |   14.369 |        — |   22.253 |   24.831 |        — |           — |           — |          — |             — |
 | Settings               |      119 |        0 |    7.692 |    9.560 |    8.405 |   16.172 |   20.143 |   20.874 |       2.720 |       5.579 |          4 |         352 B |
+| User Devices           |      372 |        0 |    8.075 |   14.166 |   11.691 |   26.976 |   39.176 |   56.561 |       3.742 |      29.383 |          4 |     1,725.6 B |
+| Asset Control          |      116 |        0 |   13.690 |   19.550 |   16.515 |   30.154 |   36.569 |   72.279 |       4.186 |      22.584 |          4 |      39,324 B |
+| Access Control         |       91 |        0 |   19.966 |   35.629 |   36.423 |   56.537 |  154.991 |  154.991 |       4.891 |       8.967 |          4 |       4,578 B |
+| Audit                  |      120 |        0 |   14.395 |   22.217 |   20.093 |   34.137 |   67.731 |   69.885 |      12.591 |      57.506 |          3 |       5,106 B |
 
 A value of `—` means the detailed metric was not preserved in the historical benchmark record.
+
+Recent completed benchmark IDs:
+
+```text
+user-devices-baseline-001
+asset-control-baseline-001
+access-control-baseline-001
+audit-baseline-001
+```
+
+Recent workload notes:
+
+```text
+User Devices
+- Read endpoint exercised: GET /api/v1/users/devices/
+- 372 successful requests
+
+Asset Control
+- Endpoint exercised: GET /api/v1/assets
+- Representative dataset: 50 synthetic assets
+- Response size: 39,324 B
+
+Access Control
+- Endpoint exercised: GET /api/v1/access-control/users?page=1&per_page=50
+- Representative dataset: 5,019 users
+- Response size: 4,578 B
+- Super-admin authentication succeeded
+
+Audit
+- Endpoint exercised: GET /api/v1/audit-logs?page=1&per_page=20
+- 120 successful requests
+- Response size: 5,106 B
+- Average DB time: 12.591 ms
+- Maximum DB time: 57.506 ms
+- DB queries/request: 3
+```
 
 ---
 
@@ -584,6 +647,10 @@ Completed official baselines:
 15. Reports
 16. Profile
 17. Settings
+18. User Devices
+19. Asset Control
+20. Access Control
+21. Audit
 ```
 
 Remaining benchmark targets:
@@ -591,51 +658,80 @@ Remaining benchmark targets:
 ```text
 1. Clinic
 2. Staff
-3. User Devices
-4. Dashboard
-5. Access Control
-6. Asset Control
-7. Audit
-8. AI
+3. Dashboard
+4. AI
 ```
 
 Current status:
 
 ```text
-17 completed
-8 remaining
+21 completed
+4 remaining
 25 scenario targets total
 ```
 
+The current scenario-creation phase has been completed for all implemented targets except the remaining implementation targets listed below.
+
 ---
 
-## 20. Empty Scenario Files
+## 20. Scenario Implementation Status
 
-At the time this README was created, these scenario files were placeholders and still require load-test implementations:
+The following scenario files now contain implemented load-test workloads and have completed official baselines:
+
+```text
+load_tests/scenarios/authentication.py
+load_tests/scenarios/patients.py
+load_tests/scenarios/appointments.py
+load_tests/scenarios/consultations.py
+load_tests/scenarios/laboratory.py
+load_tests/scenarios/pharmacy.py
+load_tests/scenarios/prescriptions.py
+load_tests/scenarios/inventory.py
+load_tests/scenarios/billing.py
+load_tests/scenarios/wards.py
+load_tests/scenarios/ambulance.py
+load_tests/scenarios/hie.py
+load_tests/scenarios/notifications.py
+load_tests/scenarios/chat.py
+load_tests/scenarios/reports.py
+load_tests/scenarios/profile.py
+load_tests/scenarios/settings.py
+load_tests/scenarios/user_devices.py
+load_tests/scenarios/asset_control.py
+load_tests/scenarios/access_control.py
+load_tests/scenarios/audit.py
+```
+
+The remaining scenario files requiring implementation are:
 
 ```text
 load_tests/scenarios/clinic.py
 load_tests/scenarios/staff.py
-load_tests/scenarios/user_devices.py
-load_tests/scenarios/access_control.py
-load_tests/scenarios/asset_control.py
-load_tests/scenarios/audit.py
 ```
 
 These should be implemented against the actual API routes and response contracts rather than guessed endpoints.
 
 ---
 
-## 21. Existing But Not Yet Benchmarked
+## 21. Implemented But Not Yet Benchmarked
 
-These already contain load-test code but still need official baseline execution:
+These scenario files already contain load-test code but still need official baseline execution:
 
 ```text
 load_tests/scenarios/dashboard.py
 load_tests/scenarios/locust_ai.py
 ```
 
-Authentication has already been benchmarked and recorded.
+The remaining official benchmark queue is therefore:
+
+```text
+Clinic
+Staff
+Dashboard
+AI
+```
+
+All other current scenario targets have completed their official baseline.
 
 ---
 
@@ -647,18 +743,19 @@ Use this sequence:
 1. Inspect the module routes/services/schemas.
 2. Identify the correct read-heavy or representative benchmark endpoint.
 3. Create or update load_tests/scenarios/<module>.py.
-4. Validate the Python file.
-5. Start a fresh server.
-6. Create a fresh module server log.
-7. Set synthetic benchmark credentials.
-8. Set a unique LOCUST_RUN_ID.
-9. Run 10 users / 2 spawn rate / 30 seconds.
-10. Confirm Locust had no failures.
-11. Extract server-side metrics from the matching log.
-12. Verify HTTP status distribution.
-13. Verify the workload is populated/representative.
-14. Record the official baseline.
-15. Do not replace a valid baseline with an invalid or empty run.
+4. Ensure all synthetic credentials use valid, non-reserved email domains.
+5. Validate the Python file.
+6. Start a fresh server.
+7. Create a fresh module server log.
+8. Set synthetic benchmark credentials.
+9. Set a unique LOCUST_RUN_ID.
+10. Run 10 users / 2 spawn rate / 30 seconds.
+11. Confirm Locust had no failures.
+12. Extract server-side metrics from the matching log.
+13. Verify HTTP status distribution.
+14. Verify the workload is populated/representative.
+15. Record the official baseline.
+16. Do not replace a valid baseline with an invalid or empty run.
 ```
 
 ---
