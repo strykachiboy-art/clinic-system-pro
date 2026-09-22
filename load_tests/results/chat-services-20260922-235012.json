@@ -1,0 +1,121 @@
+{
+  "environment": "development",
+  "clinic_id": 2,
+  "user_id": 5037,
+  "conversation_id": 51,
+  "per_page": 50,
+  "search": "clinical",
+  "mode": "create",
+  "warmups": 3,
+  "runs": 10,
+  "results": {
+    "create": {
+      "operation": "create",
+      "warmups": 3,
+      "runs": 10,
+      "service_time_ms": {
+        "average": 35.798,
+        "median": 36.532,
+        "p95": 40.652,
+        "p99": 41.144,
+        "min": 25.602,
+        "max": 41.267
+      },
+      "db_time_ms": {
+        "average": 13.649,
+        "median": 14.018,
+        "p95": 14.977,
+        "p99": 15.167,
+        "min": 9.982,
+        "max": 15.214
+      },
+      "query_count": {
+        "average": 12,
+        "median": 12.0,
+        "min": 12,
+        "max": 12
+      },
+      "representative_profile": {
+        "operation": "create",
+        "service_time_ms": 58.981,
+        "query_count": 12,
+        "db_time_ms": 15.325,
+        "result_type": "Message",
+        "profile_file": "C:\\Users\\HP\\Documents\\clinic-system\\load_tests\\results\\chat-create-20260922-235012.prof",
+        "stats_file": "C:\\Users\\HP\\Documents\\clinic-system\\load_tests\\results\\chat-create-20260922-235012.txt"
+      },
+      "runs_detail": [
+        {
+          "operation": "create",
+          "service_time_ms": 32.23130002152175,
+          "query_count": 12,
+          "db_time_ms": 13.228800002252683,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 25.60210000956431,
+          "query_count": 12,
+          "db_time_ms": 9.982499992474914,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 35.26820000843145,
+          "query_count": 12,
+          "db_time_ms": 14.101300010224804,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 41.26670002005994,
+          "query_count": 12,
+          "db_time_ms": 14.517400006297976,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 37.756600009743124,
+          "query_count": 12,
+          "db_time_ms": 14.022399904206395,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 37.83459999249317,
+          "query_count": 12,
+          "db_time_ms": 14.013400010298938,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 39.89960000035353,
+          "query_count": 12,
+          "db_time_ms": 15.214300015941262,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 37.36789998947643,
+          "query_count": 12,
+          "db_time_ms": 14.686400012578815,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 35.69630000856705,
+          "query_count": 12,
+          "db_time_ms": 13.367500068852678,
+          "result_type": "Message"
+        },
+        {
+          "operation": "create",
+          "service_time_ms": 35.061300004599616,
+          "query_count": 12,
+          "db_time_ms": 13.356500072404742,
+          "result_type": "Message"
+        }
+      ]
+    }
+  }
+}

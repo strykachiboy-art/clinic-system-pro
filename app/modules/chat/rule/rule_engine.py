@@ -35,6 +35,7 @@ class ChatRule:
 
 class ChatRuleEngine:
     _MISSING = object()
+    _SETTINGS_UNSET = object()
 
     DEFAULTS: dict[str, Any] = {
         ChatRule.MAX_MESSAGE_LENGTH: 5000,
@@ -96,7 +97,10 @@ class ChatRuleEngine:
     }
 
     @classmethod
-    def _get_settings(cls, clinic_id: int) -> ClinicSettings | None:
+    def _get_settings(
+        cls,
+        clinic_id: int,
+    ) -> ClinicSettings | None:
         if (
             isinstance(clinic_id, bool)
             or not isinstance(clinic_id, int)
@@ -106,11 +110,24 @@ class ChatRuleEngine:
                 "Clinic ID must be greater than zero"
             )
 
-        stmt = db.select(ClinicSettings).where(
+        stmt = db.select(
+            ClinicSettings
+        ).where(
             ClinicSettings.clinic_id == clinic_id
         )
 
-        return db.session.execute(stmt).scalar_one_or_none()
+        return db.session.execute(
+            stmt
+        ).scalar_one_or_none()
+
+    @classmethod
+    def get_settings(
+        cls,
+        clinic_id: int,
+    ) -> ClinicSettings | None:
+        return cls._get_settings(
+            clinic_id,
+        )
 
     @classmethod
     def _get_chat_feature_flags(
@@ -122,7 +139,10 @@ class ChatRuleEngine:
 
         flags = settings.feature_flags
 
-        if not isinstance(flags, dict):
+        if not isinstance(
+            flags,
+            dict,
+        ):
             raise ValidationError(
                 "Clinic feature flags must be a JSON object"
             )
@@ -139,7 +159,10 @@ class ChatRuleEngine:
 
         preferences = settings.operational_preferences
 
-        if not isinstance(preferences, dict):
+        if not isinstance(
+            preferences,
+            dict,
+        ):
             raise ValidationError(
                 "Clinic operational preferences must be a JSON object"
             )
@@ -156,7 +179,10 @@ class ChatRuleEngine:
 
         preferences = settings.security_preferences
 
-        if not isinstance(preferences, dict):
+        if not isinstance(
+            preferences,
+            dict,
+        ):
             raise ValidationError(
                 "Clinic security preferences must be a JSON object"
             )
@@ -173,7 +199,10 @@ class ChatRuleEngine:
 
         preferences = settings.system_preferences
 
-        if not isinstance(preferences, dict):
+        if not isinstance(
+            preferences,
+            dict,
+        ):
             raise ValidationError(
                 "Clinic system preferences must be a JSON object"
             )
@@ -187,9 +216,15 @@ class ChatRuleEngine:
         container: dict[str, Any],
         key: str,
     ) -> Any:
-        chat_settings = container.get("chat", {})
+        chat_settings = container.get(
+            "chat",
+            {},
+        )
 
-        if not isinstance(chat_settings, dict):
+        if not isinstance(
+            chat_settings,
+            dict,
+        ):
             raise ValidationError(
                 "Chat settings must be a JSON object"
             )
@@ -208,14 +243,19 @@ class ChatRuleEngine:
         if settings is None:
             return True
 
-        flags = cls._get_chat_feature_flags(settings)
+        flags = cls._get_chat_feature_flags(
+            settings
+        )
 
         if feature_name not in flags:
             return True
 
         value = flags[feature_name]
 
-        if not isinstance(value, bool):
+        if not isinstance(
+            value,
+            bool,
+        ):
             raise ValidationError(
                 f"Feature flag '{feature_name}' must be boolean"
             )
@@ -228,7 +268,10 @@ class ChatRuleEngine:
         rule: str,
         value: Any,
     ) -> bool:
-        if not isinstance(value, bool):
+        if not isinstance(
+            value,
+            bool,
+        ):
             raise ValidationError(
                 f"Chat rule '{rule}' must be boolean"
             )
@@ -241,7 +284,10 @@ class ChatRuleEngine:
         rule: str,
         value: Any,
     ) -> int:
-        if isinstance(value, bool) or not isinstance(value, int):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+        ):
             raise ValidationError(
                 f"Chat rule '{rule}' must be an integer"
             )
@@ -259,7 +305,10 @@ class ChatRuleEngine:
         rule: str,
         value: Any,
     ) -> int:
-        if isinstance(value, bool) or not isinstance(value, int):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+        ):
             raise ValidationError(
                 f"Chat rule '{rule}' must be an integer"
             )
@@ -276,7 +325,10 @@ class ChatRuleEngine:
         cls,
         value: Any,
     ) -> list[str]:
-        if not isinstance(value, list):
+        if not isinstance(
+            value,
+            list,
+        ):
             raise ValidationError(
                 "Allowed attachment types must be a list"
             )
@@ -289,10 +341,16 @@ class ChatRuleEngine:
         normalized: list[str] = []
 
         for item in value:
-            if isinstance(item, Enum):
+            if isinstance(
+                item,
+                Enum,
+            ):
                 item = item.value
 
-            if not isinstance(item, str):
+            if not isinstance(
+                item,
+                str,
+            ):
                 raise ValidationError(
                     "Attachment types must contain strings"
                 )
@@ -317,23 +375,36 @@ class ChatRuleEngine:
         cls,
         value: Any,
     ) -> dict[str, Any]:
-        if not isinstance(value, dict):
+        if not isinstance(
+            value,
+            dict,
+        ):
             raise ValidationError(
                 "Department restrictions must be a JSON object"
             )
 
-        enabled = value.get("enabled", False)
+        enabled = value.get(
+            "enabled",
+            False,
+        )
+
         allowed_ids = value.get(
             "allowed_department_ids",
             [],
         )
 
-        if not isinstance(enabled, bool):
+        if not isinstance(
+            enabled,
+            bool,
+        ):
             raise ValidationError(
                 "Department restriction 'enabled' must be boolean"
             )
 
-        if not isinstance(allowed_ids, list):
+        if not isinstance(
+            allowed_ids,
+            list,
+        ):
             raise ValidationError(
                 "allowed_department_ids must be a list"
             )
@@ -351,7 +422,9 @@ class ChatRuleEngine:
                 )
 
             if department_id not in normalized_ids:
-                normalized_ids.append(department_id)
+                normalized_ids.append(
+                    department_id
+                )
 
         if enabled and not normalized_ids:
             raise ValidationError(
@@ -369,7 +442,10 @@ class ChatRuleEngine:
         cls,
         value: Any,
     ) -> dict[str, bool]:
-        if not isinstance(value, dict):
+        if not isinstance(
+            value,
+            dict,
+        ):
             raise ValidationError(
                 "Feature availability must be a JSON object"
             )
@@ -387,7 +463,10 @@ class ChatRuleEngine:
                     "non-empty non-numeric strings"
                 )
 
-            if not isinstance(enabled, bool):
+            if not isinstance(
+                enabled,
+                bool,
+            ):
                 raise ValidationError(
                     f"Feature availability '{feature}' must be boolean"
                 )
@@ -402,14 +481,18 @@ class ChatRuleEngine:
         rule: str,
         clinic_id: int,
     ) -> Any:
-        settings = cls._get_settings(clinic_id)
+        settings = cls._get_settings(
+            clinic_id
+        )
 
         operational = cls._get_operational_preferences(
             settings
         )
+
         security = cls._get_security_preferences(
             settings
         )
+
         system = cls._get_system_preferences(
             settings
         )
@@ -492,15 +575,23 @@ class ChatRuleEngine:
         rule: str,
         value: Any,
     ) -> Any:
-        hard_limit = cls.HARD_LIMITS.get(rule)
+        hard_limit = cls.HARD_LIMITS.get(
+            rule
+        )
 
         if hard_limit is None:
             return value
 
-        if isinstance(value, bool):
+        if isinstance(
+            value,
+            bool,
+        ):
             return value
 
-        if isinstance(value, int):
+        if isinstance(
+            value,
+            int,
+        ):
             return min(
                 value,
                 hard_limit,
@@ -613,10 +704,24 @@ class ChatRuleEngine:
     def ensure_chat_enabled(
         cls,
         clinic_id: int,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> None:
-        settings = cls._get_settings(clinic_id)
+        if settings is cls._SETTINGS_UNSET:
+            settings = cls._get_settings(
+                clinic_id
+            )
+        elif (
+            settings is not None
+            and settings.clinic_id != clinic_id
+        ):
+            raise ValidationError(
+                "Clinic settings do not belong to the requested clinic"
+            )
 
-        if settings is not None and not settings.is_enabled:
+        if (
+            settings is not None
+            and not settings.is_enabled
+        ):
             raise ValidationError(
                 "Chat settings are disabled for this clinic"
             )
@@ -630,7 +735,10 @@ class ChatRuleEngine:
             True,
         )
 
-        if not isinstance(chat_enabled, bool):
+        if not isinstance(
+            chat_enabled,
+            bool,
+        ):
             raise ValidationError(
                 "Feature flag 'chat_enabled' must be boolean"
             )
@@ -689,7 +797,10 @@ class ChatRuleEngine:
         clinic_id: int,
         message: str,
     ) -> None:
-        if not isinstance(message, str):
+        if not isinstance(
+            message,
+            str,
+        ):
             raise ValidationError(
                 "Message content must be a string"
             )
@@ -728,7 +839,10 @@ class ChatRuleEngine:
         ):
             attachment_type = attachment_type.value
 
-        if not isinstance(attachment_type, str):
+        if not isinstance(
+            attachment_type,
+            str,
+        ):
             raise ValidationError(
                 "Attachment type must be a string"
             )
@@ -931,7 +1045,9 @@ class ChatRuleEngine:
 
         if (
             now - created_at
-            > timedelta(seconds=window_seconds)
+            > timedelta(
+                seconds=window_seconds
+            )
         ):
             raise ValidationError(
                 "The message editing window has expired"
@@ -979,7 +1095,9 @@ class ChatRuleEngine:
 
         if (
             now - created_at
-            > timedelta(seconds=window_seconds)
+            > timedelta(
+                seconds=window_seconds
+            )
         ):
             raise ValidationError(
                 "The message deletion window has expired"

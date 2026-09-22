@@ -8,16 +8,39 @@ from app.modules.chat.rule.rule_engine import (
 )
 from app.core.enums.chat_enums import AttachmentType
 from app.core.exceptions import ValidationError
+from app.modules.settings.models.clinic_settings import ClinicSettings
+
+
+_SETTINGS_UNSET = object()
 
 
 class ChatPolicyService:
     @classmethod
+    def get_settings(
+        cls,
+        clinic_id: int,
+    ) -> ClinicSettings | None:
+        return ChatRuleEngine.get_settings(
+            clinic_id,
+        )
+
+    @classmethod
     def ensure_chat_enabled(
         cls,
         clinic_id: int,
+        settings: ClinicSettings | None | object = (
+            _SETTINGS_UNSET
+        ),
     ) -> None:
+        if settings is _SETTINGS_UNSET:
+            ChatRuleEngine.ensure_chat_enabled(
+                clinic_id,
+            )
+            return
+
         ChatRuleEngine.ensure_chat_enabled(
             clinic_id,
+            settings=settings,
         )
 
     @classmethod
@@ -188,7 +211,10 @@ class ChatPolicyService:
         clinic_id: int,
         rule: str,
     ) -> Any:
-        if not isinstance(rule, str) or not rule.strip():
+        if (
+            not isinstance(rule, str)
+            or not rule.strip()
+        ):
             raise ValidationError(
                 "Chat rule name must be a non-empty string"
             )

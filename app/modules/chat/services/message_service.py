@@ -298,8 +298,15 @@ def create_message(
         clinic_id,
     )
 
+    chat_settings = (
+        ChatPolicyService.get_settings(
+            clinic_id,
+        )
+    )
+
     ChatPolicyService.ensure_chat_enabled(
         clinic_id,
+        settings=chat_settings,
     )
 
     conversation = ChatSecurityService.ensure_user_can_send_message(
@@ -338,9 +345,12 @@ def create_message(
     )
 
     if content is not None:
-        content = ChatContentValidationService.ensure_text_allowed(
-            clinic_id,
-            content,
+        content = (
+            ChatContentValidationService.ensure_text_allowed(
+                clinic_id,
+                content,
+                settings=chat_settings,
+            )
         )
 
     if (

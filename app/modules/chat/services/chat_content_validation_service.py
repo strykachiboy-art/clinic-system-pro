@@ -9,6 +9,7 @@ from app.modules.settings.models.clinic_settings import ClinicSettings
 
 
 MAX_CONTENT_LENGTH = 10_000
+_SETTINGS_UNSET = object()
 
 
 class ChatContentValidationService:
@@ -303,12 +304,39 @@ class ChatContentValidationService:
         ).scalar_one_or_none()
 
     @classmethod
+    def _resolve_settings(
+        cls,
+        clinic_id: int,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
+    ) -> ClinicSettings | None:
+        clinic_id = cls._validate_clinic_id(
+            clinic_id,
+        )
+
+        if settings is _SETTINGS_UNSET:
+            return cls._get_settings(
+                clinic_id,
+            )
+
+        if (
+            settings is not None
+            and settings.clinic_id != clinic_id
+        ):
+            raise ValidationError(
+                "Clinic settings do not belong to the requested clinic"
+            )
+
+        return settings
+
+    @classmethod
     def _get_chat_security_preferences(
         cls,
         clinic_id: int,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> dict[str, Any]:
-        settings = cls._get_settings(
+        settings = cls._resolve_settings(
             clinic_id,
+            settings,
         )
 
         if settings is None:
@@ -345,9 +373,11 @@ class ChatContentValidationService:
     def _get_feature_flags(
         cls,
         clinic_id: int,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> dict[str, Any]:
-        settings = cls._get_settings(
+        settings = cls._resolve_settings(
             clinic_id,
+            settings,
         )
 
         if settings is None:
@@ -371,9 +401,11 @@ class ChatContentValidationService:
         cls,
         clinic_id: int,
         key: str,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> bool:
         preferences = cls._get_chat_security_preferences(
             clinic_id,
+            settings=settings,
         )
 
         if key not in preferences:
@@ -395,9 +427,11 @@ class ChatContentValidationService:
     def _is_moderation_enabled(
         cls,
         clinic_id: int,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> bool:
         feature_flags = cls._get_feature_flags(
             clinic_id,
+            settings=settings,
         )
 
         key = "chat_content_moderation_enabled"
@@ -580,9 +614,15 @@ class ChatContentValidationService:
         cls,
         clinic_id: int,
         content: str,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> dict[str, Any]:
         clinic_id = cls._validate_clinic_id(
             clinic_id,
+        )
+
+        settings = cls._resolve_settings(
+            clinic_id,
+            settings,
         )
 
         normalized = cls.normalize_text(
@@ -613,6 +653,7 @@ class ChatContentValidationService:
         moderation_enabled = (
             cls._is_moderation_enabled(
                 clinic_id,
+                settings=settings,
             )
         )
 
@@ -629,6 +670,7 @@ class ChatContentValidationService:
                 cls._get_boolean_setting(
                     clinic_id,
                     "clinical_sensitive_content_allowed",
+                    settings=settings,
                 )
             )
 
@@ -647,6 +689,7 @@ class ChatContentValidationService:
             cls._get_boolean_setting(
                 clinic_id,
                 "profanity_filter_enabled",
+                settings=settings,
             )
             and cls._matches_profanity(
                 normalized,
@@ -666,6 +709,7 @@ class ChatContentValidationService:
             cls._get_boolean_setting(
                 clinic_id,
                 "abusive_content_blocked",
+                settings=settings,
             )
             and cls._matches_abuse(
                 normalized,
@@ -685,6 +729,7 @@ class ChatContentValidationService:
             cls._get_boolean_setting(
                 clinic_id,
                 "spam_content_blocked",
+                settings=settings,
             )
             and cls._matches_spam(
                 normalized,
@@ -703,6 +748,7 @@ class ChatContentValidationService:
             not cls._get_boolean_setting(
                 clinic_id,
                 "external_links_allowed",
+                settings=settings,
             )
             and cls._contains_external_link(
                 normalized,
@@ -738,10 +784,12 @@ class ChatContentValidationService:
         cls,
         clinic_id: int,
         content: str,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> str:
         result = cls.validate_text(
             clinic_id,
             content,
+            settings=settings,
         )
 
         if not result["allowed"]:
@@ -757,10 +805,12 @@ class ChatContentValidationService:
         cls,
         clinic_id: int,
         content: str,
+        settings: ClinicSettings | None | object = _SETTINGS_UNSET,
     ) -> bool:
         result = cls.validate_text(
             clinic_id,
             content,
+            settings=settings,
         )
 
         return bool(
