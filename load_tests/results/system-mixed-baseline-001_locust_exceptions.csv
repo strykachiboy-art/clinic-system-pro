@@ -1,0 +1,12 @@
+Count,Message,Traceback,Nodes
+10,Access Control authentication failed,"  File ""C:\Users\HP\AppData\Local\Programs\Python\Python312\Lib\site-packages\locust\user\task.py"", line 363, in run
+    self.execute_next_task()
+  File ""C:\Users\HP\AppData\Local\Programs\Python\Python312\Lib\site-packages\locust\user\task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+  File ""C:\Users\HP\AppData\Local\Programs\Python\Python312\Lib\site-packages\locust\user\task.py"", line 513, in execute_task
+    task(self.user)
+  File ""C:\Users\HP\Documents\clinic-system\load_tests\scenarios\system_mixed.py"", line 509, in admin_operations_workflow
+    self._get_access_control_token()
+  File ""C:\Users\HP\Documents\clinic-system\load_tests\scenarios\system_mixed.py"", line 267, in _get_access_control_token
+    raise RuntimeError(
+",local

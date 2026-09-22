@@ -1,0 +1,4 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,POST /api/v1/auth/login [setup],"CatchResponseError('Unexpected HTTP 400: {""details"":[{""ctx"":{""reason"":""An email address must have an @-sign.""},""input"":""YOUR_REAL_SUPER_ADMIN_EMAIL"",""loc"":[""email""],""msg"":""value is not a valid email address: An email address must have an @-s')",7,2026-09-22T12:34:12Z,2026-09-22T12:34:29Z
+GET,"GET /api/v1/wards [page=1,per_page=50]",CatchResponseError('HTTP 200 but response has no data'),7,2026-09-22T12:34:13Z,2026-09-22T12:34:30Z
+GET,"GET /api/v1/reports [page=1,per_page=20]","CatchResponseError('Unexpected HTTP 422: {""error"":""Authenticated user is not associated with staff"",""success"":false}\n')",7,2026-09-22T12:34:13Z,2026-09-22T12:34:30Z
