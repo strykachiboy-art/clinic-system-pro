@@ -294,7 +294,7 @@ def create_message(
         "Sender ID",
     )
 
-    ensure_clinic_active(
+    clinic = ensure_clinic_active(
         clinic_id,
     )
 
@@ -399,6 +399,8 @@ def create_message(
             "reply_to_message_id": message.reply_to_message_id,
         },
         message_id=message.id,
+        clinic_obj=clinic,
+        message_obj=message,
     )
 
     now = _utcnow()

@@ -1412,12 +1412,6 @@ Official individual baselines:
 Individual baselines remaining:
 4
 
-Remaining:
-- Clinic
-- Staff
-- Dashboard
-- AI
-
 System-wide mixed workload:
 Not yet implemented
 

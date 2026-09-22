@@ -341,10 +341,23 @@ def create_outbox_event(
     payload: dict[str, Any],
     message_id: int | None = None,
     available_at: datetime | None = None,
+    *,
+    clinic_obj: Clinic | None = None,
+    message_obj: Message | None = None,
 ) -> ChatOutbox:
-    _get_clinic(
+    _validate_positive_id(
         clinic_id,
+        "Clinic ID",
     )
+
+    if clinic_obj is None:
+        _get_clinic(
+            clinic_id,
+        )
+    elif clinic_obj.id != clinic_id:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
 
     event_type = _normalize_event_type(
         event_type,
@@ -355,9 +368,26 @@ def create_outbox_event(
     )
 
     if message_id is not None:
-        _get_message(
+        message_id = _validate_positive_id(
             message_id,
-            clinic_id,
+            "Message ID",
+        )
+
+        if message_obj is None:
+            _get_message(
+                message_id,
+                clinic_id,
+            )
+        elif (
+            message_obj.id != message_id
+            or message_obj.clinic_id != clinic_id
+        ):
+            raise NotFoundError(
+                f"Message {message_id} not found"
+            )
+    elif message_obj is not None:
+        raise ValidationError(
+            "Message object requires a message ID"
         )
 
     available_at = _validate_datetime(
