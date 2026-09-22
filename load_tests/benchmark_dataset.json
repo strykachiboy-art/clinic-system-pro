@@ -16,6 +16,7 @@
     "prescriptions": 300,
     "reports": 100,
     "staff": 12,
+    "user_devices": 10,
     "wards": 2
   },
   "anchor_ids": {
@@ -37,7 +38,7 @@
     "staff_last": 31
   },
   "benchmark_identity": {
-    "email_domain": "clinicbench.local",
+    "email_domain": "example.com",
     "prefix": "BENCHMARK"
   },
   "clinic_id": 2,
@@ -61,6 +62,7 @@
     "prescriptions": 300,
     "reports": 100,
     "staff": 12,
+    "user_devices": 10,
     "wards": 2
   },
   "control_patient": {

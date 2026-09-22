@@ -17,6 +17,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 from app import create_app
+from app.core.auth.user.models.user_device_model import (
+    UserDevice,
+)
 from app.core.auth.user.services.user_service import (
     get_user_by_email,
 )
@@ -221,6 +224,7 @@ class BenchmarkConfig:
     conversations: int = 50
     messages: int = 500
     reports: int = 100
+    user_devices: int = 10
     ai_credits: int = AI_CREDITS
 
 
@@ -355,6 +359,81 @@ def get_or_create_control_patient(
     )
 
 
+def seed_user_devices(
+    user,
+    count: int,
+):
+    count = max(0, count)
+
+    existing = db.session.execute(
+        select(UserDevice)
+        .where(
+            UserDevice.user_id == user.id,
+            UserDevice.device_token.like(
+                f"{BENCHMARK_PREFIX}-DEVICE-%"
+            ),
+        )
+        .order_by(
+            UserDevice.device_token.asc(),
+            UserDevice.id.asc(),
+        )
+    ).scalars().all()
+
+    by_token = {
+        device.device_token: device
+        for device in existing
+    }
+
+    devices = []
+
+    platforms = (
+        "android",
+        "ios",
+        "web",
+    )
+
+    for index in range(count):
+        sequence = index + 1
+
+        token = (
+            f"{BENCHMARK_PREFIX}"
+            f"-DEVICE-{sequence:04d}"
+        )
+
+        device = by_token.get(token)
+
+        if device is None:
+            created_at = _benchmark_datetime(
+                index
+            )
+
+            device = UserDevice(
+                user_id=user.id,
+                device_token=token,
+                device_name=(
+                    f"Benchmark Device "
+                    f"{sequence:02d}"
+                ),
+                platform=platforms[
+                    index % len(platforms)
+                ],
+                is_active=(
+                    index % 5 != 0
+                ),
+                last_seen_at=created_at,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+
+            db.session.add(device)
+
+        devices.append(device)
+
+    db.session.flush()
+
+    return devices
+
+
 def ensure_ai_credits(
     clinic: Clinic,
 ):
@@ -422,41 +501,42 @@ def seed_staff(
     users = []
     staff_rows = []
 
+    User = __import__(
+        "app.core.auth.user.models.user_model",
+        fromlist=["User"],
+    ).User
+
     existing_users = {
         user.email: user
         for user in db.session.execute(
-            select(
-                __import__(
-                    "app.core.auth.user.models.user_model",
-                    fromlist=["User"],
-                ).User
-            ).where(
-                __import__(
-                    "app.core.auth.user.models.user_model",
-                    fromlist=["User"],
-                ).User.email.like(
+            select(User).where(
+                User.email.like(
                     f"{BENCHMARK_PREFIX.lower()}-staff-%"
                 )
             )
         ).scalars()
     }
 
-    existing_staff = {
+    existing_staff_rows = db.session.execute(
+        select(Staff).where(
+            Staff.clinic_id == clinic.id,
+            Staff.email.like(
+                f"{BENCHMARK_PREFIX.lower()}-%"
+            ),
+        )
+    ).scalars().all()
+
+    existing_staff_by_email = {
         staff.email: staff
-        for staff in db.session.execute(
-            select(Staff).where(
-                Staff.clinic_id == clinic.id,
-                Staff.email.like(
-                    f"{BENCHMARK_PREFIX.lower()}-staff-%"
-                ),
-            )
-        ).scalars()
+        for staff in existing_staff_rows
+        if staff.email
     }
 
-    User = __import__(
-        "app.core.auth.user.models.user_model",
-        fromlist=["User"],
-    ).User
+    existing_staff_by_user_id = {
+        staff.user_id: staff
+        for staff in existing_staff_rows
+        if staff.user_id is not None
+    }
 
     for index in range(1, count + 1):
         display_name, code, role, specialty = (
@@ -487,10 +567,14 @@ def seed_staff(
 
         users.append(user)
 
-        staff_email = email
-        staff = existing_staff.get(
-            staff_email
+        staff = existing_staff_by_user_id.get(
+            user.id
         )
+
+        if staff is None:
+            staff = existing_staff_by_email.get(
+                email
+            )
 
         if staff is None:
             staff = Staff(
@@ -500,7 +584,7 @@ def seed_staff(
                 last_name=f"Benchmark{code}",
                 specialty=specialty,
                 phone=f"0810000{index:04d}",
-                email=staff_email,
+                email=email,
                 status=StaffStatus.ACTIVE,
                 hired_at=date(
                     2025,
@@ -511,7 +595,43 @@ def seed_staff(
             db.session.add(staff)
             db.session.flush()
 
+            existing_staff_by_user_id[
+                user.id
+            ] = staff
+
+            existing_staff_by_email[
+                email
+            ] = staff
+        else:
+            staff.clinic_id = clinic.id
+            staff.user_id = user.id
+            staff.first_name = display_name
+            staff.last_name = (
+                f"Benchmark{code}"
+            )
+            staff.specialty = specialty
+            staff.phone = (
+                f"0810000{index:04d}"
+            )
+            staff.email = email
+            staff.status = StaffStatus.ACTIVE
+            staff.hired_at = date(
+                2025,
+                1,
+                1,
+            )
+
+            existing_staff_by_user_id[
+                user.id
+            ] = staff
+
+            existing_staff_by_email[
+                email
+            ] = staff
+
         staff_rows.append(staff)
+
+    db.session.flush()
 
     return users, staff_rows
 
@@ -521,22 +641,22 @@ def seed_patients(
     count: int,
 ):
     existing = db.session.execute(
-        select(Patient)
-        .where(
+        select(Patient).where(
             Patient.clinic_id == clinic.id,
-            Patient.email.like(
-                f"{BENCHMARK_PREFIX.lower()}-patient-%"
+            Patient.patient_number.like(
+                f"{BENCHMARK_PREFIX}-PT-%"
             ),
         )
         .order_by(
-            Patient.email.asc(),
+            Patient.patient_number.asc(),
             Patient.id.asc(),
         )
     ).scalars().all()
 
-    by_email = {
-        patient.email: patient
+    by_patient_number = {
+        patient.patient_number: patient
         for patient in existing
+        if patient.patient_number
     }
 
     patients = []
@@ -546,13 +666,22 @@ def seed_patients(
             index
         )
 
-        patient = by_email.get(email)
+        patient_number = (
+            f"{BENCHMARK_PREFIX}"
+            f"-PT-{index:08d}"
+        )
+
+        patient = by_patient_number.get(
+            patient_number
+        )
 
         if patient is None:
             patient = Patient(
                 clinic_id=clinic.id,
                 first_name="Benchmark",
-                last_name=f"Patient{index:06d}",
+                last_name=(
+                    f"Patient{index:06d}"
+                ),
                 date_of_birth=date(
                     1980 + (index % 30),
                     1 + (index % 12),
@@ -564,28 +693,67 @@ def seed_patients(
                     else Gender.FEMALE
                 ),
                 blood_type=BloodType.UNKNOWN,
-                phone=f"0820000{index:06d}",
+                phone=(
+                    f"0820000{index:06d}"
+                ),
                 email=email,
                 address=(
                     f"Benchmark Avenue "
                     f"{index:06d}"
                 ),
-                allergies=(
-                    "None reported"
-                ),
+                allergies="None reported",
                 chronic_conditions=(
                     "None reported"
                 ),
                 patient_number=(
-                    f"{BENCHMARK_PREFIX}"
-                    f"-PT-{index:08d}"
+                    patient_number
                 ),
                 is_active=True,
             )
+
             db.session.add(patient)
-            patients.append(patient)
+            db.session.flush()
+
         else:
-            patients.append(patient)
+            patient.clinic_id = clinic.id
+            patient.first_name = "Benchmark"
+            patient.last_name = (
+                f"Patient{index:06d}"
+            )
+            patient.date_of_birth = date(
+                1980 + (index % 30),
+                1 + (index % 12),
+                1 + (index % 25),
+            )
+            patient.gender = (
+                Gender.MALE
+                if index % 2
+                else Gender.FEMALE
+            )
+            patient.blood_type = (
+                BloodType.UNKNOWN
+            )
+            patient.phone = (
+                f"0820000{index:06d}"
+            )
+            patient.email = email
+            patient.address = (
+                f"Benchmark Avenue "
+                f"{index:06d}"
+            )
+            patient.allergies = (
+                "None reported"
+            )
+            patient.chronic_conditions = (
+                "None reported"
+            )
+            patient.is_active = True
+
+        patients.append(patient)
+
+        by_patient_number[
+            patient_number
+        ] = patient
 
     db.session.flush()
 
@@ -2246,6 +2414,7 @@ def build_manifest(
     clinic: Clinic,
     control_user,
     control_patient,
+    user_devices: list[UserDevice],
     staff_rows: list[Staff],
     patients: list[Patient],
     appointments: list[Appointment],
@@ -2306,8 +2475,15 @@ def build_manifest(
             "conversations": len(
                 conversations
             ),
-            "messages": len(messages),
-            "reports": len(reports),
+            "messages": len(
+                messages
+            ),
+            "reports": len(
+                reports
+            ),
+            "user_devices": len(
+                user_devices
+            ),
         },
         "benchmark_identity": {
             "prefix": BENCHMARK_PREFIX,
@@ -2518,6 +2694,11 @@ def parse_args() -> tuple[BenchmarkConfig, Path]:
         default=100,
     )
     parser.add_argument(
+        "--user-devices",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
         "--ai-credits",
         type=int,
         default=AI_CREDITS,
@@ -2549,6 +2730,7 @@ def parse_args() -> tuple[BenchmarkConfig, Path]:
         conversations=args.conversations,
         messages=args.messages,
         reports=args.reports,
+        user_devices=args.user_devices,
         ai_credits=args.ai_credits,
     )
 
@@ -2576,6 +2758,11 @@ def main():
                 clinic.id,
                 control_user.id,
             )
+        )
+
+        user_devices = seed_user_devices(
+            control_user,
+            config.user_devices,
         )
 
         clinic = ensure_ai_credits(
@@ -2695,6 +2882,7 @@ def main():
             clinic=clinic,
             control_user=control_user,
             control_patient=control_patient,
+            user_devices=user_devices,
             staff_rows=staff_rows,
             patients=patients,
             appointments=appointments,
@@ -2809,6 +2997,10 @@ def main():
         print(
             f"Reports:            "
             f"{len(reports)}"
+        )
+        print(
+            f"User devices:       "
+            f"{len(user_devices)}"
         )
         print(
             f"AI credits:         "
