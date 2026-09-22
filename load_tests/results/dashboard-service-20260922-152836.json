@@ -1,0 +1,10 @@
+{
+  "actor_id": 5,
+  "actor_role": "admin",
+  "clinic_id": 2,
+  "service_entry_point": "app.modules.dashboard.services.dashboard_service.get_dashboard",
+  "result_type": "ManagementDashboardSchema",
+  "service_time_ms": 508.554,
+  "profile_file": "C:\\Users\\HP\\Documents\\clinic-system\\load_tests\\results\\dashboard-service-20260922-152836.prof",
+  "stats_file": "C:\\Users\\HP\\Documents\\clinic-system\\load_tests\\results\\dashboard-service-20260922-152836.txt"
+}

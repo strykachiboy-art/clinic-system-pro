@@ -449,159 +449,197 @@ def build_ai_aggregates(
             AILog.user_id == user_id,
         )
 
-    total_ai_requests = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+    overview_statement = db.select(
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
-        )
-    )
-
-    total_credits_used = count_scalar(
-        db.select(
-            db.func.coalesce(
-                db.func.sum(
-                    AILog.credits_used,
-                ),
-                0,
-            )
-        ).where(
-            *filters,
-        )
-    )
-
-    total_input_tokens = count_scalar(
-        db.select(
-            db.func.coalesce(
-                db.func.sum(
-                    AILog.input_tokens,
-                ),
-                0,
-            )
-        ).where(
-            *filters,
-        )
-    )
-
-    total_output_tokens = count_scalar(
-        db.select(
-            db.func.coalesce(
-                db.func.sum(
-                    AILog.output_tokens,
-                ),
-                0,
-            )
-        ).where(
-            *filters,
-        )
-    )
-
-    total_tokens = count_scalar(
-        db.select(
-            db.func.coalesce(
-                db.func.sum(
-                    AILog.total_tokens,
-                ),
-                0,
-            )
-        ).where(
-            *filters,
-        )
-    )
-
-    estimated_cost = decimal_scalar(
-        db.select(
-            db.func.coalesce(
-                db.func.sum(
-                    AILog.estimated_cost,
-                ),
-                0,
-            )
-        ).where(
-            *filters,
-        )
-    )
-
-    pending_reviews = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "total_ai_requests"
+        ),
+        db.func.coalesce(
+            db.func.sum(
+                AILog.credits_used,
+            ).filter(
+                *filters,
+            ),
+            0,
+        ).label(
+            "total_credits_used"
+        ),
+        db.func.coalesce(
+            db.func.sum(
+                AILog.input_tokens,
+            ).filter(
+                *filters,
+            ),
+            0,
+        ).label(
+            "total_input_tokens"
+        ),
+        db.func.coalesce(
+            db.func.sum(
+                AILog.output_tokens,
+            ).filter(
+                *filters,
+            ),
+            0,
+        ).label(
+            "total_output_tokens"
+        ),
+        db.func.coalesce(
+            db.func.sum(
+                AILog.total_tokens,
+            ).filter(
+                *filters,
+            ),
+            0,
+        ).label(
+            "total_tokens"
+        ),
+        db.func.coalesce(
+            db.func.sum(
+                AILog.estimated_cost,
+            ).filter(
+                *filters,
+            ),
+            0,
+        ).label(
+            "estimated_cost"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.approval_status
             == AIApprovalStatus.PENDING,
-        )
-    )
-
-    approved_reviews = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "pending_reviews"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.approval_status
             == AIApprovalStatus.APPROVED,
-        )
-    )
-
-    rejected_reviews = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "approved_reviews"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.approval_status
             == AIApprovalStatus.REJECTED,
-        )
-    )
-
-    low_risk_results = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "rejected_reviews"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.risk_level == AIRiskLevel.LOW,
-        )
-    )
-
-    medium_risk_results = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "low_risk_results"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.risk_level == AIRiskLevel.MEDIUM,
-        )
-    )
-
-    high_risk_results = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "medium_risk_results"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.risk_level == AIRiskLevel.HIGH,
-        )
-    )
-
-    critical_risk_results = count_scalar(
-        db.select(
-            db.func.count(
-                AILog.id,
-            )
-        ).where(
+        ).label(
+            "high_risk_results"
+        ),
+        db.func.count(
+            AILog.id,
+        ).filter(
             *filters,
             AILog.risk_level == AIRiskLevel.CRITICAL,
+        ).label(
+            "critical_risk_results"
+        ),
+    )
+
+    overview = (
+        db.session.execute(
+            overview_statement,
         )
+        .mappings()
+        .one()
+    )
+
+    total_ai_requests = int(
+        overview["total_ai_requests"] or 0
+    )
+
+    total_credits_used = int(
+        overview["total_credits_used"] or 0
+    )
+
+    total_input_tokens = int(
+        overview["total_input_tokens"] or 0
+    )
+
+    total_output_tokens = int(
+        overview["total_output_tokens"] or 0
+    )
+
+    total_tokens = int(
+        overview["total_tokens"] or 0
+    )
+
+    estimated_cost_value = overview[
+        "estimated_cost"
+    ]
+
+    if estimated_cost_value is None:
+        estimated_cost = Decimal("0")
+    elif isinstance(
+        estimated_cost_value,
+        Decimal,
+    ):
+        estimated_cost = estimated_cost_value
+    else:
+        estimated_cost = Decimal(
+            str(
+                estimated_cost_value
+            )
+        )
+
+    pending_reviews = int(
+        overview["pending_reviews"] or 0
+    )
+
+    approved_reviews = int(
+        overview["approved_reviews"] or 0
+    )
+
+    rejected_reviews = int(
+        overview["rejected_reviews"] or 0
+    )
+
+    low_risk_results = int(
+        overview["low_risk_results"] or 0
+    )
+
+    medium_risk_results = int(
+        overview["medium_risk_results"] or 0
+    )
+
+    high_risk_results = int(
+        overview["high_risk_results"] or 0
+    )
+
+    critical_risk_results = int(
+        overview["critical_risk_results"] or 0
     )
 
     feature_rows = db.session.execute(

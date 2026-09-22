@@ -1,0 +1,420 @@
+{
+  "actor_id": 5,
+  "result_type": "ManagementDashboardSchema",
+  "total_service_time_ms": 2914.5992,
+  "db_query_count": 34,
+  "total_db_time_ms": 352.413,
+  "slow_query_count_ge_10ms": 11,
+  "queries_in_execution_order": [
+    {
+      "query": 1,
+      "duration_ms": 8.7011,
+      "executemany": false,
+      "sql": "SELECT users.id AS users_id, users.email AS users_email, users.password_hash AS users_password_hash, users.role AS users_role, users.is_active AS users_is_active, users.token_version AS users_token_version, users.clinic_id AS users_clinic_id, users.profile_image_storage_key AS users_profile_image_storage_key, users.created_at AS users_created_at, users.updated_at AS users_updated_at, users.last_login_at AS users_last_login_at FROM users WHERE users.id = %(pk_1)s"
+    },
+    {
+      "query": 2,
+      "duration_ms": 17.1807,
+      "executemany": false,
+      "sql": "SELECT count(patients.id) AS count_1 FROM patients WHERE patients.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 3,
+      "duration_ms": 1.6909,
+      "executemany": false,
+      "sql": "SELECT count(patients.id) AS count_1 FROM patients WHERE patients.clinic_id = %(clinic_id_1)s AND patients.is_active IS true"
+    },
+    {
+      "query": 4,
+      "duration_ms": 13.9471,
+      "executemany": false,
+      "sql": "SELECT count(staff.id) AS count_1 FROM staff WHERE staff.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 5,
+      "duration_ms": 2.3496,
+      "executemany": false,
+      "sql": "SELECT count(staff.id) AS count_1 FROM staff WHERE staff.clinic_id = %(clinic_id_1)s AND staff.status = %(status_1)s"
+    },
+    {
+      "query": 6,
+      "duration_ms": 6.7236,
+      "executemany": false,
+      "sql": "SELECT count(appointments.id) AS count_1 FROM appointments WHERE appointments.clinic_id = %(clinic_id_1)s AND appointments.status IN (%(status_1_1)s, %(status_1_2)s) AND appointments.scheduled_start >= %(scheduled_start_1)s AND appointments.scheduled_start < %(scheduled_start_2)s"
+    },
+    {
+      "query": 7,
+      "duration_ms": 1.9311,
+      "executemany": false,
+      "sql": "SELECT count(appointments.id) AS count_1 FROM appointments WHERE appointments.clinic_id = %(clinic_id_1)s AND appointments.status = %(status_1)s AND appointments.scheduled_start >= %(scheduled_start_1)s AND appointments.scheduled_start < %(scheduled_start_2)s"
+    },
+    {
+      "query": 8,
+      "duration_ms": 15.0509,
+      "executemany": false,
+      "sql": "SELECT count(admissions.id) AS count_1 FROM admissions JOIN patients ON admissions.patient_id = patients.id WHERE patients.clinic_id = %(clinic_id_1)s AND admissions.status = %(status_1)s"
+    },
+    {
+      "query": 9,
+      "duration_ms": 19.8726,
+      "executemany": false,
+      "sql": "SELECT count(beds.id) AS count_1 FROM beds JOIN wards ON beds.ward_id = wards.id WHERE wards.clinic_id = %(clinic_id_1)s AND beds.status = %(status_1)s"
+    },
+    {
+      "query": 10,
+      "duration_ms": 35.6304,
+      "executemany": false,
+      "sql": "SELECT count(lab_orders.id) AS count_1 FROM lab_orders WHERE lab_orders.clinic_id = %(clinic_id_1)s AND lab_orders.status IN (%(status_1_1)s, %(status_1_2)s, %(status_1_3)s)"
+    },
+    {
+      "query": 11,
+      "duration_ms": 17.3346,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 12,
+      "duration_ms": 1.5097,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.credits_used), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 13,
+      "duration_ms": 1.2887,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.input_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 14,
+      "duration_ms": 1.2287,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.output_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 15,
+      "duration_ms": 1.2448,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.total_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 16,
+      "duration_ms": 1.571,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.estimated_cost), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 17,
+      "duration_ms": 1.9537,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 18,
+      "duration_ms": 1.2824,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 19,
+      "duration_ms": 1.3812,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 20,
+      "duration_ms": 2.0743,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 21,
+      "duration_ms": 1.298,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 22,
+      "duration_ms": 1.2061,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 23,
+      "duration_ms": 1.254,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 24,
+      "duration_ms": 2.4722,
+      "executemany": false,
+      "sql": "SELECT ai_logs.feature_used, count(ai_logs.id) AS count_1, coalesce(sum(ai_logs.credits_used), %(coalesce_2)s) AS coalesce_1, coalesce(sum(ai_logs.estimated_cost), %(coalesce_4)s) AS coalesce_3 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.feature_used"
+    },
+    {
+      "query": 25,
+      "duration_ms": 2.348,
+      "executemany": false,
+      "sql": "SELECT ai_logs.risk_level, count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.risk_level"
+    },
+    {
+      "query": 26,
+      "duration_ms": 1.5126,
+      "executemany": false,
+      "sql": "SELECT ai_logs.approval_status, count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.approval_status"
+    },
+    {
+      "query": 27,
+      "duration_ms": 91.8866,
+      "executemany": false,
+      "sql": "SELECT count(chat_message_read_receipts.id) AS count_1 FROM chat_message_read_receipts JOIN chat_messages ON chat_messages.id = chat_message_read_receipts.message_id WHERE chat_message_read_receipts.user_id = %(user_id_1)s AND chat_message_read_receipts.clinic_id = %(clinic_id_1)s AND chat_message_read_receipts.status = %(status_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_2_1)s, %(status_2_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_2)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_3)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_4)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 28,
+      "duration_ms": 5.4239,
+      "executemany": false,
+      "sql": "SELECT count(distinct(chat_messages.conversation_id)) AS count_1 FROM chat_message_read_receipts JOIN chat_messages ON chat_messages.id = chat_message_read_receipts.message_id WHERE chat_message_read_receipts.user_id = %(user_id_1)s AND chat_message_read_receipts.clinic_id = %(clinic_id_1)s AND chat_message_read_receipts.status = %(status_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_2_1)s, %(status_2_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_2)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_3)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_4)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 29,
+      "duration_ms": 24.5796,
+      "executemany": false,
+      "sql": "SELECT count(chat_message_mentions.id) AS count_1 FROM chat_message_mentions JOIN chat_messages ON chat_messages.id = chat_message_mentions.message_id WHERE chat_message_mentions.clinic_id = %(clinic_id_1)s AND chat_message_mentions.mentioned_user_id = %(mentioned_user_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 30,
+      "duration_ms": 5.5967,
+      "executemany": false,
+      "sql": "SELECT count(chat_messages.id) AS count_1 FROM chat_messages WHERE chat_messages.clinic_id = %(clinic_id_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.priority IN (%(priority_1_1)s, %(priority_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 31,
+      "duration_ms": 4.4417,
+      "executemany": false,
+      "sql": "SELECT count(chat_messages.id) AS count_1 FROM chat_messages WHERE chat_messages.clinic_id = %(clinic_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 32,
+      "duration_ms": 17.9128,
+      "executemany": false,
+      "sql": "SELECT count(inventory_items.id) AS count_1 FROM inventory_items WHERE inventory_items.clinic_id = %(clinic_id_1)s AND inventory_items.is_active IS true AND inventory_items.quantity_on_hand <= inventory_items.reorder_level"
+    },
+    {
+      "query": 33,
+      "duration_ms": 19.3657,
+      "executemany": false,
+      "sql": "SELECT count(invoices.id) AS count_1 FROM invoices WHERE invoices.clinic_id = %(clinic_id_1)s AND invoices.status = %(status_1)s"
+    },
+    {
+      "query": 34,
+      "duration_ms": 19.168,
+      "executemany": false,
+      "sql": "SELECT audit_logs.id, audit_logs.user_id, audit_logs.action, audit_logs.entity_type, audit_logs.entity_id, audit_logs.description, audit_logs.old_value, audit_logs.new_value, audit_logs.ip_address, audit_logs.created_at FROM audit_logs JOIN users ON audit_logs.user_id = users.id WHERE users.clinic_id = %(clinic_id_1)s ORDER BY audit_logs.created_at DESC, audit_logs.id DESC LIMIT %(param_1)s"
+    }
+  ],
+  "queries_sorted_by_duration": [
+    {
+      "query": 27,
+      "duration_ms": 91.8866,
+      "executemany": false,
+      "sql": "SELECT count(chat_message_read_receipts.id) AS count_1 FROM chat_message_read_receipts JOIN chat_messages ON chat_messages.id = chat_message_read_receipts.message_id WHERE chat_message_read_receipts.user_id = %(user_id_1)s AND chat_message_read_receipts.clinic_id = %(clinic_id_1)s AND chat_message_read_receipts.status = %(status_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_2_1)s, %(status_2_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_2)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_3)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_4)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 10,
+      "duration_ms": 35.6304,
+      "executemany": false,
+      "sql": "SELECT count(lab_orders.id) AS count_1 FROM lab_orders WHERE lab_orders.clinic_id = %(clinic_id_1)s AND lab_orders.status IN (%(status_1_1)s, %(status_1_2)s, %(status_1_3)s)"
+    },
+    {
+      "query": 29,
+      "duration_ms": 24.5796,
+      "executemany": false,
+      "sql": "SELECT count(chat_message_mentions.id) AS count_1 FROM chat_message_mentions JOIN chat_messages ON chat_messages.id = chat_message_mentions.message_id WHERE chat_message_mentions.clinic_id = %(clinic_id_1)s AND chat_message_mentions.mentioned_user_id = %(mentioned_user_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 9,
+      "duration_ms": 19.8726,
+      "executemany": false,
+      "sql": "SELECT count(beds.id) AS count_1 FROM beds JOIN wards ON beds.ward_id = wards.id WHERE wards.clinic_id = %(clinic_id_1)s AND beds.status = %(status_1)s"
+    },
+    {
+      "query": 33,
+      "duration_ms": 19.3657,
+      "executemany": false,
+      "sql": "SELECT count(invoices.id) AS count_1 FROM invoices WHERE invoices.clinic_id = %(clinic_id_1)s AND invoices.status = %(status_1)s"
+    },
+    {
+      "query": 34,
+      "duration_ms": 19.168,
+      "executemany": false,
+      "sql": "SELECT audit_logs.id, audit_logs.user_id, audit_logs.action, audit_logs.entity_type, audit_logs.entity_id, audit_logs.description, audit_logs.old_value, audit_logs.new_value, audit_logs.ip_address, audit_logs.created_at FROM audit_logs JOIN users ON audit_logs.user_id = users.id WHERE users.clinic_id = %(clinic_id_1)s ORDER BY audit_logs.created_at DESC, audit_logs.id DESC LIMIT %(param_1)s"
+    },
+    {
+      "query": 32,
+      "duration_ms": 17.9128,
+      "executemany": false,
+      "sql": "SELECT count(inventory_items.id) AS count_1 FROM inventory_items WHERE inventory_items.clinic_id = %(clinic_id_1)s AND inventory_items.is_active IS true AND inventory_items.quantity_on_hand <= inventory_items.reorder_level"
+    },
+    {
+      "query": 11,
+      "duration_ms": 17.3346,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 2,
+      "duration_ms": 17.1807,
+      "executemany": false,
+      "sql": "SELECT count(patients.id) AS count_1 FROM patients WHERE patients.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 8,
+      "duration_ms": 15.0509,
+      "executemany": false,
+      "sql": "SELECT count(admissions.id) AS count_1 FROM admissions JOIN patients ON admissions.patient_id = patients.id WHERE patients.clinic_id = %(clinic_id_1)s AND admissions.status = %(status_1)s"
+    },
+    {
+      "query": 4,
+      "duration_ms": 13.9471,
+      "executemany": false,
+      "sql": "SELECT count(staff.id) AS count_1 FROM staff WHERE staff.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 1,
+      "duration_ms": 8.7011,
+      "executemany": false,
+      "sql": "SELECT users.id AS users_id, users.email AS users_email, users.password_hash AS users_password_hash, users.role AS users_role, users.is_active AS users_is_active, users.token_version AS users_token_version, users.clinic_id AS users_clinic_id, users.profile_image_storage_key AS users_profile_image_storage_key, users.created_at AS users_created_at, users.updated_at AS users_updated_at, users.last_login_at AS users_last_login_at FROM users WHERE users.id = %(pk_1)s"
+    },
+    {
+      "query": 6,
+      "duration_ms": 6.7236,
+      "executemany": false,
+      "sql": "SELECT count(appointments.id) AS count_1 FROM appointments WHERE appointments.clinic_id = %(clinic_id_1)s AND appointments.status IN (%(status_1_1)s, %(status_1_2)s) AND appointments.scheduled_start >= %(scheduled_start_1)s AND appointments.scheduled_start < %(scheduled_start_2)s"
+    },
+    {
+      "query": 30,
+      "duration_ms": 5.5967,
+      "executemany": false,
+      "sql": "SELECT count(chat_messages.id) AS count_1 FROM chat_messages WHERE chat_messages.clinic_id = %(clinic_id_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.priority IN (%(priority_1_1)s, %(priority_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 28,
+      "duration_ms": 5.4239,
+      "executemany": false,
+      "sql": "SELECT count(distinct(chat_messages.conversation_id)) AS count_1 FROM chat_message_read_receipts JOIN chat_messages ON chat_messages.id = chat_message_read_receipts.message_id WHERE chat_message_read_receipts.user_id = %(user_id_1)s AND chat_message_read_receipts.clinic_id = %(clinic_id_1)s AND chat_message_read_receipts.status = %(status_1)s AND chat_messages.sender_id != %(sender_id_1)s AND chat_messages.status IN (%(status_2_1)s, %(status_2_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_2)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_3)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_4)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 31,
+      "duration_ms": 4.4417,
+      "executemany": false,
+      "sql": "SELECT count(chat_messages.id) AS count_1 FROM chat_messages WHERE chat_messages.clinic_id = %(clinic_id_1)s AND chat_messages.status IN (%(status_1_1)s, %(status_1_2)s) AND chat_messages.conversation_id IN (SELECT chat_conversations.id FROM chat_conversations WHERE chat_conversations.id IN (SELECT chat_conversation_participants.conversation_id FROM chat_conversation_participants WHERE chat_conversation_participants.user_id = %(user_id_1)s AND chat_conversation_participants.clinic_id = %(clinic_id_2)s AND chat_conversation_participants.status = %(status_2)s) AND chat_conversations.clinic_id = %(clinic_id_3)s AND chat_conversations.status = %(status_3)s) AND chat_messages.created_at >= %(created_at_1)s AND chat_messages.created_at < %(created_at_2)s"
+    },
+    {
+      "query": 24,
+      "duration_ms": 2.4722,
+      "executemany": false,
+      "sql": "SELECT ai_logs.feature_used, count(ai_logs.id) AS count_1, coalesce(sum(ai_logs.credits_used), %(coalesce_2)s) AS coalesce_1, coalesce(sum(ai_logs.estimated_cost), %(coalesce_4)s) AS coalesce_3 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.feature_used"
+    },
+    {
+      "query": 5,
+      "duration_ms": 2.3496,
+      "executemany": false,
+      "sql": "SELECT count(staff.id) AS count_1 FROM staff WHERE staff.clinic_id = %(clinic_id_1)s AND staff.status = %(status_1)s"
+    },
+    {
+      "query": 25,
+      "duration_ms": 2.348,
+      "executemany": false,
+      "sql": "SELECT ai_logs.risk_level, count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.risk_level"
+    },
+    {
+      "query": 20,
+      "duration_ms": 2.0743,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 17,
+      "duration_ms": 1.9537,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 7,
+      "duration_ms": 1.9311,
+      "executemany": false,
+      "sql": "SELECT count(appointments.id) AS count_1 FROM appointments WHERE appointments.clinic_id = %(clinic_id_1)s AND appointments.status = %(status_1)s AND appointments.scheduled_start >= %(scheduled_start_1)s AND appointments.scheduled_start < %(scheduled_start_2)s"
+    },
+    {
+      "query": 3,
+      "duration_ms": 1.6909,
+      "executemany": false,
+      "sql": "SELECT count(patients.id) AS count_1 FROM patients WHERE patients.clinic_id = %(clinic_id_1)s AND patients.is_active IS true"
+    },
+    {
+      "query": 16,
+      "duration_ms": 1.571,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.estimated_cost), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 26,
+      "duration_ms": 1.5126,
+      "executemany": false,
+      "sql": "SELECT ai_logs.approval_status, count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s GROUP BY ai_logs.approval_status"
+    },
+    {
+      "query": 12,
+      "duration_ms": 1.5097,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.credits_used), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 19,
+      "duration_ms": 1.3812,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 21,
+      "duration_ms": 1.298,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 13,
+      "duration_ms": 1.2887,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.input_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 18,
+      "duration_ms": 1.2824,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.approval_status = %(approval_status_1)s"
+    },
+    {
+      "query": 23,
+      "duration_ms": 1.254,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    },
+    {
+      "query": 15,
+      "duration_ms": 1.2448,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.total_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 14,
+      "duration_ms": 1.2287,
+      "executemany": false,
+      "sql": "SELECT coalesce(sum(ai_logs.output_tokens), %(coalesce_2)s) AS coalesce_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s"
+    },
+    {
+      "query": 22,
+      "duration_ms": 1.2061,
+      "executemany": false,
+      "sql": "SELECT count(ai_logs.id) AS count_1 FROM ai_logs WHERE ai_logs.created_at >= %(created_at_1)s AND ai_logs.created_at < %(created_at_2)s AND ai_logs.clinic_id = %(clinic_id_1)s AND ai_logs.risk_level = %(risk_level_1)s"
+    }
+  ]
+}
