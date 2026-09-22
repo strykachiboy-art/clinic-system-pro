@@ -1,0 +1,78 @@
+{
+  "actual_counts": {
+    "ambulances": 2,
+    "appointments": 1000,
+    "beds": 20,
+    "consultations": 300,
+    "conversations": 50,
+    "drugs": 12,
+    "inventory_items": 20,
+    "invoices": 500,
+    "lab_orders": 300,
+    "lab_tests": 12,
+    "messages": 500,
+    "notifications": 1000,
+    "patients": 500,
+    "prescriptions": 300,
+    "reports": 100,
+    "staff": 12,
+    "wards": 2
+  },
+  "anchor_ids": {
+    "appointment_first": 1001,
+    "appointment_last": 2000,
+    "consultation_first": 301,
+    "consultation_last": 600,
+    "drug_first": 13,
+    "drug_last": 24,
+    "invoice_first": 501,
+    "invoice_last": 1000,
+    "lab_order_first": 301,
+    "lab_order_last": 600,
+    "patient_first": 505,
+    "patient_last": 1004,
+    "prescription_first": 301,
+    "prescription_last": 600,
+    "staff_first": 20,
+    "staff_last": 31
+  },
+  "benchmark_identity": {
+    "email_domain": "clinicbench.local",
+    "prefix": "BENCHMARK"
+  },
+  "clinic_id": 2,
+  "clinic_name": "Clinic Load Test",
+  "configured_counts": {
+    "ai_credits": 100000,
+    "ambulance_trips": 50,
+    "ambulances": 2,
+    "appointments": 1000,
+    "beds_per_ward": 10,
+    "consultations": 300,
+    "conversations": 50,
+    "drugs": 12,
+    "inventory_items": 20,
+    "invoices": 500,
+    "lab_orders": 300,
+    "lab_tests": 12,
+    "messages": 500,
+    "notifications": 1000,
+    "patients": 500,
+    "prescriptions": 300,
+    "reports": 100,
+    "staff": 12,
+    "wards": 2
+  },
+  "control_patient": {
+    "email": "loadtest-patient@clinicload.com",
+    "id": 4
+  },
+  "control_user": {
+    "email": "loadtest@clinicload.com",
+    "id": 5,
+    "role": "admin"
+  },
+  "dataset_name": "clinic_system_pro_benchmark",
+  "dataset_version": 1,
+  "seed_base_time": "2026-01-01T08:00:00"
+}
