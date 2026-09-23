@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-basedir = os.path.abspath(os.path.dirname(__file__))
+basedir = os.path.abspath(
+    os.path.dirname(__file__)
+)
 
 
 class Config:
@@ -20,7 +22,8 @@ class Config:
 
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         "DATABASE_URL",
-        "sqlite:///" + os.path.join(
+        "sqlite:///"
+        + os.path.join(
             basedir,
             "..",
             "clinic.db",
@@ -58,24 +61,25 @@ class Config:
     # ------------------------------------------------------------------
     # Redis
     # ------------------------------------------------------------------
-    #
-    # Development/production Redis remains configurable through the
-    # environment.
-    #
+
     REDIS_URL = os.environ.get(
         "REDIS_URL",
         "redis://localhost:6379/0",
     )
 
     # Celery
+
     CELERY_BROKER_URL = REDIS_URL
+
     CELERY_RESULT_BACKEND = REDIS_URL
 
     # ------------------------------------------------------------------
-    # Upload / storage
+    # Upload / Storage
     # ------------------------------------------------------------------
 
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+    MAX_CONTENT_LENGTH = (
+        16 * 1024 * 1024
+    )
 
     UPLOAD_FOLDER = os.environ.get(
         "UPLOAD_FOLDER",
@@ -94,39 +98,32 @@ class Config:
         5 * 1024 * 1024
     )
 
+    # ------------------------------------------------------------------
     # Flask-Limiter
+    # ------------------------------------------------------------------
+
     RATELIMIT_STORAGE_URI = REDIS_URL
 
-        # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # AI
     # ------------------------------------------------------------------
 
-    OPENAI_API_KEY = os.environ.get(
+    OPENAI_API_KEY = (
         "OPENAI_API_KEY"
-    )
+        )
 
-    OPENAI_MODEL = os.environ.get(
-        "OPENAI_MODEL",
-        "gpt-4o-mini",
-    )
+    OPENAI_MODEL = "gpt-4o-mini"
 
-    AI_LOAD_TEST_MODE = os.environ.get(
-        "AI_LOAD_TEST_MODE",
-        "false",
-    ).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    AI_PROVIDER = "openai"
 
-    AI_LOAD_TEST_RATE_LIMIT = os.environ.get(
-        "AI_LOAD_TEST_RATE_LIMIT",
-        "1000 per second",
+    AI_LOAD_TEST_MODE = True
+
+    AI_LOAD_TEST_RATE_LIMIT = (
+        "1000 per second"
     )
 
     # ------------------------------------------------------------------
-    # Integration encryption
+    # Integration Encryption
     # ------------------------------------------------------------------
 
     INTEGRATION_ENCRYPTION_KEY = os.environ.get(
@@ -137,11 +134,6 @@ class Config:
 class DevelopmentConfig(Config):
     DEBUG = True
 
-    AI_PROVIDER = os.environ.get(
-        "AI_PROVIDER",
-        "openai",
-    )
-
 
 class ProductionConfig(Config):
     DEBUG = False
@@ -151,7 +143,7 @@ class TestingConfig(Config):
     TESTING = True
 
     # ------------------------------------------------------------------
-    # Isolated test database
+    # Isolated Test Database
     # ------------------------------------------------------------------
 
     SQLALCHEMY_DATABASE_URI = (
@@ -159,27 +151,22 @@ class TestingConfig(Config):
     )
 
     # ------------------------------------------------------------------
-    # Isolated test Redis
+    # Isolated Test Redis
     # ------------------------------------------------------------------
-    #
-    # Production/development normally use Redis DB 0.
-    # Tests use Redis DB 15 so test authentication/revocation state
-    # cannot collide with the normal development Redis database.
-    #
+
     REDIS_URL = os.environ.get(
         "TEST_REDIS_URL",
         "redis://localhost:6379/15",
     )
 
-    # Keep Celery test infrastructure on the isolated Redis database.
     CELERY_BROKER_URL = REDIS_URL
+
     CELERY_RESULT_BACKEND = REDIS_URL
 
-    # Keep Flask-Limiter isolated from development/production counters.
     RATELIMIT_STORAGE_URI = REDIS_URL
 
     # ------------------------------------------------------------------
-    # Test encryption key
+    # Test Encryption Key
     # ------------------------------------------------------------------
 
     INTEGRATION_ENCRYPTION_KEY = (

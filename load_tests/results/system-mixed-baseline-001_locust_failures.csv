@@ -1,7 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-POST,POST /api/v1/ai/drug-interactions,"CatchResponseError('Unexpected HTTP 422: {""error"":""OPENAI_API_KEY is not configured"",""success"":false}\n')",7,2026-09-22T12:28:43Z,2026-09-22T12:29:02Z
-GET,GET /api/v1/clinics,CatchResponseError('Response success != true'),13,2026-09-22T12:28:46Z,2026-09-22T12:29:01Z
-GET,"GET /api/v1/prescriptions/patients/{patient_id} [page=1,per_page=50]","CatchResponseError('Unexpected HTTP 403: {""error"":""Insufficient permissions""}\n')",37,2026-09-22T12:28:42Z,2026-09-22T12:29:03Z
-GET,"GET /api/v1/staff [page=1,per_page=50]",CatchResponseError('Response success != true'),13,2026-09-22T12:28:46Z,2026-09-22T12:29:01Z
-POST,POST /api/v1/auth/login [setup],"CatchResponseError('Unexpected HTTP 400: {""details"":[{""ctx"":{""reason"":""An email address must have an @-sign.""},""input"":""YOUR_EXISTING_ACCESS_CONTROL_EMAIL"",""loc"":[""email""],""msg"":""value is not a valid email address: An email address must have')",10,2026-09-22T12:28:42Z,2026-09-22T12:28:58Z
-GET,"GET /api/v1/assets [page=1,per_page=50]",CatchResponseError('HTTP 200 but response has no data'),10,2026-09-22T12:28:42Z,2026-09-22T12:28:58Z
