@@ -8,6 +8,7 @@ from app.core.enums.clinic_enums import ClinicStatus, ClinicType
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.modules.clinic.models.clinic_model import Clinic
 from app.modules.clinic.services import clinic_service
+from app.extensions import db
 
 
 # ============================================================================
@@ -57,10 +58,13 @@ def test_validate_positive_id_rejects_non_integer(value):
 
 
 def test_validate_optional_positive_id_accepts_none():
-    assert clinic_service._validate_optional_positive_id(
-        None,
-        "Parent clinic ID",
-    ) is None
+    assert (
+        clinic_service._validate_optional_positive_id(
+            None,
+            "Parent clinic ID",
+        )
+        is None
+    )
 
 
 def test_validate_optional_positive_id_accepts_positive_integer():
@@ -387,6 +391,7 @@ def test_list_clinics_filters_by_status(
     assert [clinic.id for clinic in clinics] == [
         suspended.id
     ]
+
     assert active.id not in [
         clinic.id for clinic in clinics
     ]
@@ -1437,6 +1442,119 @@ def test_consume_ai_credit_rejects_missing_clinic():
 def test_consume_ai_credit_rejects_invalid_clinic_id():
     with pytest.raises(ValidationError):
         clinic_service.consume_ai_credit(0)
+
+
+# ============================================================================
+# MONTHLY AI USAGE RESET
+# ============================================================================
+
+
+def test_reset_monthly_ai_usage_resets_non_zero_clinics(
+    make_clinic,
+):
+    clinic_a = make_clinic(
+        name="AI Reset Clinic A",
+        ai_credits=25,
+    )
+
+    clinic_b = make_clinic(
+        name="AI Reset Clinic B",
+        ai_credits=40,
+    )
+
+    clinic_c = make_clinic(
+        name="AI Reset Clinic C",
+        ai_credits=60,
+    )
+
+    clinic_a.ai_requests_this_month = 12
+    clinic_b.ai_requests_this_month = 37
+    clinic_c.ai_requests_this_month = 0
+
+    db.session.flush()
+
+    result = clinic_service.reset_monthly_ai_usage.run()
+
+    assert result == 2
+
+    db.session.refresh(clinic_a)
+    db.session.refresh(clinic_b)
+    db.session.refresh(clinic_c)
+
+    assert clinic_a.ai_requests_this_month == 0
+    assert clinic_b.ai_requests_this_month == 0
+    assert clinic_c.ai_requests_this_month == 0
+
+    assert clinic_a.ai_credits == 25
+    assert clinic_b.ai_credits == 40
+    assert clinic_c.ai_credits == 60
+
+
+def test_reset_monthly_ai_usage_is_idempotent(
+    clinic,
+):
+    clinic.ai_requests_this_month = 0
+
+    db.session.flush()
+
+    result = clinic_service.reset_monthly_ai_usage.run()
+
+    assert result == 0
+
+    db.session.refresh(clinic)
+
+    assert clinic.ai_requests_this_month == 0
+
+
+def test_reset_monthly_ai_usage_has_expected_celery_name():
+    assert (
+        clinic_service.reset_monthly_ai_usage.name
+        == "reset_monthly_ai_usage"
+    )
+
+
+def test_reset_monthly_ai_usage_rolls_back_on_failure(
+    monkeypatch,
+):
+    session = clinic_service.db.session()
+    rollback_called = False
+
+    original_rollback = session.rollback
+
+    def failing_execute(*args, **kwargs):
+        raise RuntimeError(
+            "Synthetic database failure"
+        )
+
+    def tracking_rollback(*args, **kwargs):
+        nonlocal rollback_called
+
+        rollback_called = True
+
+        return original_rollback(
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        session,
+        "execute",
+        failing_execute,
+    )
+
+    monkeypatch.setattr(
+        session,
+        "rollback",
+        tracking_rollback,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Synthetic database failure",
+    ):
+        clinic_service.reset_monthly_ai_usage.run()
+
+    assert rollback_called is True
 
 
 # ============================================================================

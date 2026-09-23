@@ -4,7 +4,7 @@ import secrets
 from datetime import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
@@ -1069,6 +1069,40 @@ def consume_ai_credit(
     return _consume_ai_credit(
         clinic_id
     )
+    
+
+
+# =====================================================================
+# MONTHLY AI USAGE RESET
+# =====================================================================
+
+
+@celery.task(
+    name="reset_monthly_ai_usage"
+)
+def reset_monthly_ai_usage() -> int:
+    try:
+        result = db.session.execute(
+            update(Clinic)
+            .where(
+                Clinic.ai_requests_this_month != 0
+            )
+            .values(
+                ai_requests_this_month=0
+            )
+        )
+
+        updated_count = int(
+            result.rowcount or 0
+        )
+
+        db.session.commit()
+
+        return updated_count
+
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 # =====================================================================
