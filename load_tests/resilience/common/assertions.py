@@ -23,8 +23,9 @@ def assert_json_object(
     response: Any,
 ) -> dict[str, Any]:
     try:
-        body = response.json()
-    except ValueError as exc:
+        value = response.json
+        body = value() if callable(value) else value
+    except (TypeError, ValueError) as exc:
         raise AssertionError(
             "Response body is not valid JSON"
         ) from exc

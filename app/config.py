@@ -142,6 +142,11 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING = True
 
+    JWT_SECRET_KEY = os.environ.get(
+        "TEST_JWT_SECRET_KEY",
+        "clinic-system-pro-test-jwt-secret-2026",
+    )
+
     # ------------------------------------------------------------------
     # Isolated Test Database
     # ------------------------------------------------------------------
@@ -149,7 +154,6 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = (
         "sqlite:///:memory:"
     )
-
     # ------------------------------------------------------------------
     # Isolated Test Redis
     # ------------------------------------------------------------------
