@@ -2,38 +2,64 @@
 
 ## 1. Purpose
 
-The `load_tests/` package provides a controlled, reproducible performance-testing framework for Clinic System Pro v5.
+The `load_tests/` package provides a controlled, reproducible performance and load-testing framework for Clinic System Pro v5.
 
-The framework is designed to measure:
+It is designed to measure and investigate:
 
-* API response latency
-* Throughput
-* Error rates
-* Database query count
-* Database execution time
-* Response sizes
-* Endpoint-level performance
-* Module-level performance
-* System-wide mixed workload performance
-* Performance regressions after optimization
+```text
+API response latency
+Throughput
+Error rates
+Database query count
+Database execution time
+Response sizes
+Endpoint-level performance
+Module-level performance
+System-wide mixed workloads
+Performance regressions
+Infrastructure behavior
+```
 
-The benchmark system deliberately separates:
+The load-testing system deliberately separates:
 
-1. **Application correctness**
-2. **Benchmark workload generation**
-3. **Server-side performance measurements**
-4. **Locust client-side measurements**
-5. **Benchmark result validation**
-6. **Performance optimization**
-7. **System-wide workload verification**
+```text
+Application correctness
+Benchmark workload generation
+Server-side performance measurements
+Locust client-side measurements
+Benchmark result validation
+Performance profiling
+Performance optimization
+System-wide workload verification
+```
 
-Server-side measurements are treated as the primary source for application performance analysis because they measure the request inside the Flask application and include database timing.
-
-Locust measurements remain important for observing client-perceived latency and throughput.
+The benchmark environment exercises the real application path rather than creating benchmark-only shortcuts.
 
 ---
 
-# 2. Benchmark Architecture
+# 2. Performance Testing Principles
+
+Performance testing follows these rules:
+
+```text
+Authentication is real
+Authorization is real
+Tenant isolation is real
+Validation is real
+Transactions remain enabled
+Audit logging remains enabled
+Production service logic is exercised
+Database constraints remain active
+Redis dependencies remain active
+```
+
+Benchmarking must not bypass application guarantees just to produce better numbers.
+
+The purpose of the framework is to expose real application behavior and identify measurable bottlenecks.
+
+---
+
+# 3. Benchmark Architecture
 
 ```text
                     ┌──────────────────────┐
@@ -57,58 +83,29 @@ Locust measurements remain important for observing client-perceived latency and 
                     ▼                     ▼
              ┌──────────────┐      ┌──────────────┐
              │ PostgreSQL   │      │    Redis     │
-             │ Source Truth │      │ Cache/Queue  │
+             │ Source Truth │      │ Infrastructure│
              └──────────────┘      └──────────────┘
-
                                │
                                ▼
                     ┌──────────────────────┐
-                    │  Performance Logs    │
-                    │  logs/*.log          │
+                    │ Performance Metrics  │
+                    │ Server-side records  │
                     └──────────┬───────────┘
                                │
                                ▼
                     ┌──────────────────────┐
-                    │ baseline.py parser   │
-                    │ + result validation  │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ JSON / CSV Artifacts │
-                    │ load_tests/results/  │
+                    │ JSON / CSV / Logs    │
+                    │ Benchmark Artifacts  │
                     └──────────────────────┘
 ```
 
 ---
 
-# 3. Benchmark Philosophy
+# 4. Server-Side Metrics vs Locust Metrics
 
-The benchmark system follows several rules.
+Server-side measurements are the primary source for application performance analysis.
 
-## 3.1 Production logic is not modified for benchmarking
-
-Benchmarking must measure the application as it exists.
-
-The benchmark must not:
-
-* bypass authentication
-* bypass authorization
-* bypass tenant isolation
-* bypass validation
-* disable database constraints
-* disable audit logging
-* remove production middleware
-* modify service behavior solely to improve benchmark results
-* introduce benchmark-only shortcuts into production routes
-
-If the application is slow, the benchmark should expose the bottleneck.
-
----
-
-## 3.2 Server-side metrics are authoritative
-
-The benchmark captures:
+The application records values such as:
 
 ```text
 duration_ms
@@ -116,140 +113,115 @@ db_time_ms
 db_query_count
 response_size_bytes
 HTTP status
-route
 HTTP method
-```
-
-These are emitted by the application's performance instrumentation.
-
-Locust metrics are supplementary because client-side measurements can include:
-
-* network overhead
-* client scheduling
-* connection establishment
-* request queueing
-* local machine contention
-* Locust process overhead
-
----
-
-## 3.3 Fresh logs are required
-
-Each official benchmark run must use a fresh server log.
-
-Do not append multiple benchmark runs into one official benchmark log.
-
-This allows exact correlation between:
-
-```text
-LOCUST_RUN_ID
-```
-
-and:
-
-```text
+route
 load_test_id
 ```
 
-inside the server performance records.
+Locust measurements remain important for observing client-perceived behavior.
+
+Client-side timing may include:
+
+```text
+Network overhead
+Client scheduling
+Connection establishment
+Local machine contention
+Locust process overhead
+```
+
+Therefore:
+
+```text
+Server-side metrics
+=
+Primary application-performance evidence
+
+Locust metrics
+=
+Client-side supporting evidence
+```
 
 ---
 
-# 4. Standard Benchmark Environment
+# 5. Benchmark Environment
 
-The standard benchmark profile is:
+The standard local benchmark profile used for the controlled benchmark cycle is:
 
-| Setting       |                   Value |
-| ------------- | ----------------------: |
-| Python        |                 3.12.10 |
-| Locust        |                  2.46.5 |
-| Users         |                      10 |
-| Spawn rate    |               2 users/s |
-| Runtime       |                     30s |
-| Host          | `http://127.0.0.1:5000` |
-| Database      |              PostgreSQL |
-| Cache / queue |                   Redis |
-| Application   |    Clinic System Pro v5 |
+| Setting        | Value                       |
+| -------------- | --------------------------- |
+| Python         | 3.12.x                      |
+| Locust         | Project environment version |
+| Users          | Controlled per scenario     |
+| Spawn rate     | Controlled per scenario     |
+| Runtime        | Controlled per scenario     |
+| Host           | `http://127.0.0.1:5000`     |
+| Database       | PostgreSQL                  |
+| Infrastructure | Redis                       |
+| Application    | Clinic System Pro v5        |
 
-This profile should be used for official individual module baselines unless a benchmark explicitly documents a different configuration.
+Individual benchmark commands must record their actual user count, spawn rate, runtime, host, and run ID.
+
+The standard local profile is not a production-capacity claim.
 
 ---
 
-# 5. Synthetic Benchmark Identity
+# 6. Synthetic Benchmark Identity
 
 Load testing uses dedicated synthetic accounts.
 
-The current standard credentials are:
+The benchmark environment must never use real patient or staff accounts.
+
+Typical environment variables include:
 
 ```text
-LOCUST_EMAIL=loadtest@clinicload.com
-LOCUST_PASSWORD=LoadTestPassword123!
+LOCUST_EMAIL
+LOCUST_PASSWORD
+LOCUST_PATIENT_ID
+LOCUST_DRUGS
+LOCUST_TOKENS_FILE
+LOCUST_AI_MODE
 ```
 
-These credentials are intended only for benchmark activity.
-
-Real production accounts must not be used for load testing.
-
-The application currently requires valid email domains, so benchmark identities must not use invalid domains such as:
-
-```text
-.local
-.test
-```
-
----
-
-# 6. Redis Requirement
-
-Redis must be available before running scenarios that depend on Redis-backed functionality.
-
-For the development environment:
-
-```powershell
-docker start redis-dev
-```
-
-Verify:
-
-```powershell
-Test-NetConnection localhost -Port 6379
-```
-
-Expected result:
-
-```text
-TcpTestSucceeded : True
-```
+Synthetic data is preferred because it makes performance measurements repeatable without exposing real medical information.
 
 ---
 
 # 7. Run ID Requirements
 
-Every official benchmark must use a unique run ID.
+Every benchmark run must use a unique run ID.
 
 Examples:
 
 ```text
 patients-baseline-003
 appointments-baseline-001
-billing-baseline-001
+reports-baseline-001
+system-mixed-baseline-003
 ```
 
-Recommended naming:
+Recommended format:
 
 ```text
 <scenario>-baseline-<number>
 ```
 
-Do not reuse an existing run ID for a new benchmark.
+Do not reuse a run ID for a new benchmark.
 
-The benchmark runner checks run-ID uniqueness before starting a normal benchmark.
+Run IDs provide correlation between:
+
+```text
+Locust execution
+Server-side performance records
+Logs
+JSON benchmark artifacts
+```
 
 ---
 
-# 8. Scenario Structure
+# 8. Scenario Layout
 
-Scenarios are located in:
+Individual Locust workloads are located in:
 
 ```text
 load_tests/scenarios/
@@ -281,127 +253,70 @@ profile.py
 reports.py
 settings.py
 staff.py
+system_mixed.py
 user_devices.py
 wards.py
 ```
 
-There are currently:
+Current implementation coverage:
 
 ```text
-25 / 25
+25 / 25 individual scenarios
 ```
-
-implemented individual scenario files.
 
 ---
 
-# 9. Individual Scenario vs Official Baseline
+# 9. Scenario Implementation vs Benchmark Verification
 
-These are intentionally treated as different states.
-
-## Scenario implemented
-
-The Locust workload exists and can be executed.
-
-## Official baseline complete
-
-The scenario has been executed using the controlled benchmark process and its results have been verified.
-
-Therefore:
+These are separate states.
 
 ```text
-Implemented scenario
+Scenario implemented
 ≠
-Official benchmark completed
+Scenario benchmark verified
 ```
 
-This distinction prevents the project from claiming performance measurements that have not actually been verified.
+An implementation means the workload exists.
+
+A verified benchmark means the workload was executed using the controlled benchmark process and the resulting evidence passed the benchmark validation rules.
+
+This distinction prevents unsupported performance claims.
 
 ---
 
-# 10. Current Load-Testing Status
+# 10. Benchmark Runner
 
-## Individual scenario implementation
-
-```text
-25 / 25 complete
-```
-
-All currently planned individual scenario files have implementations.
-
-## Official individual baselines
-
-```text
-21 / 25 complete
-```
-
-## Individual baselines remaining
-
-```text
-4
-```
-
-The remaining individual baseline targets are:
-
-```text
-Clinic
-Staff
-Dashboard
-AI
-```
-
-These four scenarios are already implemented.
-
-They have not yet received their official individual baseline runs.
-
----
-
-# 11. System-Wide Benchmark Status
-
-The individual module benchmarks are not the final load-testing stage.
-
-The next major stage is a true mixed system workload.
-
-Current status:
-
-```text
-System-wide mixed workload implementation:
-Not yet implemented
-
-System-wide benchmark:
-Not yet executed
-```
-
-The system-wide workload will exercise multiple Clinic System Pro v5 modules together rather than treating each endpoint or module independently.
-
-The exact workload composition should be designed after inspecting the current scenario implementations and identifying realistic cross-module traffic patterns.
-
----
-
-# 12. Benchmark Runner
-
-The central benchmark runner is:
+The central runner is:
 
 ```text
 load_tests/baseline.py
 ```
 
-It provides:
+The runner is responsible for capabilities including:
 
-* scenario execution
-* run-ID management
-* server-log parsing
-* server-side metric aggregation
-* Locust CSV parsing
-* route filtering
-* login exclusion
-* benchmark validity checks
-* JSON result generation
-* existing-result repair
+```text
+Scenario execution
+Run-ID management
+Fresh-run validation
+Server log correlation
+Server-side metric aggregation
+Locust artifact parsing
+Route filtering
+Login/setup filtering
+Result validation
+JSON result generation
+Existing-result repair
+```
+
+The reporting helper is:
+
+```text
+load_tests/baseline_report.py
+```
 
 ---
 
-# 13. Basic Benchmark Command
+# 11. Basic Benchmark Command
 
 Example:
 
@@ -411,13 +326,7 @@ python -m load_tests.baseline `
     --run-id patients-baseline-001
 ```
 
-The runner uses the standard profile unless overridden.
-
----
-
-# 14. Explicit Benchmark Configuration
-
-Example:
+Explicit configuration can be supplied:
 
 ```powershell
 python -m load_tests.baseline `
@@ -431,9 +340,9 @@ python -m load_tests.baseline `
 
 ---
 
-# 15. Existing Result Repair
+# 12. Existing Result Repair
 
-If a benchmark has already been executed but its JSON result did not correctly contain the server-side metrics, the existing result can be repaired.
+The benchmark runner supports repair of an existing result artifact when a benchmark has already been executed but server-side metrics need to be reconstructed.
 
 Example:
 
@@ -444,72 +353,65 @@ python -m load_tests.baseline `
     --repair-existing
 ```
 
-Repair mode does not start Locust again.
+Repair mode does not execute Locust again.
 
-It:
+It can:
 
-1. reads the existing result
-2. reads the associated server log
-3. correlates records using the run ID
-4. applies the scenario filters
-5. recalculates server-side metrics
-6. preserves existing Locust metadata
-7. rewrites the JSON result
+```text
+Read the existing benchmark result
+Read the associated server log
+Match records using the run ID
+Apply the scenario filters
+Recalculate server-side metrics
+Preserve existing Locust metadata
+Rewrite the JSON artifact
+```
 
-This was used to repair the Patients benchmark artifact without rerunning the workload.
+This provides reproducibility without unnecessarily rerunning a completed workload.
 
 ---
 
-# 16. Login Filtering
+# 13. Login and Setup Filtering
 
-Most module scenarios perform a setup login before exercising the actual module workload.
+Non-authentication scenarios normally perform authentication before exercising their primary module workload.
 
 For example:
 
 ```text
-10 login requests
-116 patient workload requests
+Setup/login traffic
+        ↓
+Module workload
 ```
 
-For non-authentication benchmarks, login requests are excluded from the primary module metrics by default.
+For module benchmarks, setup authentication is excluded from primary module metrics when appropriate.
 
-This prevents authentication setup traffic from contaminating the module's performance measurement.
+This prevents login overhead from contaminating the measurement of the module being benchmarked.
 
-Authentication itself is treated differently because login is the workload being measured.
-
-Use:
-
-```text
---include-login
-```
-
-when authentication setup traffic should explicitly be included.
+Authentication scenarios are different because authentication itself is the workload.
 
 ---
 
-# 17. Route Filtering
+# 14. Route Filtering
 
-The benchmark runner supports exact route inclusion:
+The benchmark runner can target a specific route:
 
 ```text
 --route /api/v1/patients
 ```
 
-and route exclusion:
+and can exclude routes when needed:
 
 ```text
 --exclude-route /api/v1/auth/login
 ```
 
-Multiple filters can be supplied when necessary.
-
-The benchmark result records both the filtered workload and the underlying Locust statistics.
+This enables controlled analysis when one scenario exercises multiple application routes.
 
 ---
 
-# 18. Performance Record Format
+# 15. Performance Record Format
 
-Server instrumentation emits records following this structure:
+Server-side instrumentation records performance data in a structure similar to:
 
 ```text
 performance.request
@@ -531,835 +433,797 @@ performance.request load_test_id=patients-baseline-003 method=GET route=/api/v1/
 
 ---
 
-# 19. Server-Side Metrics
+# 16. Primary Server-Side Metrics
 
-The benchmark runner calculates:
+The framework calculates metrics including:
 
-* request count
-* failure count
-* status distribution
-* minimum latency
-* average latency
-* p50
-* p95
-* p99
-* maximum latency
-* average response size
-* average DB time
-* maximum DB time
-* total DB queries
-* average DB queries/request
+```text
+Request count
+Failure count
+Status distribution
+Minimum latency
+Average latency
+P50
+P95
+P99
+Maximum latency
+Average response size
+Average DB time
+Maximum DB time
+Total DB queries
+Average DB queries/request
+```
 
-These metrics are the primary basis for performance analysis.
+These values are used for application-performance analysis.
 
 ---
 
-# 20. Locust Metrics
+# 17. Locust Metrics
 
-Locust results include:
+Locust provides supporting measurements including:
 
-* request count
-* failure count
-* requests per second
-* failures per second
-* average response time
-* median response time
-* minimum response time
-* maximum response time
-* average content size
+```text
+Request count
+Failure count
+Requests per second
+Average response time
+Median response time
+Minimum response time
+Maximum response time
+Average content size
+```
 
-Locust output is retained as supporting benchmark evidence.
+Client-side numbers should always be interpreted together with server-side records.
 
 ---
 
-# 21. Benchmark Artifacts
+# 18. Performance Profiling Tools
 
-Results are stored under:
+The load-testing package also contains targeted profiling tools.
 
-```text
-load_tests/results/
-```
-
-A typical benchmark produces:
+Current profiling utilities include:
 
 ```text
-<run-id>.json
-<run-id>_locust_stats.csv
-<run-id>_locust_stats_history.csv
-<run-id>_locust_failures.csv
-<run-id>_locust_exceptions.csv
+profile_chat_create_message.py
+profile_chat_security.py
+profile_chat_security_deep.py
+profile_chat_services.py
+
+profile_dashboard_service.py
+profile_dashboard_warm.py
+
+explain_dashboard_queries.py
+trace_chat_create_queries.py
 ```
 
-Server logs are stored separately, normally under:
+These tools are used when an observed benchmark result requires deeper investigation.
 
-```text
-logs/
-```
-
-Example:
-
-```text
-logs\patients_server.log
-```
+Profiling is separate from the clean benchmark workload.
 
 ---
 
-# 22. Current Verified Patients Baseline
+# 19. Database Query Analysis
 
-The latest verified Patients benchmark is:
-
-```text
-patients-baseline-003
-```
-
-Configuration:
-
-```text
-Users:       10
-Spawn rate:  2 users/s
-Runtime:     30s
-Host:        http://127.0.0.1:5000
-```
-
-The server-side workload contained:
-
-```text
-116 patient workload requests
-10 setup login requests
-```
-
-The 10 setup login requests were excluded from the primary Patients workload metrics.
-
-## Server-side results
-
-| Metric                     |        Value |
-| -------------------------- | -----------: |
-| Requests                   |          116 |
-| Failures                   |            0 |
-| Status                     |     200: 116 |
-| Minimum                    |    13.054 ms |
-| Average                    |    21.522 ms |
-| P50                        |    19.728 ms |
-| P95                        |    34.258 ms |
-| P99                        |    45.733 ms |
-| Maximum                    |    50.835 ms |
-| Average response size      | 25,271 bytes |
-| Average DB time            |     6.377 ms |
-| Maximum DB time            |    20.425 ms |
-| Average DB queries/request |        4.000 |
-| Total DB queries           |          464 |
-| Total DB time              |   739.743 ms |
-
-## Locust results
-
-| Metric               |           Value |
-| -------------------- | --------------: |
-| Requests             |             126 |
-| Failures             |               0 |
-| RPS                  |           4.528 |
-| Average response     |      165.060 ms |
-| Median response      |         31.0 ms |
-| Minimum              |       17.498 ms |
-| Maximum              |     1785.117 ms |
-| Average content size | 23,329.65 bytes |
-
-The Locust request count includes the setup login requests.
-
-The server-side module metrics above are the representative Patients measurements.
-
----
-
-# 23. Patients Benchmark Verification
-
-The Patients benchmark was independently verified.
-
-Verification confirmed:
-
-```text
-Run ID records found: 126
-
-Filtered workload:
-116
-
-Patient workload:
-116
-
-Excluded setup/login:
-10
-
-Server failures:
-0
-
-HTTP 200 responses:
-116
-```
-
-The resulting benchmark artifact is valid.
-
-The current verified artifact is:
-
-```text
-load_tests/results/patients-baseline-003.json
-```
-
-The associated artifacts include:
-
-```text
-load_tests/results/patients-baseline-003_locust_exceptions.csv
-load_tests/results/patients-baseline-003_locust_failures.csv
-load_tests/results/patients-baseline-003_locust_stats.csv
-load_tests/results/patients-baseline-003_locust_stats_history.csv
-```
-
-No rerun is required for this benchmark.
-
----
-
-# 24. Historical Benchmark Records
-
-The following table preserves historical benchmark measurements recorded during the earlier benchmarking phases.
-
-These records are retained for historical traceability and must not automatically be interpreted as the newest measurement when a newer verified artifact exists.
-
-| Module                 | Requests | Avg (ms) | P50 (ms) | P95 (ms) | P99 (ms) | Max (ms) | Avg DB (ms) | Max DB (ms) | Queries/Req | Avg Size (B) | Failures |
-| ---------------------- | -------: | -------: | -------: | -------: | -------: | -------: | ----------: | ----------: | ----------: | -----------: | -------: |
-| Authentication         |      120 |   23.417 |   20.931 |   38.754 |   51.492 |   61.215 |       8.214 |      21.783 |       5.000 |        1,842 |        0 |
-| Patients               |     121* |  22.200* |        — |  34.541* |  51.761* |        — |           — |           — |           — |            — |        0 |
-| Appointments           |      118 |   24.871 |   22.194 |   39.822 |   52.184 |   59.321 |       7.916 |      19.441 |       5.000 |       18,401 |        0 |
-| Consultations          |      114 |   26.492 |   23.177 |   42.081 |   58.712 |   67.913 |       9.122 |      25.641 |       6.000 |       21,774 |        0 |
-| Laboratory             |      116 |   25.736 |   22.961 |   40.318 |   54.442 |   63.284 |       8.441 |      23.816 |       5.000 |       19,322 |        0 |
-| Pharmacy               |      119 |   24.531 |   21.817 |   38.617 |   51.284 |   60.873 |       8.103 |      21.407 |       5.000 |       17,912 |        0 |
-| Prescriptions          |      117 |   25.191 |   22.008 |   39.742 |   53.181 |   62.704 |       8.377 |      22.514 |       5.000 |       16,801 |        0 |
-| Inventory              |      115 |   26.018 |   23.206 |   41.592 |   55.417 |   65.239 |       8.702 |      24.918 |       5.000 |       14,687 |        0 |
-| Billing                |      113 |   27.184 |   24.017 |   43.218 |   57.421 |   68.103 |       9.014 |      26.381 |       6.000 |       12,841 |        0 |
-| Wards                  |      111 |   24.913 |   21.726 |   38.441 |   52.614 |   61.927 |       8.126 |      22.193 |       5.000 |       13,202 |        0 |
-| Ambulance              |      110 |   28.304 |   25.103 |   45.218 |   60.184 |   71.314 |       9.341 |      28.114 |       6.000 |       11,904 |        0 |
-| HIE                    |      108 |   29.117 |   26.013 |   46.821 |   62.407 |   73.201 |       9.812 |      29.817 |       6.000 |       10,773 |        0 |
-| Notifications          |     95** |   21.046 |   19.055 |   35.135 |  141.105 |  141.105 |       5.100 |      44.656 |       4.000 |       24,363 |        0 |
-| Internal Clinical Chat |      104 |   27.806 |   24.611 |   44.287 |   59.143 |   69.782 |       9.422 |      27.905 |       6.000 |       18,992 |        0 |
-| Reports                |      109 |   30.118 |   27.314 |   49.817 |   66.381 |   77.421 |      10.114 |      31.207 |       6.000 |       28,614 |        0 |
-| Profile                |      112 |   23.817 |   21.104 |   37.914 |   51.672 |   60.318 |       7.921 |      20.804 |       5.000 |       15,621 |        0 |
-| Settings               |      106 |   24.318 |   21.441 |   38.614 |   52.017 |   61.209 |       8.017 |      21.916 |       5.000 |       13,482 |        0 |
-| User Devices           |      107 |   25.704 |   22.612 |   40.718 |   54.913 |   64.381 |       8.614 |      23.711 |       5.000 |       12,103 |        0 |
-| Asset Control          |      105 |   26.207 |   23.114 |   42.118 |   56.204 |   66.317 |       8.918 |      25.014 |       6.000 |       11,786 |        0 |
-| Access Control         |      103 |   28.417 |   25.217 |   45.913 |   61.207 |   72.418 |       9.704 |      28.417 |       6.000 |       10,944 |        0 |
-| Audit                  |      102 |   29.006 |   25.918 |   47.318 |   63.712 |   74.601 |       9.887 |      30.214 |       6.000 |        9,817 |        0 |
-
-* The historical Patients row is superseded by the verified `patients-baseline-003` artifact documented above.
-
-** The Notifications value represents the official populated representative workload selected for current tracking. An older benchmark also measured an empty notification feed and is retained only as historical evidence.
-
-Historical measurements should be traced back to their corresponding benchmark artifacts where available.
-
-Do not manufacture missing metrics from the historical table.
-
----
-
-# 25. Populated Workload Rule
-
-When an endpoint is expected to operate on populated production-like data, a populated synthetic workload should be preferred for the official performance baseline.
-
-Examples include:
-
-* patient lists
-* appointments
-* prescriptions
-* inventory
-* laboratory records
-* notifications
-* clinical conversations
-* reports
-
-An empty database can produce misleadingly low latency.
-
-The benchmark dataset therefore exists to provide deterministic synthetic records for meaningful testing.
-
----
-
-# 26. Benchmark Dataset
-
-The benchmark dataset definition is:
-
-```text
-load_tests/benchmark_dataset.json
-```
-
-The seeding utility is:
-
-```text
-load_tests/seed_load_test_data.py
-```
-
-The provisioning utility for AI load users is:
-
-```text
-load_tests/provision_ai_load_users.py
-```
-
-The benchmark database remains synthetic and isolated from real production users.
-
----
-
-# 27. Benchmark Data Integrity
-
-Before an official benchmark is accepted, verify:
-
-```text
-1. Dataset exists
-2. Dataset was seeded successfully
-3. Expected records exist
-4. Benchmark user exists
-5. Authentication succeeds
-6. Scenario reaches the intended route
-7. Server log exists
-8. Matching run ID exists in the server log
-9. Workload records are correctly filtered
-10. Server failures are zero
-11. Locust exits successfully
-12. Result artifact is valid
-```
-
-A successful Locust run by itself is not sufficient evidence of a valid benchmark.
-
----
-
-# 28. Benchmark Validity
-
-A benchmark is considered valid when the required integrity checks pass.
-
-The runner tracks:
-
-```text
-locust_exit_code_zero
-server_log_exists
-matching_server_records_present
-run_id_unique_before_run
-server_failures_zero
-```
-
-The benchmark is valid only when the required checks pass.
-
----
-
-# 29. Failed Benchmark Handling
-
-If a benchmark fails integrity checks:
-
-```text
-DO NOT
-```
-
-treat it as an official performance baseline.
-
-Investigate:
-
-* authentication failures
-* invalid synthetic data
-* route mismatch
-* missing logs
-* duplicated run IDs
-* application errors
-* database errors
-* Redis availability
-* scenario logic
-* Locust failures
-* incorrect filtering
-* instrumentation problems
-
-Fix the benchmark infrastructure or underlying application issue before accepting a new baseline.
-
----
-
-# 30. Benchmark Execution Workflow
-
-The controlled workflow is:
-
-```text
-1. Start required infrastructure
-2. Verify PostgreSQL
-3. Verify Redis
-4. Verify application
-5. Verify synthetic benchmark data
-6. Verify benchmark credentials
-7. Generate a unique LOCUST_RUN_ID
-8. Start a fresh server log
-9. Execute the scenario
-10. Collect Locust artifacts
-11. Parse server-side performance records
-12. Exclude setup traffic where appropriate
-13. Validate the run
-14. Store the JSON result
-15. Inspect the metrics
-16. Record the benchmark status
-```
-
----
-
-# 31. Optimization Workflow
-
-Performance optimization should follow:
-
-```text
-Baseline
-   ↓
-Measure
-   ↓
-Identify bottleneck
-   ↓
-Change one controlled area
-   ↓
-Run tests
-   ↓
-Re-benchmark
-   ↓
-Compare
-   ↓
-Accept or revert
-```
-
-Do not optimize based only on intuition.
-
-The benchmark should demonstrate that an optimization changes the measured bottleneck without introducing functional regressions.
-
----
-
-# 32. Database Performance
-
-Database performance is tracked using:
+Database behavior is measured using:
 
 ```text
 db_query_count
 db_time_ms
 ```
 
-The main questions are:
+The framework is intended to expose:
 
 ```text
-How many queries are executed per request?
+N+1 query patterns
+Unexpected query multiplication
+Expensive joins
+Unbounded queries
+Pagination problems
+Missing indexes
+Tenant-filter inefficiencies
+Sorting inefficiencies
+Unnecessary database round trips
+```
 
-How much time is spent in PostgreSQL?
+Database optimization must preserve:
 
-Does query count scale with returned records?
-
-Are there N+1 patterns?
-
-Are indexes being used appropriately?
-
-Does pagination remain bounded?
-
-Does eager loading improve or worsen the workload?
-
-Does tenant filtering remain efficient?
-
-Does sorting remain deterministic and indexed?
+```text
+Tenant isolation
+Authorization
+Transaction boundaries
+Data correctness
+Deterministic ordering
 ```
 
 ---
 
-# 33. Response Size
+# 20. Response Size Analysis
 
-Response size is recorded because large payloads can affect:
+Response size is measured because large payloads can affect:
 
-* server serialization
-* network transfer
-* client latency
-* memory consumption
-* mobile performance
-* Flutter rendering
-* bandwidth usage
+```text
+Server serialization
+Network transfer
+Client latency
+Memory usage
+Mobile performance
+Flutter rendering
+Bandwidth consumption
+```
 
-Large response sizes should therefore be considered alongside latency.
-
----
-
-# 34. Locust Scenario Guidelines
-
-Each scenario should:
-
-* authenticate correctly
-* use valid synthetic identities
-* use realistic tenant context
-* exercise real application routes
-* avoid bypassing business rules
-* avoid hardcoded production IDs when avoidable
-* avoid destructive operations unless explicitly intended
-* generate deterministic or controlled workloads where practical
-* remain safe to execute repeatedly
+Latency should therefore never be evaluated independently of response size.
 
 ---
 
-# 35. Current Scenario Coverage
+# 21. Benchmark Data
 
-The current individual scenario implementation coverage is:
+Benchmark data is controlled through:
 
-| Scenario               | Implementation | Official Individual Baseline |
-| ---------------------- | -------------- | ---------------------------- |
-| Authentication         | Complete       | Complete                     |
-| Patients               | Complete       | Complete                     |
-| Appointments           | Complete       | Complete                     |
-| Consultations          | Complete       | Complete                     |
-| Laboratory             | Complete       | Complete                     |
-| Pharmacy               | Complete       | Complete                     |
-| Prescriptions          | Complete       | Complete                     |
-| Inventory              | Complete       | Complete                     |
-| Billing                | Complete       | Complete                     |
-| Wards                  | Complete       | Complete                     |
-| Ambulance              | Complete       | Complete                     |
-| HIE                    | Complete       | Complete                     |
-| Notifications          | Complete       | Complete                     |
-| Internal Clinical Chat | Complete       | Complete                     |
-| Reports                | Complete       | Complete                     |
-| Profile                | Complete       | Complete                     |
-| Settings               | Complete       | Complete                     |
-| User Devices           | Complete       | Complete                     |
-| Asset Control          | Complete       | Complete                     |
-| Access Control         | Complete       | Complete                     |
-| Audit                  | Complete       | Complete                     |
-| Clinic                 | Complete       | Pending                      |
-| Staff                  | Complete       | Pending                      |
-| Dashboard              | Complete       | Pending                      |
-| AI                     | Complete       | Pending                      |
+```text
+load_tests/benchmark_dataset.json
+```
+
+Data seeding:
+
+```text
+load_tests/seed_load_test_data.py
+```
+
+AI load-user provisioning:
+
+```text
+load_tests/provision_ai_load_users.py
+```
+
+Benchmark data is synthetic.
+
+The production database must not be populated with benchmark-only records merely to generate benchmark results.
+
+---
+
+# 22. Benchmark Data Integrity
+
+A benchmark should verify all relevant conditions before being accepted as evidence.
+
+Typical checks include:
+
+```text
+Dataset exists
+Synthetic users exist
+Authentication succeeds
+Intended route is reached
+Fresh server log exists
+Matching run ID exists
+Correct workload records are present
+Setup traffic is correctly filtered
+Server failures are zero
+Locust exits successfully
+Result artifact is valid
+```
+
+A successful Locust process by itself is not sufficient evidence of a valid application benchmark.
+
+---
+
+# 23. Benchmark Validity
+
+A benchmark is accepted only when the required integrity conditions pass.
+
+Core validation concepts include:
+
+```text
+Unique run ID
+Fresh execution context
+Server log availability
+Matching server records
+Correct workload filtering
+Zero unexpected server failures
+Successful Locust completion
+Valid result artifact
+```
+
+Invalid runs must be investigated rather than promoted to official baselines.
+
+---
+
+# 24. Benchmark Execution Workflow
+
+The controlled workflow is:
+
+```text
+1. Start PostgreSQL
+2. Start Redis
+3. Start Clinic System Pro
+4. Verify synthetic benchmark data
+5. Verify benchmark identity
+6. Generate a unique run ID
+7. Start a fresh server log
+8. Execute the Locust scenario
+9. Collect Locust artifacts
+10. Parse server-side performance records
+11. Filter setup traffic where appropriate
+12. Validate the run
+13. Store the result
+14. Analyze performance
+15. Compare against previous verified results
+```
+
+---
+
+# 25. Optimization Workflow
+
+Performance optimization follows:
+
+```text
+Measure
+   ↓
+Establish baseline
+   ↓
+Identify measurable bottleneck
+   ↓
+Change one controlled area
+   ↓
+Run functional tests
+   ↓
+Re-benchmark
+   ↓
+Compare metrics
+   ↓
+Accept or revert
+```
+
+Optimization should not be based solely on intuition.
+
+---
+
+# 26. Performance Regression Tracking
+
+Important comparison metrics include:
+
+```text
+Average latency
+P50
+P95
+P99
+Maximum latency
+DB time
+DB queries/request
+Response size
+Throughput
+Failure count
+```
+
+A change should not be called an improvement solely because one number decreased.
+
+Examples that require investigation:
+
+```text
+Latency ↓
+DB queries ↑
+```
+
+or:
+
+```text
+Average latency ↓
+P99 latency ↑ significantly
+```
+
+or:
+
+```text
+Server latency stable
+Response size ↑ significantly
+```
+
+---
+
+# 27. Individual Scenario Coverage
+
+Current implementation coverage:
+
+| Scenario       | Status      |
+| -------------- | ----------- |
+| Access Control | Implemented |
+| Ambulance      | Implemented |
+| Appointments   | Implemented |
+| Asset Control  | Implemented |
+| Audit          | Implemented |
+| Authentication | Implemented |
+| Billing        | Implemented |
+| Chat           | Implemented |
+| Clinic         | Implemented |
+| Consultations  | Implemented |
+| Dashboard      | Implemented |
+| HIE            | Implemented |
+| Inventory      | Implemented |
+| Laboratory     | Implemented |
+| AI             | Implemented |
+| Notifications  | Implemented |
+| Patients       | Implemented |
+| Pharmacy       | Implemented |
+| Prescriptions  | Implemented |
+| Profile        | Implemented |
+| Reports        | Implemented |
+| Settings       | Implemented |
+| Staff          | Implemented |
+| User Devices   | Implemented |
+| Wards          | Implemented |
 
 Therefore:
 
 ```text
-Scenario implementation:
+Individual scenario implementations:
 25 / 25
-
-Official individual baselines:
-21 / 25
 ```
 
 ---
 
-# 36. Remaining Individual Baselines
+# 28. System-Wide Mixed Workload
 
-The remaining individual baseline targets are:
-
-## Clinic
-
-Scenario:
+The system-wide workload is represented by:
 
 ```text
-load_tests/scenarios/clinic.py
+load_tests/scenarios/system_mixed.py
 ```
 
-Status:
+Its purpose is to exercise multiple application domains concurrently instead of benchmarking isolated modules independently.
+
+The mixed workload incorporates realistic application categories such as:
 
 ```text
-Implemented
-Not individually benchmarked
+Clinical workflows
+Patient access
+Medication/inventory workflows
+Front-desk activity
+Administrative activity
+Communication
+Reporting
+Dashboard activity
 ```
 
-## Staff
+The system-wide benchmark is intended to reveal interactions and contention that isolated module tests cannot expose.
 
-Scenario:
+---
+
+# 29. Verified System-Mixed Baseline
+
+A controlled mixed baseline was established during the local benchmark cycle.
+
+Current reference run:
 
 ```text
-load_tests/scenarios/staff.py
+system-mixed-baseline-003
 ```
 
-Status:
+Recorded server-side reference metrics:
 
 ```text
-Implemented
-Not individually benchmarked
+Requests:
+410
+
+Failures:
+0
+
+Average server latency:
+22.014 ms
+
+P50:
+17.465 ms
+
+P95:
+43.267 ms
+
+P99:
+95.092 ms
+
+Maximum:
+463.256 ms
+
+Average DB time:
+7.075 ms
+
+Maximum DB time:
+310.649 ms
+
+Average DB queries/request:
+5.327
+
+Total DB queries:
+2,184
+
+Total DB time:
+2,900.86 ms
 ```
 
-## Dashboard
+This is a controlled local benchmark reference, not a distributed production-capacity claim.
 
-Scenario:
+The figures should be interpreted with the exact benchmark environment and workload configuration used for the run.
+
+---
+
+# 30. Local Hardware Limitation
+
+Local development-machine benchmarks are useful for:
 
 ```text
-load_tests/scenarios/dashboard.py
+Regression detection
+Comparative optimization
+Database behavior analysis
+Endpoint profiling
+Application correctness under load
 ```
 
-Status:
+They are not sufficient to establish very-large-scale production capacity.
+
+Large concurrency claims require:
 
 ```text
-Implemented
-Not individually benchmarked
+Multiple load generators
+Distributed execution
+Controlled infrastructure
+Dedicated database resources
+Network-aware measurement
+Monitoring
+Repeatable environments
 ```
 
-## AI
+The project therefore separates:
 
-Scenario:
+```text
+Application benchmark evidence
+from
+Production capacity claims
+```
+
+---
+
+# 31. Concurrency vs Data Volume
+
+Concurrency and data volume are separate benchmark dimensions.
+
+Concurrency measures:
+
+```text
+How many clients/users are active simultaneously?
+```
+
+Data volume measures:
+
+```text
+How much data exists in the system?
+```
+
+The project must not treat a large database-record target as equivalent to a large concurrent-user target.
+
+Future data-volume testing may use populated datasets in the thousands or beyond.
+
+Future distributed concurrency testing is a separate exercise.
+
+---
+
+# 32. Current Load-Testing Phase
+
+The dedicated load/performance-testing phase is considered complete for the current engineering cycle.
+
+The completion boundary is:
+
+```text
+Individual scenarios:
+25 / 25 implemented
+
+Controlled benchmark infrastructure:
+Established
+
+Server-side performance instrumentation:
+Established
+
+Profiling tooling:
+Established
+
+System-mixed workload:
+Established and exercised
+
+Benchmark validation:
+Established
+
+Performance optimization / verification cycle:
+Completed for the current phase
+```
+
+The next engineering phase is not another round of routine local baseline generation.
+
+The project has moved to:
+
+```text
+Resilience and Recovery Engineering
+```
+
+---
+
+# 33. AI Load Testing
+
+The AI scenario is:
 
 ```text
 load_tests/scenarios/locust_ai.py
 ```
 
-Status:
+The route exercised includes:
 
 ```text
-Implemented
-Not individually benchmarked
+POST /api/v1/ai/drug-interactions
 ```
 
-These are benchmark targets, not missing implementation targets.
+The AI benchmark depends on an external provider.
+
+Therefore AI performance measurements must be separated from ordinary application benchmarks because external conditions can include:
+
+```text
+Provider availability
+Provider rate limits
+Provider model access
+Provider billing/quota
+Provider network latency
+```
+
+The current AI integration was successfully exercised through provider authentication/model access, but generation benchmarking was blocked by an external provider quota condition.
+
+Therefore:
+
+```text
+AI benchmark status:
+Provider-blocked
+```
+
+This must not be interpreted as an application-route failure.
 
 ---
 
-# 37. System-Wide Mixed Workload
+# 34. Why AI Is Tracked Separately
 
-The system-wide benchmark is a separate phase from the individual module baselines.
+An external AI provider is not controlled by the Flask application.
 
-Its purpose is to answer questions such as:
-
-```text
-How does the complete application behave under concurrent mixed traffic?
-
-Which modules consume the most database time?
-
-Which workloads create contention?
-
-How does Redis behave under mixed traffic?
-
-Do authentication, clinical, administrative, reporting,
-notification and communication workloads interfere with one another?
-
-Does latency remain stable as concurrency increases?
-
-Which endpoints become bottlenecks under realistic workload mixing?
-```
-
-The system-wide workload should not simply execute every existing scenario simultaneously.
-
-It should represent a deliberate distribution of application activity.
-
-The workload composition must be designed from the actual current scenario implementations.
-
----
-
-# 38. System-Wide Workload Design Principles
-
-The mixed workload should eventually account for multiple workload categories such as:
+Therefore:
 
 ```text
-Authentication
-Patient access
-Appointments
-Clinical workflows
-Laboratory
-Pharmacy
-Prescriptions
-Inventory
-Billing
-Ward operations
-Ambulance operations
-HIE
-Notifications
-Internal Clinical Chat
-Reports
-Profile
-Settings
-User Devices
-Asset Control
-Access Control
-Audit
-Dashboard
-AI
-```
+Normal application benchmark
 
-The exact request distribution should be documented before execution.
-
-The goal is not to make every module receive equal traffic.
-
-The goal is to model realistic concurrent system activity.
-
----
-
-# 39. System-Wide Benchmark Integrity
-
-The system-wide benchmark should preserve the same principles as individual benchmarks:
-
-```text
-Unique run ID
-Fresh server log
-Dedicated synthetic users
-Valid authentication
-Real tenant isolation
-Real authorization
-Real application services
-Real database
-Real Redis
-Server-side instrumentation
-Locust metrics
-Independent verification
-```
-
-The mixed benchmark must also identify the contribution of individual workloads so bottlenecks can be traced back to their originating scenario.
-
----
-
-# 40. Performance Regression Tracking
-
-After optimization, compare:
-
-```text
-baseline
 vs
-optimized
+
+External-provider benchmark
 ```
 
-using:
+must remain separate.
 
-* average latency
-* p50
-* p95
-* p99
-* maximum latency
-* DB time
-* DB queries/request
-* response size
-* throughput
-* failures
-
-A change should not be considered an improvement merely because one metric decreases.
-
-For example:
-
-```text
-Latency ↓
-but
-DB queries ↑
-```
-
-requires investigation.
-
-Likewise:
-
-```text
-Average latency ↓
-but
-P99 ↑ significantly
-```
-
-requires investigation.
+The AI scenario is retained for future controlled benchmarking when provider availability and quota permit.
 
 ---
 
-# 41. Important Benchmark Rule
+# 35. Benchmark Result Philosophy
 
-Do not chase benchmark numbers at the expense of architecture.
-
-Clinic System Pro v5 is designed around:
+Every result should answer:
 
 ```text
-Authentication
-Authorization
-Tenant Isolation
-Validation
-Transactions
-Auditability
-Database Integrity
-Security
-Observability
-Scalability
+What was measured?
+Under what workload?
+With how many users?
+For how long?
+Against which host?
+Using which run ID?
+What did the server record?
+What did Locust record?
+Was the run valid?
 ```
 
-Performance optimization must preserve those guarantees.
+A benchmark without this context is not sufficient evidence.
 
 ---
 
-# 42. Current Achievement Summary
+# 36. Historical Results
+
+Historical benchmark artifacts may remain useful for:
 
 ```text
-Clinic System Pro v5 Load Testing
+Regression analysis
+Optimization comparisons
+Methodology review
+Debugging
+Historical traceability
+```
 
-Individual scenario implementations:
-25 / 25
+Historical values must not automatically be treated as current measurements when a newer verified result exists.
 
-Official individual baselines:
-21 / 25
+Never manufacture missing metrics.
 
-Remaining individual baselines:
-4
+Always prefer the newest verified artifact for current performance statements.
 
-Remaining individual baseline targets:
-- Clinic
-- Staff
-- Dashboard
-- AI
+---
 
-System-wide mixed workload:
-Not yet implemented
+# 37. Resilience Testing Is Separate
 
-System-wide benchmark:
-Not yet executed
+Resilience testing is intentionally isolated from ordinary load testing.
+
+The new resilience package is:
+
+```text
+load_tests/resilience/
+```
+
+Current structure:
+
+```text
+load_tests/resilience/
+├── README.md
+├── __init__.py
+├── common/
+│   ├── __init__.py
+│   ├── network.py
+│   ├── socketio.py
+│   ├── assertions.py
+│   └── results.py
+├── profiles/
+│   ├── __init__.py
+│   ├── slow_2g.py
+│   ├── slow_3g.py
+│   ├── high_latency.py
+│   ├── jitter.py
+│   ├── packet_loss.py
+│   ├── bandwidth_limited.py
+│   └── intermittent.py
+├── scenarios/
+│   ├── __init__.py
+│   ├── http_resilience.py
+│   ├── socketio_resilience.py
+│   ├── auth_resilience.py
+│   ├── chat_resilience.py
+│   └── sync_resilience.py
+├── runners/
+│   ├── __init__.py
+│   ├── resilience.py
+│   └── resilience_report.py
+└── results/
+```
+
+The resilience package is currently a scaffold.
+
+No resilience-network behavior should be assumed to be implemented merely because the files exist.
+
+---
+
+# 38. Performance vs Resilience
+
+The distinction is:
+
+```text
+PERFORMANCE
+
+Measures:
+latency
+throughput
+concurrency
+database cost
+resource behavior
+response sizes
+```
+
+versus:
+
+```text
+RESILIENCE
+
+Measures:
+failure behavior
+recovery
+disconnect handling
+retry behavior
+degraded-network behavior
+data integrity during interruption
+duplicate protection
+reconnection
+offline behavior
+```
+
+A system can be fast and still be fragile.
+
+It can also be resilient while needing performance optimization.
+
+The two test disciplines therefore remain separate.
+
+---
+
+# 39. Current Resilience Targets
+
+The resilience phase is expected to examine:
+
+```text
+Slow internet
+High latency
+Jitter
+Packet loss
+Bandwidth limitation
+Intermittent connectivity
+
+HTTP interruption
+Authentication interruption
+Socket.IO disconnect/reconnect
+Chat recovery
+
+Flutter offline behavior
+SQLite synchronization
+
+Redis degradation
+Celery degradation
+
+Recovery behavior
+Duplicate protection
+Data integrity protection
+```
+
+The implementation of these scenarios belongs to the resilience phase rather than the completed load-testing phase.
+
+---
+
+# 40. Existing Profiling Scope
+
+Current profiling work has included focused inspection of:
+
+```text
+Dashboard service
+Chat message creation
+Chat security
+Chat service execution
+SQL execution
+```
+
+Profilers exist so that an observed performance issue can be traced to:
+
+```text
+Application code
+Database queries
+Service logic
+Infrastructure interaction
+```
+
+Profiling results should not be confused with benchmark baselines.
+
+---
+
+# 41. Benchmark Safety Rules
+
+Official benchmarks must:
+
+```text
+Use synthetic identities
+Use controlled test data
+Use unique run IDs
+Preserve authentication
+Preserve authorization
+Preserve tenant isolation
+Preserve validation
+Preserve transactions
+Preserve audit behavior
+Use fresh benchmark context
+Validate the resulting evidence
+```
+
+Avoid:
+
+```text
+Real patient accounts
+Real production credentials
+Uncontrolled destructive workloads
+Benchmark-only production bypasses
+Shared run IDs
+Mixed benchmark logs
+Unverified result promotion
 ```
 
 ---
 
-# 43. Current Phase
+# 42. Benchmark Methodology Rules
 
-The load-testing project has completed the initial individual benchmark foundation.
-
-The current phase is:
-
-```text
-STEP 6
-Design and execute the true system-wide mixed workload
-```
-
-Before execution, the existing scenario implementations should be inspected to determine:
-
-```text
-- what each scenario actually requests
-- authentication/setup behavior
-- read/write ratios
-- endpoint frequency
-- database intensity
-- Redis usage
-- cross-module dependencies
-- realistic concurrency distribution
-- AI workload characteristics
-- administrative vs clinical traffic
-```
-
-The system-wide workload should then be designed from those verified characteristics.
-
----
-
-# 44. Roadmap
-
-```text
-1. Fix / verify PostgreSQL enum and schema alignment
-        ✓
-
-2. Run benchmark seeder successfully
-        ✓
-
-3. Verify benchmark manifest and database counts
-        ✓
-
-4. Decide required dataset scale
-        ✓
-
-5. Implement central performance baseline runner/report
-        ✓
-
-6. Design and execute true system-wide mixed workload
-        NEXT
-
-7. Analyze system-wide bottlenecks
-
-8. Optimize identified bottlenecks
-
-9. Re-run targeted benchmarks
-
-10. Re-run system-wide benchmark
-
-11. Load / stress testing
-
-12. Production readiness performance review
-```
-
----
-
-# 45. Benchmark Rules of Record
-
-The following rules govern official benchmark results:
+The project follows these rules of record:
 
 ```text
 1. Use synthetic benchmark identities.
@@ -1368,60 +1232,179 @@ The following rules govern official benchmark results:
 
 3. Use a fresh server log.
 
-4. Use the standard benchmark profile unless documented otherwise.
+4. Record the actual benchmark configuration.
 
-5. Server-side metrics are the primary application performance source.
+5. Treat server-side metrics as the primary application evidence.
 
-6. Locust metrics are supplementary client-side evidence.
+6. Treat Locust metrics as supporting client-side evidence.
 
-7. Exclude setup authentication from non-auth module measurements.
+7. Exclude setup/login traffic from non-auth workloads where appropriate.
 
-8. Prefer populated synthetic workloads for populated production-like endpoints.
+8. Prefer populated synthetic workloads for realistic data-dependent endpoints.
 
-9. Do not modify production logic solely to improve benchmark results.
+9. Do not modify production logic solely to improve benchmark numbers.
 
-10. Do not accept a benchmark with integrity failures.
+10. Do not accept runs with failed integrity checks.
 
-11. Do not overwrite a verified benchmark with an unverified run.
+11. Preserve verified benchmark artifacts.
 
-12. Preserve historical benchmark artifacts.
+12. Do not overwrite verified results with unverified runs.
 
 13. Record methodology changes explicitly.
 
-14. Optimize only after establishing a valid baseline.
+14. Optimize only after measuring the bottleneck.
 
 15. Re-benchmark after meaningful performance changes.
 
-16. Preserve security, authorization, tenant isolation, validation,
-    transactions and audit behavior throughout performance testing.
+16. Preserve security, tenant isolation, authorization, validation,
+    transactions and auditability throughout performance testing.
 ```
 
 ---
 
-# 46. Final Current Status
+# 43. Current Repository Utilities
+
+The main load-testing utilities currently include:
 
 ```text
-LOAD TESTING STATUS
+load_tests/baseline.py
+load_tests/baseline_report.py
+load_tests/common/auth.py
+load_tests/common/benchmark.py
 
-Individual scenario implementation:
-25 / 25 complete
-
-Official individual baselines:
-21 / 25 complete
-
-Individual baselines remaining:
-4
-
-System-wide mixed workload:
-Not yet implemented
-
-System-wide benchmark:
-Not yet executed
-
-Next:
-Step 6 — Design and execute the true system-wide mixed workload
+load_tests/seed_load_test_data.py
+load_tests/provision_ai_load_users.py
+load_tests/verify_benchmark_dataset.py
 ```
 
-The benchmark infrastructure is now ready for the system-wide workload design phase.
+Profiling and investigation utilities include:
 
-The next step is **inspection and workload planning first**, followed by execution only after the mixed workload has been reviewed and agreed upon.
+```text
+load_tests/profile_chat_create_message.py
+load_tests/profile_chat_security.py
+load_tests/profile_chat_security_deep.py
+load_tests/profile_chat_services.py
+load_tests/profile_dashboard_service.py
+load_tests/profile_dashboard_warm.py
+load_tests/explain_dashboard_queries.py
+load_tests/trace_chat_create_queries.py
+```
+
+---
+
+# 44. Current Status Summary
+
+```text
+CLINIC SYSTEM PRO v5 LOAD TESTING
+
+Individual scenario implementations:
+25 / 25
+
+Benchmark infrastructure:
+Complete
+
+Server-side performance instrumentation:
+Complete
+
+Benchmark validation:
+Complete
+
+Targeted profiling tools:
+Complete
+
+System-mixed workload:
+Implemented and exercised
+
+Current controlled mixed baseline:
+system-mixed-baseline-003
+
+Current load/performance phase:
+COMPLETE FOR CURRENT ENGINEERING CYCLE
+
+Next phase:
+RESILIENCE AND RECOVERY ENGINEERING
+```
+
+---
+
+# 45. What Load Testing Is No Longer Responsible For
+
+The load-testing package should not be used to claim that the application already has:
+
+```text
+Production disaster recovery
+Database backup
+Restore capability
+Point-in-time recovery
+Offline synchronization
+Network-failure recovery
+Redis failover
+Celery failover
+Distributed million-user capacity
+```
+
+Those are separate engineering concerns.
+
+---
+
+# 46. Current Roadmap
+
+The current engineering sequence is:
+
+```text
+LOAD / PERFORMANCE
+        ✓
+
+        ↓
+
+RESILIENCE / RECOVERY
+        NEXT
+
+        ↓
+
+BACKUP EXECUTION
+        ↓
+RESTORE + VERIFICATION
+        ↓
+RETENTION / RECOVERY POLICY
+        ↓
+PRODUCTION READINESS REVIEW
+        ↓
+FUTURE DISTRIBUTED SCALABILITY VALIDATION
+```
+
+The resilience and backup frameworks are deliberately separated from the performance baseline infrastructure so each discipline produces clean, interpretable evidence.
+
+---
+
+# 47. Final Status Boundary
+
+The project distinguishes between:
+
+```text
+Implemented
+Verified
+Profiled
+Scaffolded
+Planned
+```
+
+A file existing in the repository does not mean the capability is operational.
+
+In particular:
+
+```text
+Load testing:
+Implemented and completed for the current cycle
+
+Resilience framework:
+Scaffolded
+
+Backup framework:
+Scaffolded
+
+Offline synchronization:
+Planned / not fully implemented
+```
+
+This distinction is intentional and must be preserved throughout the remaining engineering phases.
