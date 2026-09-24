@@ -138,9 +138,6 @@ def run_scheduled_backup() -> dict[str, Any]:
 @celery.task(
     name="run_backup_retention",
 )
-@celery.task(
-    name="run_backup_retention",
-)
 def run_backup_retention() -> dict[str, Any]:
     from flask import current_app
 
