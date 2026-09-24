@@ -97,6 +97,30 @@ class Config:
     MAX_PROFILE_IMAGE_SIZE_BYTES = (
         5 * 1024 * 1024
     )
+    
+    
+        # ------------------------------------------------------------------
+    # Backup & Disaster Recovery
+    # ------------------------------------------------------------------
+
+    BACKUP_ROOT = os.environ.get(
+        "BACKUP_ROOT"
+    )
+
+    BACKUP_RETENTION_DAYS = int(
+        os.environ.get(
+            "BACKUP_RETENTION_DAYS",
+            "30",
+        )
+    )
+
+    BACKUP_MIN_RECOVERY_POINTS = int(
+        os.environ.get(
+            "BACKUP_MIN_RECOVERY_POINTS",
+            "1",
+        )
+    )
+    
 
     # ------------------------------------------------------------------
     # Flask-Limiter

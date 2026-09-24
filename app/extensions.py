@@ -96,5 +96,19 @@ def init_extensions(app):
                     minute=0,
                 ),
             },
+            "run-scheduled-backup-daily": {
+                "task": "run_scheduled_backup",
+                "schedule": crontab(
+                    hour=2,
+                    minute=0,
+                ),
+            },
+            "run-backup-retention-daily": {
+                "task": "run_backup_retention",
+                "schedule": crontab(
+                    hour=3,
+                    minute=0,
+                ),
+            },
         },
     )

@@ -13,6 +13,7 @@ class ContextTask(celery.Task):
 
 celery.Task = ContextTask
 
+
 from app import create_app
 
 
@@ -23,8 +24,10 @@ flask_app = create_app(
     )
 )
 
+
 from app.modules.appointment.services import appointment_service
 from app.modules.billing.services import billing_service
 from app.modules.clinic.services import clinic_service
 from app.core.notifications.services import notification_service
 from app.modules.chat.tasks import chat_outbox_task
+from app.core.backup import backup_tasks
