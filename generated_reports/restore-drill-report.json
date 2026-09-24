@@ -1,0 +1,22 @@
+{
+  "authentication_invalidated": true,
+  "backup_id": "20260924T130957Z-942390b4fed5478687566ef1fa464b24",
+  "backup_path": "C:\\Users\\HP\\Documents\\clinic-system\\instance\\backups\\20260924T130957Z-942390b4fed5478687566ef1fa464b24",
+  "completed_at": "2026-09-24T13:17:13.344562+00:00",
+  "database_verification": {
+    "audit_log_count": 20898,
+    "chat_outbox_count": 62,
+    "clinic_count": 2,
+    "database_name": "clinic_system_restore_drill",
+    "migration_revision": "3f8c2e7a1b44",
+    "processing_outbox_count": 0,
+    "user_count": 5020
+  },
+  "outbox_recovery_completed": true,
+  "post_restore_verification_completed": true,
+  "restored_file_count": 0,
+  "restored_total_size_bytes": 0,
+  "success": true,
+  "target_database": "clinic_system_restore_drill",
+  "target_storage_root": "C:\\Users\\HP\\Documents\\clinic-system\\restore-drill-storage-20260924"
+}
