@@ -152,6 +152,10 @@ def register_blueprints(app):
     from app.core.emergency_access.routes.emergency_access_routes import (
         emergency_access_bp,
     )
+    
+    from app.core.clinical_safety.routes.clinical_safety_routes import (
+        clinical_safety_bp,
+    )
 
     app.register_blueprint(web_bp)
 
@@ -182,7 +186,8 @@ def register_blueprints(app):
         access_control_bp,
         chat_bp,
         dashboard_bp,
-        emergency_access_bp
+        emergency_access_bp,
+        clinical_safety_bp,
     )
 
     for blueprint in api_blueprints:
