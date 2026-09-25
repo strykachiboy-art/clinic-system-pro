@@ -156,6 +156,10 @@ def register_blueprints(app):
     from app.core.clinical_safety.routes.clinical_safety_routes import (
         clinical_safety_bp,
     )
+    
+    from app.modules.feedback.routes.feedback_routes import (
+        feedback_bp,
+    )
 
     app.register_blueprint(web_bp)
 
@@ -188,6 +192,7 @@ def register_blueprints(app):
         dashboard_bp,
         emergency_access_bp,
         clinical_safety_bp,
+        feedback_bp,
     )
 
     for blueprint in api_blueprints:
