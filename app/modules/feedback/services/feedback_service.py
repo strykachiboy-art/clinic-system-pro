@@ -16,6 +16,7 @@ from app.core.enums.feedback_enums import (
     FeedbackType,
 )
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -241,10 +242,7 @@ def _is_active_staff(
     statement = db.select(Staff.id).where(
         Staff.user_id == user_id,
         Staff.clinic_id == clinic_id,
-    )
-
-    statement = statement.where(
-        Staff.status.is_not(None),
+        Staff.status == StaffStatus.ACTIVE,
     )
 
     return (
