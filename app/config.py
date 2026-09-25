@@ -140,7 +140,7 @@ class Config:
 
     AI_PROVIDER = "openai"
 
-    AI_LOAD_TEST_MODE = True
+    AI_LOAD_TEST_MODE = False
 
     AI_LOAD_TEST_RATE_LIMIT = (
         "1000 per second"
