@@ -343,8 +343,66 @@ def _get_user_in_clinic(
     return user
 
 
+def _validate_target_actor_access(
+    *,
+    actor_user_id: int,
+    clinic_id: int,
+    model: type,
+    target: object,
+) -> None:
+    actor = _get_actor(actor_user_id)
+    role = _actor_role(actor)
+
+    if role == Role.SUPER_ADMIN:
+        return
+
+    _get_user_in_clinic(
+        actor_user_id,
+        clinic_id,
+        active_only=True,
+    )
+
+    if role == Role.ADMIN:
+        return
+
+    if _is_active_staff(
+        user_id=actor_user_id,
+        clinic_id=clinic_id,
+    ):
+        return
+
+    patient = db.session.execute(
+        db.select(Patient).where(
+            Patient.user_id == actor_user_id,
+            Patient.clinic_id == clinic_id,
+            Patient.is_active.is_(True),
+        )
+    ).scalar_one_or_none()
+
+    if patient is None:
+        raise NotFoundError(
+            "Feedback target resource not found"
+        )
+
+    if model is Patient:
+        allowed = target.user_id == actor_user_id
+    else:
+        target_patient_id = getattr(
+            target,
+            "patient_id",
+            None,
+        )
+        allowed = target_patient_id == patient.id
+
+    if not allowed:
+        raise NotFoundError(
+            "Feedback target resource not found"
+        )
+
+
 def _validate_target(
     *,
+    actor_user_id: int,
     clinic_id: int,
     target_module: str | None,
     target_resource_type: str | None,
@@ -422,6 +480,13 @@ def _validate_target(
             "Feedback target resource not found"
         )
 
+    _validate_target_actor_access(
+        actor_user_id=actor_user_id,
+        clinic_id=clinic_id,
+        model=model,
+        target=target,
+    )
+
 
 def _validate_assignment(
     *,
@@ -436,6 +501,14 @@ def _validate_assignment(
         clinic_id,
         active_only=True,
     )
+
+    if not _is_active_staff(
+        user_id=assigned_to_user_id,
+        clinic_id=clinic_id,
+    ):
+        raise ValidationError(
+            "Assigned user must be active clinic staff."
+        )
 
 
 def _validate_status_transition(
@@ -612,6 +685,7 @@ def create_feedback(
     )
 
     _validate_target(
+        actor_user_id=actor_user_id,
         clinic_id=resolved_clinic_id,
         target_module=payload.target_module,
         target_resource_type=(
