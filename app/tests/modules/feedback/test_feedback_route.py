@@ -930,3 +930,93 @@ def test_feedback_route_hides_unexpected_exception(
     )
 
     assert "SECRET INTERNAL DETAIL" not in response.text
+
+@pytest.mark.parametrize(
+    "user_fixture",
+    [
+        "feedback_submitter",
+        "feedback_admin",
+    ],
+)
+def test_normal_users_cannot_supply_feedback_clinic_id(
+    request,
+    client,
+    feedback,
+    auth_headers_for,
+    feedback_routes,
+    user_fixture,
+    monkeypatch,
+):
+    user = request.getfixturevalue(user_fixture)
+
+    service = Mock(
+        return_value={
+            "items": [feedback],
+            "total": 1,
+            "page": 1,
+            "per_page": 50,
+            "pages": 1,
+            "has_next": False,
+            "has_previous": False,
+        }
+    )
+
+    monkeypatch.setattr(
+        feedback_routes,
+        "list_feedback",
+        service,
+    )
+
+    response = client.get(
+        f"{BASE_URL}?clinic_id={feedback.clinic_id}",
+        headers=_auth_headers(
+            auth_headers_for,
+            user,
+        ),
+    )
+
+    assert response.status_code == 404
+    service.assert_not_called()
+
+
+def test_super_admin_can_supply_feedback_clinic_id(
+    client,
+    feedback,
+    feedback_super_admin,
+    auth_headers_for,
+    feedback_routes,
+    monkeypatch,
+):
+    service = Mock(
+        return_value={
+            "items": [feedback],
+            "total": 1,
+            "page": 1,
+            "per_page": 50,
+            "pages": 1,
+            "has_next": False,
+            "has_previous": False,
+        }
+    )
+
+    monkeypatch.setattr(
+        feedback_routes,
+        "list_feedback",
+        service,
+    )
+
+    response = client.get(
+        f"{BASE_URL}?clinic_id={feedback.clinic_id}",
+        headers=_auth_headers(
+            auth_headers_for,
+            feedback_super_admin,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    assert service.call_args.kwargs["clinic_id"] == (
+        feedback.clinic_id
+    )
+
+

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt, get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
-from app.core.exceptions import DomainError, ValidationError
+from app.core.exceptions import DomainError, NotFoundError, ValidationError
 from app.core.utils.decorators import (
     login_required,
     role_required,
@@ -76,6 +76,25 @@ def _get_optional_clinic_id():
     if raw is None or raw == "":
         return None
 
+    claims = get_jwt()
+    raw_role = claims.get("role")
+
+    try:
+        role = (
+            raw_role
+            if isinstance(raw_role, Role)
+            else Role(raw_role)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            "Invalid authentication role"
+        ) from exc
+
+    if role != Role.SUPER_ADMIN:
+        raise NotFoundError(
+            "Requested feedback scope was not found"
+        )
+
     try:
         clinic_id = int(raw)
     except (TypeError, ValueError) as exc:
@@ -89,6 +108,7 @@ def _get_optional_clinic_id():
         )
 
     return clinic_id
+
 
 
 def _get_json_object() -> dict:
@@ -109,6 +129,7 @@ def _get_json_object() -> dict:
 
 def _build_feedback_list_query():
     values = request.args.to_dict()
+    values.pop("clinic_id", None)
 
     integer_fields = (
         "page",
