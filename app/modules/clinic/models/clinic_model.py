@@ -281,6 +281,11 @@ class Clinic(db.Model):
         back_populates="clinic",
         cascade="all, delete-orphan",
    )
+    
+    feedback_items = db.relationship(
+        "Feedback",
+        back_populates="clinic",
+    )
 
     def __repr__(self):
         return (

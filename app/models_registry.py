@@ -20,6 +20,8 @@ from app.modules.staff.models.staff_model import (
     LeaveRequest,
 )
 
+from app.modules.staff.models.excuse_model import Excuse
+
 # Appointment
 from app.modules.appointment.models.appointment_model import Appointment
 
@@ -147,6 +149,10 @@ from app.modules.chat.models.message_revision_model import MessageRevision
 from app.modules.chat.models.chat_outbox_model import ChatOutbox
 from app.modules.chat.models.chat_usage_model import ChatUsage
 
+# Feedback
+from app.modules.feedback.models.feedback_model import Feedback
+from app.modules.feedback.models.feedback_comment_model import FeedbackComment
+from app.modules.feedback.models.feedback_reaction_model import FeedbackReaction
 
 __all__ = [
     # Core
@@ -166,6 +172,7 @@ __all__ = [
     "Staff",
     "PayrollRecord",
     "LeaveRequest",
+    "Excuse",
 
     # Appointment
     "Appointment",
@@ -260,4 +267,9 @@ __all__ = [
     "MessageRevision",
     "ChatOutbox",
     "ChatUsage",
+    
+    # Feedback
+    "Feedback",
+    "FeedbackComment",
+    "FeedbackReaction",
 ]
