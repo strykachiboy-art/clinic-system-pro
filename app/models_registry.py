@@ -126,6 +126,17 @@ from app.core.emergency_access.models.consent_guard_model import (
     ConsentGuardEvaluation,
 )
 
+# Clinical Safety
+from app.core.clinical_safety.models.clinical_rule_model import (
+    ClinicalRule,
+)
+from app.core.clinical_safety.models.clinical_alert_model import (
+    ClinicalAlert,
+)
+from app.core.clinical_safety.models.alert_acknowledgement_model import (
+    AlertAcknowledgement,
+)
+
 from app.modules.chat.models.message_model import Message
 from app.modules.chat.models.message_attachment_model import MessageAttachment
 from app.modules.chat.models.message_mention_model import MessageMention
@@ -230,7 +241,12 @@ __all__ = [
     
     # Emergency Access
     "EmergencyAccessGrant",
-    "ConsentGuardEvaluation"
+    "ConsentGuardEvaluation",
+    
+    # Clinical Safety
+    "ClinicalRule",
+    "ClinicalAlert",
+    "AlertAcknowledgement",
 
     # Chat
     "Conversation",
