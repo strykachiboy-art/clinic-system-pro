@@ -1,27 +1,73 @@
-from pydantic import BaseModel, ConfigDict
+from __future__ import annotations
 
-from app.core.enums.feedback_reaction_enums import FeedbackReactionType
+from datetime import datetime
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+)
+
+from app.core.enums.feedback_reaction_enums import (
+    FeedbackReactionType,
+)
 
 
 class FeedbackReactionCreateSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     reaction_type: FeedbackReactionType
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class FeedbackReactionResponseSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    id: StrictInt = Field(
+        ...,
+        gt=0,
+    )
 
-    id: int
-    feedback_id: int
-    user_id: int
+    feedback_id: StrictInt = Field(
+        ...,
+        gt=0,
+    )
+
+    user_id: StrictInt = Field(
+        ...,
+        gt=0,
+    )
+
     reaction_type: FeedbackReactionType
-    created_at: object
-    updated_at: object
+
+    created_at: datetime
+
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
 
 
 class FeedbackReactionSummarySchema(BaseModel):
-    helpful: int
-    appreciated: int
-    not_helpful: int
+    helpful: StrictInt = Field(
+        ...,
+        ge=0,
+    )
+
+    appreciated: StrictInt = Field(
+        ...,
+        ge=0,
+    )
+
+    not_helpful: StrictInt = Field(
+        ...,
+        ge=0,
+    )
+
     my_reaction: FeedbackReactionType | None = None
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
