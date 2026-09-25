@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
@@ -292,6 +292,21 @@ def clinical_rule_audit_mock(
 
     monkeypatch.setattr(
         clinical_rule_service,
+        "create_audit_log",
+        audit,
+    )
+
+    return audit
+
+
+@pytest.fixture()
+def clinical_alert_audit_mock(monkeypatch):
+    from app.core.clinical_safety.services import alert_service
+
+    audit = Mock()
+
+    monkeypatch.setattr(
+        alert_service,
         "create_audit_log",
         audit,
     )
