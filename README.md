@@ -1,1965 +1,2286 @@
 # Clinic System Pro v5
 
-Clinic System Pro v5 is a modular, multi-clinic healthcare management backend built with Flask, SQLAlchemy 2.x, PostgreSQL, Redis, Celery, Flask-SocketIO, JWT authentication, Pydantic v2, and a versioned API architecture.
+Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-The platform is designed around server-side authorization, strict tenant isolation, transactional business services, auditability, clinical safety, emergency access controls, observability, backup and recovery, resilience testing, and a future Flutter client layer.
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete and the next active backend phase is Resilience Engineering.**
+
+**Status date: September 2026**
 
 ---
 
-## Current Project Status
+## 1. Project Overview
 
-**Status date:** September 25, 2026
+Clinic System Pro v5 is being developed as a production-oriented healthcare platform rather than a conventional CRUD application.
 
-The project has completed its major backend architecture, security hardening, core feature, resilience, and recovery engineering milestones.
+The backend is designed around:
 
-### Completed and hardened
+- strict multi-clinic tenant isolation
+- authentication and authorization
+- role-based access control
+- clinical resource protection
+- emergency clinical access
+- clinical safety enforcement
+- auditability
+- transactional integrity
+- deterministic API behavior
+- validation and structured errors
+- historical and lifecycle-aware reads
+- performance-conscious database access
+- background processing
+- notifications
+- internal clinical communication
+- backup and disaster recovery
+- resilience engineering
+- production-readiness verification
+- Flutter/mobile client support
 
-```text
-Application factory architecture
-Authentication and identity
-JWT access and refresh tokens
-Google OAuth
-Token revocation
-Token-version invalidation
-Role-based access control
-Multi-clinic tenant isolation
-IDOR protection
-Strict request validation
-Pydantic v2 contracts
-Transactional service boundaries
-Centralized domain error handling
-Pagination
-Deterministic ordering
-Lifecycle/state validation
-Historical-read semantics
-Audit logging
-Modern SQLAlchemy 2.x usage
-Migration cleanup
-Database hardening
-Route/schema integration hardening
-Service and route test hardening
-Configuration and integration hardening
+The project deliberately separates completed implementation from planned work. A feature is not considered production-ready merely because its files exist; implementation, authorization, error handling, integration, and verification must all be established.
 
+---
+
+# 2. Architecture
+
+The project uses a modular Flask backend with clear separation between:
+
+Routes
+    ↓
+Schemas / Validation
+    ↓
+Services / Business Logic
+    ↓
+Models / Database
+
+Cross-cutting infrastructure is handled through dedicated core modules for:
+
+- authentication
+- authorization
+- tenant isolation
+- errors
+- transactions
+- audit
+- clinical safety
+- emergency access
+- configuration
+- observability
+- backup/recovery
+- background processing
+- security controls
+
+The architecture is intended to keep route handlers thin and business rules inside reusable service layers.
+
+---
+
+# 3. Source-of-Truth Model
+
+PostgreSQL is the authoritative application datastore.
+
+SQLite is not the source of truth.
+
+SQLite is reserved for Flutter-side local storage, cache, offline state, control data, and queued client operations where appropriate.
+
+Offline functionality must never become an authorization bypass.
+
+The server remains authoritative for:
+
+- identity
+- permissions
+- tenant membership
+- patient records
+- clinical records
+- financial records
+- medication safety
+- emergency access authorization
+- synchronization decisions
+- conflict resolution
+- permanent audit state
+
+---
+
+# 4. Core Technology Stack
+
+## Backend
+
+- Python
+- Flask
+- Flask-SQLAlchemy
+- Flask-Migrate / Alembic
+- PostgreSQL
+- Redis
+- JWT authentication
+- Google OAuth
+- Pydantic v2
+- Flask-SocketIO
+- Celery/background processing
+- SQLAlchemy transactions
+- structured application errors
+
+## Client
+
+Flutter is the planned cross-platform application layer.
+
+The web application remains supported.
+
+Flutter is intended to provide the mobile/client experience rather than replace the backend.
+
+---
+
+# 5. Core Platform Structure
+
+The platform is organized into major application domains:
+
+Auth / Identity
+User / Staff
+Patient
+Clinic
+Profile
+Appointment
+Consultation
+Lab
+Pharmacy
+Prescription
+Inventory
+Billing
+Ward
+Ambulance
+HIE
+AI
+Reports
+Notifications
+Audit
 Settings
-Asset Control / Asset Management
+Asset Control
 Dashboard
-Advanced Access Control
-Internal Clinical Chat
-
-Emergency Clinical Access
-Consent Guard / Break-Glass controls
-
 Clinical Safety
-Clinical Rule Engine
-Medication Safety Evaluation
-Clinical Alerts
-Alert acknowledgement and override controls
+Emergency Clinical Access
+Internal Clinical Chat
+Feedback
 
-Database backup
-File backup
-Backup storage handling
-Backup retention
-Backup verification
-Database restore
-File restore
-Restore orchestration
-Controlled restore drill
+---
 
-Request observability
-Database observability
-Redis observability
-Celery observability
-Socket.IO observability
-System observability
+# 6. Authentication
 
-Controlled Locust load-testing infrastructure
-Resilience testing infrastructure
-Network degradation profiles
-HTTP resilience testing
-Authentication resilience testing
-Socket.IO resilience testing
-Chat resilience testing
-Redis/Celery resilience testing
-```
+Authentication supports:
 
-### Current verified checkpoints
+- username/password based authentication
+- JWT access tokens
+- JWT refresh tokens
+- Google OAuth
+- session invalidation/revocation through Redis
+- authenticated request protection
+- token expiration
+- authentication lifecycle controls
 
-```text
-Clinical Safety suite:
+Current token configuration is approximately:
+
+- access token: about 1 hour
+- refresh token: about 30 days
+
+Redis-backed revocation is used for invalidating credentials before their natural expiration.
+
+---
+
+# 7. Authorization and RBAC
+
+The authoritative role system includes:
+
+SUPER_ADMIN
+ADMIN
+DOCTOR
+NURSE
+PATIENT
+PHARMACIST
+LAB_TECHNICIAN
+RECEPTIONIST
+ACCOUNTANT
+PARAMEDIC
+EMT
+DRIVER
+AMBULANCE_DISPATCHER
+AMBULANCE_COORDINATOR
+OTHER
+
+Authorization rules distinguish:
+
+- global administration
+- clinic administration
+- clinical staff
+- operational staff
+- patients
+- emergency roles
+
+Important principles:
+
+- role claims are enforced server-side
+- client-supplied actor IDs are not trusted for authorization
+- tenant ownership is verified on protected resources
+- object-level authorization is enforced
+- administrative escalation is restricted
+- privileged roles cannot arbitrarily assign equivalent or higher privileges
+- super-admin controls are intentionally separated from normal clinic administration
+
+---
+
+# 8. Multi-Clinic Tenant Isolation
+
+Every tenant-sensitive operation must establish the correct clinic context server-side.
+
+The application does not trust arbitrary client-supplied clinic IDs for ordinary users.
+
+Tenant isolation is enforced across:
+
+- database queries
+- service-layer authorization
+- resource lookup
+- mutations
+- assignments
+- audit records
+- feedback
+- chat
+- emergency access
+- clinical records
+- financial records
+- background operations
+
+A resource belonging to another clinic should not become accessible merely because its numeric ID is known.
+
+---
+
+# 9. API Versioning
+
+The API is versioned under:
+
+/api/v1
+
+Blueprint registration applies the versioning prefix consistently.
+
+The architecture allows future API evolution without breaking the existing contract unnecessarily.
+
+---
+
+# 10. Validation and Error Handling
+
+Pydantic v2 schemas are used for structured request validation.
+
+The system uses strict validation where required, including:
+
+- StrictInt
+- StrictBool
+- explicit enumerations
+- constrained strings
+- date/time validation
+- cross-field validation
+- forbidden extra fields
+
+Application-level errors use structured domain exceptions.
+
+Important categories include:
+
+400 DomainError
+402 InsufficientCredits
+404 NotFoundError
+409 ConflictError
+422 ValidationError
+
+Transactions use centralized commit/rollback behavior.
+
+The backend avoids silently accepting malformed or ambiguous input.
+
+---
+
+# 11. Database Architecture
+
+The database uses:
+
+- PostgreSQL
+- SQLAlchemy
+- Alembic migrations
+- foreign-key integrity
+- unique constraints
+- check constraints
+- tenant-aware indexes
+- lifecycle timestamps
+- deterministic ordering
+- transaction boundaries
+
+SQLAlchemy usage follows modern patterns such as:
+
+db.select(...)
+db.session.execute(...)
+db.session.get(...)
+
+and appropriate row locking where concurrency requires it.
+
+Database migrations are tracked through Alembic/Flask-Migrate.
+
+---
+
+# 12. Auditability
+
+Healthcare operations require traceability.
+
+The architecture therefore includes audit logging for security-sensitive and clinically relevant operations.
+
+Audit data is intended to establish:
+
+- who performed an action
+- what was accessed or changed
+- when it occurred
+- what tenant was involved
+- what relevant resource was involved
+- whether the action was ordinary or emergency access
+
+Auditability is treated as part of the platform architecture rather than an optional reporting feature.
+
+---
+
+# 13. Security Model
+
+Security hardening includes:
+
+- authentication
+- role authorization
+- tenant isolation
+- IDOR protection
+- strict validation
+- transaction safety
+- controlled privilege escalation
+- resource ownership validation
+- auditability
+- credential revocation
+- emergency-access controls
+- clinical safety enforcement
+- deterministic API behavior
+
+No security control is allowed to rely solely on client-side behavior.
+
+---
+
+# 14. Emergency Clinical Access / Break-Glass
+
+The Emergency Clinical Access module provides controlled emergency access to protected patient information.
+
+The implementation includes:
+
+- eligible clinical requesters
+- active staff checks
+- active user and clinic checks
+- patient-scoped emergency requests
+- scoped access
+- reviewer approval
+- reviewer denial
+- revocation
+- expiration
+- lifecycle states
+- duration limits
+- authorization checks
+- audit integration
+
+Emergency access is not intended to become a permanent privilege escalation mechanism.
+
+Example scopes include:
+
+patient:read
+consultation:123:read
+
+The emergency-access architecture is designed around:
+
+Request
+    ↓
+Review / Grant
+    ↓
+Limited Scope
+    ↓
+Time-Bounded Access
+    ↓
+Audit / Expiry / Revocation
+
+Break-glass access must never bypass Clinical Safety controls.
+
+---
+
+# 15. Clinical Safety
+
+Clinical Safety is a first-class backend subsystem.
+
+It provides the foundation for:
+
+- clinical rules
+- medication safety
+- contraindication checks
+- alerts
+- clinical warnings
+- safety enforcement
+- alert lifecycle handling
+
+The system separates clinical decision enforcement from ordinary CRUD behavior.
+
+## Clinical Safety Verification
+
+The current Clinical Safety test suite reached:
+
 134 passed
 
-Recorded resilience all-scenario run:
-47 passed
+Clinical Safety remains a protected platform boundary.
+
+Emergency access does not override clinical safety rules.
+
+---
+
+# 16. Medication Safety
+
+Medication-related workflows are expected to enforce clinical safety requirements where applicable.
+
+The architecture supports checks such as:
+
+- medication interactions
+- contraindications
+- allergy-related safety
+- duplicate or unsafe therapy detection
+- clinical warnings
+
+Medication safety remains part of the Clinical Safety domain.
+
+The project deliberately avoids duplicating the DrugInteraction subsystem across unrelated modules.
+
+---
+
+# 17. Clinical Alerts
+
+Clinical alerts provide a controlled mechanism for surfacing safety-relevant information.
+
+The system distinguishes:
+
+- clinical rules
+- generated alerts
+- alert status
+- alert ownership/context
+- lifecycle handling
+
+Alerts must remain auditable and must not become an uncontrolled notification mechanism.
+
+---
+
+# 18. Internal Clinical Chat
+
+The Internal Clinical Chat subsystem includes:
+
+conversation
+participant
+message
+attachment
+mention
+pin
+reaction
+read receipt
+revision
+outbox
+usage
+
+The system supports clinic-scoped internal communication.
+
+Important architecture characteristics include:
+
+- tenant isolation
+- participant validation
+- message authorization
+- Socket.IO realtime delivery
+- outbox/event processing
+- message lifecycle control
+- usage limits
+- controlled group size
+- message length limits
+
+Current configuration supports:
+
+chat_enabled
+rust_service_enabled
+direct_chat_enabled
+e2e_encryption_enabled
+max_group_participants
+max_message_length
+retention_days
+hipaa_log_redaction
+
+Configuration resolution follows the intended hierarchy of:
+
+Hard limit
+    ↓
+Feature flag
+    ↓
+Clinic setting
+    ↓
+Default
+
+The system currently enforces ceilings such as:
+
+max_group_participants <= 500
+max_message_length <= 10000
+
+Clinic-level configuration may be more restrictive.
+
+---
+
+# 19. Feedback
+
+The Feedback module is fully implemented and verified for the current backend cycle.
+
+Module structure:
+
+app/modules/feedback/
+├── __init__.py
+├── models/
+│   ├── __init__.py
+│   ├── feedback_model.py
+│   └── feedback_comment_model.py
+├── schemas/
+│   ├── __init__.py
+│   ├── feedback_schema.py
+│   ├── feedback_comment_schema.py
+│   ├── feedback_query_schema.py
+│   └── feedback_reaction_schema.py
+├── services/
+│   ├── __init__.py
+│   ├── feedback_service.py
+│   └── feedback_comment_service.py
+└── routes/
+    ├── __init__.py
+    └── feedback_routes.py
+
+Supported feedback types:
+
+PRODUCT_FEEDBACK
+BUG_REPORT
+FEATURE_REQUEST
+SERVICE_COMPLAINT
+COMPLIMENT
+
+Categories include:
+
+USABILITY
+PERFORMANCE
+ACCESSIBILITY
+BILLING
+APPOINTMENT
+PHARMACY
+LABORATORY
+CLINICAL_WORKFLOW
+COMMUNICATION
+SECURITY
+OTHER
+
+Priority states:
+
+LOW
+NORMAL
+HIGH
+URGENT
+
+Lifecycle states:
+
+OPEN
+TRIAGED
+IN_PROGRESS
+RESOLVED
+REOPENED
+CLOSED
+REJECTED
+
+Sources include:
+
+WEB
+MOBILE
+API
+SYSTEM
+
+Version 1 intentionally does not provide anonymous feedback.
+
+Version 1 also does not include feedback attachments.
+
+## Feedback API
+
+Base route:
+
+/api/v1/feedback
+
+Supported operations include:
+
+POST    /feedback
+GET     /feedback
+GET     /feedback/<id>
+PATCH   /feedback/<id>
+
+POST    /feedback/<id>/resolve
+POST    /feedback/<id>/reopen
+POST    /feedback/<id>/close
+POST    /feedback/<id>/reject
+
+POST    /feedback/<id>/comments
+GET     /feedback/<id>/comments
+GET     /feedback/<id>/comments/<comment_id>
+PATCH   /feedback/<id>/comments/<comment_id>
+
+Feedback includes:
+
+- clinic ownership
+- submitting user
+- type/category/priority/status
+- subject and message
+- optional target resource
+- assignment to active clinic staff
+- resolution information
+- lifecycle timestamps
+- comments
+- reactions
+- auditability
+
+Target resources are resolved through controlled mappings and validated against authorization.
+
+Examples include:
+
+patient
+appointment
+consultation
+laboratory
+pharmacy
+prescription
+inventory
+billing
+ward
+ambulance
+asset_control
+chat
+hie
+reports
+notifications
+settings
+staff
+emergency_access
+clinical_safety
+
+Target access follows the same tenant and resource-authorization rules as the underlying application.
+
+Only active clinic staff can be assigned feedback.
+
+System-generated feedback uses a dedicated trusted service path rather than allowing ordinary API callers to impersonate the SYSTEM source.
+
+Feedback lifecycle transitions clear or preserve resolution state according to the intended lifecycle rules.
+
+## Feedback Verification
+
+The complete current Feedback test suite reached:
+
+95 passed
 0 failed
-0 skipped
+0 errors
 
-Recorded restore drill:
-success = true
-post-restore verification = true
-authentication invalidation = true
-outbox recovery = true
-```
+This includes service, comment-service, route, validation-path, authorization, lifecycle, and target-access behavior.
 
-The repository currently contains **no Feedback feature implementation**. Feedback is the next planned application feature.
+The Feedback module is therefore considered complete for the current roadmap cycle.
 
 ---
 
-# Architecture
+# 20. Chat Policy and Rule Engine
 
-Clinic System Pro follows an application-factory architecture with a separation between:
+The platform supports configurable policy enforcement around internal communication and operational behavior.
 
-```text
-Client interfaces
-API / realtime transport
-Authentication and authorization
-Business modules
-Cross-cutting infrastructure
-Persistence
-Background processing
-Observability
-Recovery
-```
+The future Rules Engine is intended to formalize reusable business rules instead of embedding every rule directly into route handlers.
 
-```text
-                              Clients
-                       ┌─────────┴─────────┐
-                       │                   │
-                  HTTP / API v1        Socket.IO
-                       │                   │
-                       └─────────┬─────────┘
-                                 │
-                         Flask Application
-                                 │
-       ┌─────────────────────────┼─────────────────────────┐
-       │                         │                         │
- Authentication &          Business Modules        Cross-Cutting Core
- Authorization                                       Infrastructure
-       │                         │                         │
-       ├─ JWT                    ├─ Patient             ├─ Validation
-       ├─ OAuth                  ├─ Appointment         ├─ Audit
-       ├─ RBAC                   ├─ Consultation        ├─ Security
-       ├─ Tenant isolation       ├─ Laboratory          ├─ Observability
-       └─ Access controls        ├─ Pharmacy            ├─ Notifications
-                                 ├─ Prescription        ├─ Storage
-                                 ├─ Billing             ├─ Backup
-                                 ├─ Chat                ├─ Emergency Access
-                                 ├─ Dashboard           └─ Clinical Safety
-                                 ├─ Reports
-                                 └─ ...
-                                    │
-                                    ▼
-                             PostgreSQL
-                         Authoritative data
-                                    │
-                          ┌─────────┴─────────┐
-                          │                   │
-                        Redis              Celery
-                  Cache / revocation   Background tasks /
-                  rate limiting        scheduled work
-                  Socket.IO support
+Examples of future rule-driven behavior include:
 
-                                 ▲
-                                 │
-                          Future Flutter Client
-                                 │
-                              SQLite
-                     Local cache / offline /
-                    synchronization control
-```
+- clinical workflow conditions
+- communication policies
+- operational alerts
+- configurable tenant rules
+- safety-related decision support
+
+Rules must remain auditable and deterministic.
 
 ---
 
-# Source-of-Truth Model
+# 21. Background Processing
 
-PostgreSQL is the authoritative application data store.
+The architecture supports background processing for operations that do not need to block request execution.
 
-Redis is infrastructure for ephemeral or coordination-oriented workloads such as:
+Examples include:
 
-```text
-JWT revocation state
-Rate limiting
-Caching
-Celery broker/result infrastructure
-Socket.IO coordination
-Realtime support
-```
+- notifications
+- outbox processing
+- asynchronous jobs
+- background integrations
+- recovery work
+- operational tasks
 
-Flutter SQLite is intended for client-side state only.
-
-SQLite is not the authoritative medical-record database.
-
-The backend remains authoritative for:
-
-```text
-Authentication
-Authorization
-Tenant isolation
-Validation
-Business rules
-Clinical safety
-Audit logging
-Persistence
-Conflict handling
-```
+Background jobs must preserve tenant context and authorization boundaries.
 
 ---
 
-# Core Technology Stack
+# 22. Notifications
 
-```text
-Python
-Flask
-Flask-SQLAlchemy
-SQLAlchemy 2.x
-Flask-Migrate
-Alembic
-PostgreSQL
-Redis
-Celery
-Flask-SocketIO
-Flask-JWT-Extended
-Flask-CORS
-Flask-Limiter
-Pydantic v2
-Werkzeug
-Requests
-Pillow
-QRCode utilities
-OpenAI integration
-Stripe integration
-Pytest
-Locust
-psutil
-```
+The Notifications subsystem provides a foundation for:
 
-The primary dependency manifest is:
+- application notifications
+- push notification provider integration
+- lifecycle events
+- user-targeted notifications
+- future workflow alerts
 
-```text
-requirements.txt
-```
+Push notification provider integration is implemented.
+
+SMS remains deferred until the required phone-support architecture is finalized.
+
+Notifications must not bypass user or clinic authorization.
 
 ---
 
-# Core Platform Structure
+# 23. Dashboard
 
-The repository currently contains the following major core packages:
+The Dashboard provides aggregated operational information for authenticated users.
 
-```text
-app/core/
-├── api
-├── audit
-├── auth
-├── backup
-├── cache
-├── clinical_safety
-├── compliance
-├── emergency_access
-├── enums
-├── files
-├── integrations
-├── notifications
-├── observability
-├── security
-├── storage
-├── utils
-├── error_handlers.py
-├── exceptions.py
-└── web_routes.py
-```
+The dashboard has undergone performance profiling and query analysis.
 
-The core layer contains infrastructure and cross-cutting controls rather than ordinary domain workflows.
+Performance work focused on:
+
+- query counts
+- database time
+- redundant lookups
+- serialization
+- request duration
+- deterministic response behavior
+
+The dashboard is not being redesigned merely for optimization purposes.
+
+Performance work is based on measured bottlenecks.
 
 ---
 
-# Application Modules
+# 24. Reports
 
-The current application modules are:
+Reports include controlled query and generation flows.
 
-```text
-app/modules/
-├── access_control
-├── ai
-├── ambulance
-├── appointment
-├── asset_control
-├── billing
-├── chat
-├── clinic
-├── consultation
-├── dashboard
-├── hie
-├── inventory
-├── lab
-├── patient
-├── pharmacy
-├── prescription
-├── profile
-├── reports
-├── settings
-├── staff
-└── ward
-```
+Hardening includes:
 
-The major application domains therefore include:
+- strict parameter validation
+- deterministic date filtering
+- authorization checks
+- tenant isolation
+- lifecycle-aware filtering
+- controlled generated report access
 
-```text
-Authentication / Identity
+The Reports domain participates in the same security and audit model as the rest of the platform.
+
+---
+
+# 25. Settings
+
+Settings provide controlled configuration at the application and clinic level.
+
+Settings implementation includes:
+
+- validated configuration
+- tenant-specific configuration
+- feature flags
+- operational limits
+- controlled administration
+- strict schema validation
+
+Settings test verification previously reached:
+
+130 passed
+
+---
+
+# 26. Asset Control
+
+Asset Control manages clinic-controlled operational assets.
+
+The subsystem participates in:
+
+- tenant isolation
+- authorization
+- lifecycle management
+- auditability
+- feedback target resolution
+- future operational reporting
+
+---
+
+# 27. AI Integration
+
+The backend includes an AI integration layer.
+
+The current configuration supports an OpenAI provider and a configured model.
+
+AI operations remain subject to:
+
+- request authorization
+- tenant isolation
+- configuration control
+- usage limits
+- error handling
+- provider failure handling
+- external quota limitations
+
+External provider billing, credits, and quotas are separate from backend correctness.
+
+AI functionality must not be treated as a substitute for clinical authorization or clinical safety enforcement.
+
+---
+
+# 28. Billing and Payments
+
+Billing is implemented as a first-class application domain.
+
+The architecture supports controlled handling of:
+
+- invoices
+- billing records
+- payment workflows
+- tenant ownership
+- financial permissions
+- auditability
+
+Financial authorization remains distinct from clinical authorization.
+
+---
+
+# 29. Pharmacy and Prescription
+
+The Pharmacy and Prescription domains support medication workflows while integrating with Clinical Safety.
+
+The architecture is intended to maintain separation between:
+
+Medication records
+Prescription workflows
+Inventory
+Clinical Safety
+
+while allowing controlled interoperability between them.
+
+---
+
+# 30. Laboratory
+
+The Laboratory domain supports lab-order and laboratory workflow operations.
+
+Access remains tenant-scoped and role-controlled.
+
+Laboratory resources can also participate in Feedback target references where authorized.
+
+---
+
+# 31. Consultation
+
+Consultations are protected clinical resources.
+
+The consultation domain participates in:
+
+- clinical authorization
+- patient ownership relationships
+- auditability
+- clinical safety
+- emergency access
+- feedback target authorization
+
+---
+
+# 32. Appointment
+
+Appointments are clinic-scoped operational records.
+
+They participate in:
+
+- tenant isolation
+- role authorization
+- patient relationships
+- auditability
+- scheduling workflows
+- feedback target validation
+
+---
+
+# 33. Ambulance
+
+The Ambulance subsystem supports emergency transport workflows.
+
+Roles include operational emergency roles such as:
+
+PARAMEDIC
+EMT
+DRIVER
+AMBULANCE_DISPATCHER
+AMBULANCE_COORDINATOR
+
+Ambulance resources remain protected by tenant and role authorization.
+
+Emergency workflows do not automatically bypass clinical safety.
+
+---
+
+# 34. HIE
+
+Health Information Exchange support is represented as a distinct platform domain.
+
+HIE operations are intended to remain:
+
+- authenticated
+- authorized
+- auditable
+- tenant-aware
+- controlled by explicit workflows
+
+HIE functionality must not rely on unrestricted cross-tenant access.
+
+---
+
+# 35. Patient
+
+Patient records are among the most sensitive resources in the system.
+
+Protection includes:
+
+- tenant isolation
+- role-based authorization
+- object-level authorization
+- auditability
+- emergency access controls
+- clinical safety interactions
+- historical read rules
+
+A user must not gain access to another patient merely by knowing the patient's database ID.
+
+---
+
+# 36. Ward
+
+Ward and admission workflows are clinic scoped.
+
+They participate in:
+
+- authorization
+- patient relationships
+- operational lifecycle
+- auditability
+- emergency access
+- feedback target access controls
+
+---
+
+# 37. Profile
+
+Profile is an application-level aggregation rather than a standalone database model.
+
+It combines relevant information from:
+
 User
 Staff
 Clinic
 Patient
-Appointment
-Consultation
-Laboratory
-Pharmacy
-Prescription
-Inventory
-Billing
-Ward
-Ambulance
-HIE
-AI
-Reports
+
+The project intentionally does not create a redundant Profile table merely to represent this aggregation.
+
+---
+
+# 38. Storage and Files
+
+File and document handling is treated as a security-sensitive subsystem.
+
+Storage must preserve:
+
+- authorization boundaries
+- tenant isolation
+- access auditing where required
+- controlled retrieval
+- secure references
+- lifecycle behavior
+
+File access must never become an IDOR path.
+
+---
+
+# 39. Backup and Disaster Recovery
+
+Backup and recovery are part of the enterprise backend architecture.
+
+Implemented areas include:
+
+- database backup
+- recovery verification
+- authentication invalidation
+- post-restore verification
+- outbox recovery
+- recovery integrity checks
+
+## Restore Drill
+
+The recorded restore drill reported:
+
+success = true
+post_restore_verification = true
+authentication_invalidated = true
+outbox_recovery_completed = true
+
+This demonstrates that the restore workflow has been exercised.
+
+It does not represent a universal production SLA or certification.
+
+Retention, RPO, RTO, storage policy, geographic redundancy, and final production backup infrastructure remain deployment-specific responsibilities.
+
+---
+
+# 40. Resilience Engineering
+
+Resilience Engineering is the next active backend phase.
+
+The project already has a structural resilience framework and historical resilience evidence.
+
+The existing resilience structure is:
+
+load_tests/resilience/
+├── README.md
+├── __init__.py
+├── common/
+│   ├── __init__.py
+│   ├── network.py
+│   ├── socketio.py
+│   ├── assertions.py
+│   └── results.py
+├── profiles/
+│   ├── __init__.py
+│   ├── slow_2g.py
+│   ├── slow_3g.py
+│   ├── high_latency.py
+│   ├── jitter.py
+│   ├── packet_loss.py
+│   ├── bandwidth_limited.py
+│   └── intermittent.py
+├── scenarios/
+│   ├── __init__.py
+│   ├── http_resilience.py
+│   ├── socketio_resilience.py
+│   ├── auth_resilience.py
+│   ├── chat_resilience.py
+│   └── sync_resilience.py
+├── runners/
+│   ├── __init__.py
+│   ├── resilience.py
+│   └── resilience_report.py
+└── results/
+    └── .gitkeep
+
+These files are not considered evidence by themselves.
+
+Structural scaffolding must be backed by real execution and measured results.
+
+## Historical Resilience Evidence
+
+A previous recorded resilience run achieved:
+
+47 passed
+0 failed
+0 skipped
+
+This is historical evidence.
+
+It does not mean the entire Resilience Engineering phase is complete.
+
+The active phase is to systematically exercise real failure conditions and document observed behavior.
+
+Planned areas include:
+
+- slow 2G
+- slow 3G
+- high latency
+- jitter
+- packet loss
+- bandwidth limits
+- intermittent connectivity
+- HTTP resilience
+- Socket.IO resilience
+- authentication resilience
+- chat resilience
+- synchronization resilience
+
+---
+
+# 41. Performance and Load Testing
+
+Performance testing uses synthetic users.
+
+Real production patient/user accounts must not be used for load tests.
+
+The benchmark infrastructure measures metrics such as:
+
+- request count
+- failure count
+- average latency
+- p95 latency
+- database query count
+- database time
+- response size
+- route
+- status
+- load_test_id
+
+Performance logs use fields such as:
+
+performance.request
+load_test_id
+method
+route
+status
+duration
+response_size
+db_query_count
+db_time
+
+Dedicated load-test users and synthetic records are used.
+
+The current performance program has already covered baseline scenarios and targeted profiling.
+
+Examples of measured areas include:
+
+- user devices
+- patient workloads
+- dashboard
+- reports
+- chat
+- API request paths
+- AI load behavior
+
+A load test is not treated as proof of universal production capacity.
+
+Performance claims must always be tied to the exact tested environment, scenario, duration, synthetic population, and configuration.
+
+---
+
+# 42. Observability
+
+Observability is built around measured application behavior.
+
+Current architecture supports structured logs and performance information.
+
+The platform records useful signals around:
+
+- requests
+- errors
+- latency
+- database performance
+- background operations
+- load-test metadata
+- security events
+
+Production observability will continue to expand during the Operations phase.
+
+---
+
+# 43. Testing
+
+Testing follows the architecture of the platform.
+
+The project emphasizes:
+
+- service tests
+- route tests
+- integration tests
+- security tests
+- lifecycle tests
+- concurrency tests where relevant
+- resilience tests
+- end-to-end tests later in the roadmap
+
+Schema tests are intentionally not treated as a separate test layer.
+
+Instead, schema behavior is covered through service and route contract verification.
+
+Important verified checkpoints include:
+
+Clinical Safety:
+134 passed
+
+Feedback:
+95 passed
+
+Historical Resilience Run:
+47 passed
+0 failed
+0 skipped
+
+Restore Drill:
+success = true
+post_restore_verification = true
+authentication_invalidated = true
+outbox_recovery_completed = true
+
+Historical full-suite checkpoints have also exceeded six thousand passing tests, but full-suite counts should be treated as time-specific snapshots rather than permanent guarantees.
+
+---
+
+# 44. Flutter Client Architecture
+
+Flutter is planned as the cross-platform client layer.
+
+The backend remains the source of truth.
+
+Flutter responsibilities include:
+
+- authentication UI
+- clinical workflows
+- mobile interaction
+- local cache
+- offline queueing
+- synchronization UI
+- conflict presentation
+- notifications
+- device/session management
+
+The Flutter client must never independently redefine backend authorization.
+
+---
+
+# 45. Planned Offline Synchronization
+
+Offline-first capability is planned carefully because healthcare data is sensitive.
+
+The intended model is:
+
+Flutter
+    ↓
+Local SQLite
+    ↓
+Offline Queue
+    ↓
+Server Sync
+    ↓
+Authorization / Validation
+    ↓
+Canonical PostgreSQL State
+
+SQLite is never the authoritative medical record.
+
+Offline operations are queued and later validated by the server.
+
+---
+
+# 46. Offline Queue and Idempotency
+
+Offline synchronization will require:
+
+- operation IDs
+- idempotency keys
+- retry behavior
+- deduplication
+- server-side authorization
+- validation after reconnection
+- conflict handling
+- deterministic replay behavior
+
+Repeated delivery must not accidentally duplicate clinical or financial operations.
+
+---
+
+# 47. Conflict Resolution
+
+Synchronization conflicts must be resolved according to explicit server-defined rules.
+
+The client must not silently overwrite authoritative server data.
+
+Conflict handling will be developed for:
+
+- records
+- state transitions
+- appointments
+- clinical workflows
+- messages
+- settings where applicable
+
+---
+
+# 48. Sensitive Offline Data Security
+
+Offline storage must be treated as a sensitive environment.
+
+Planned protections include:
+
+- encrypted sensitive local storage
+- device-level controls
+- secure credential handling
+- local session invalidation
+- protected cached patient information
+- data expiration/retention behavior
+- synchronization authorization
+
+Offline mode does not grant additional privileges.
+
+---
+
+# 49. Production Entry Points
+
+Development entry point:
+
+run.py
+
+Production WSGI entry point:
+
+wsgi.py
+
+The Flask application uses the application factory pattern.
+
+Development supports:
+
+0.0.0.0:5000
+
+Production deployment configuration remains environment-specific.
+
+---
+
+# 50. Database Migrations
+
+Database migrations are maintained through:
+
+Flask-Migrate
+Alembic
+
+Migration history is tracked through the repository.
+
+Migrations should only be modified when the schema genuinely requires change.
+
+Existing migrations should not be rewritten merely to make history appear cleaner.
+
+---
+
+# 51. Repository Structure
+
+At a high level:
+
+clinic-system-pro/
+├── app/
+│   ├── core/
+│   │   ├── emergency_access/
+│   │   ├── clinical_safety/
+│   │   ├── auth/
+│   │   ├── errors/
+│   │   ├── audit/
+│   │   └── ...
+│   ├── modules/
+│   │   ├── feedback/
+│   │   ├── patient/
+│   │   ├── appointment/
+│   │   ├── consultation/
+│   │   ├── lab/
+│   │   ├── pharmacy/
+│   │   ├── prescription/
+│   │   ├── inventory/
+│   │   ├── billing/
+│   │   ├── ward/
+│   │   ├── ambulance/
+│   │   ├── hie/
+│   │   ├── reports/
+│   │   ├── notifications/
+│   │   ├── settings/
+│   │   ├── asset_control/
+│   │   ├── chat/
+│   │   └── ...
+│   ├── tests/
+│   └── ...
+├── load_tests/
+├── migrations/
+├── run.py
+├── wsgi.py
+├── README.md
+└── ...
+
+---
+
+# 52. Engineering Principles
+
+The project follows several hard boundaries.
+
+## Security First
+
+Authorization must happen on the server.
+
+## Tenant Isolation
+
+A clinic-scoped resource belongs to its clinic.
+
+## Explicit Privilege
+
+Privileged roles require explicit authorization.
+
+## Clinical Safety
+
+Emergency access does not bypass clinical safety.
+
+## Auditability
+
+Sensitive actions must be traceable.
+
+## Transactions
+
+State-changing operations must have clear transaction boundaries.
+
+## Determinism
+
+Identical requests under identical state should behave predictably.
+
+## Validation
+
+Malformed input must fail explicitly.
+
+## No Client Trust
+
+Client-provided IDs, role information, and clinic context are never assumed to be authoritative.
+
+## No Premature Scaling Claims
+
+Benchmarks describe tested environments, not universal system capacity.
+
+## No Premature Rust
+
+Rust is planned after the required production-scale evidence exists.
+
+## Offline Safety
+
+Offline functionality must never bypass server authorization.
+
+## No Duplicate Clinical Safety Engines
+
+Existing clinical safety infrastructure must be reused instead of recreated independently.
+
+---
+
+# 53. Implementation Status Model
+
+The project distinguishes between:
+
+PLANNED
+SCAFFOLDED
+IMPLEMENTED
+HARDENED
+VERIFIED
+PRODUCTION-READY
+
+A module existing in the repository does not automatically mean it is production-ready.
+
+Verification requires actual tests, integration, and appropriate operational evidence.
+
+---
+
+# 54. Current Milestone
+
+The following areas are currently implemented or substantially hardened:
+
+Core Backend Architecture
+Authentication
+Authorization
+RBAC
+Tenant Isolation
+IDOR Protection
+Validation
+Transactions
+Errors
+Pagination
+Historical Reads
+Audit
+SQLAlchemy Modernization
+Migration Cleanup
+Performance Hardening
+Observability
 Settings
 Asset Control
 Dashboard
 Advanced Access Control
 Internal Clinical Chat
-Profile
-```
-
-Profile is an aggregation layer over User, Staff, and Clinic information.
-
-Profile is not a standalone database entity.
-
----
-
-# Authentication
-
-Authentication supports:
-
-```text
-JWT access tokens
-JWT refresh tokens
-Google OAuth
-Token revocation
-Token-version invalidation
-Role claims
-Account activity checks
-```
-
-Standard token lifetimes are configured around:
-
-```text
-Access token  : approximately 1 hour
-Refresh token : approximately 30 days
-```
-
-Protected requests resolve the authenticated user from the server-side JWT identity.
-
-Client requests are not trusted to provide arbitrary actor identities for protected workflows.
-
----
-
-# Authorization and RBAC
-
-The persisted user role and application role enum are authoritative for access control.
-
-Current roles include:
-
-```text
-doctor
-nurse
-patient
-pharmacist
-lab_technician
-receptionist
-admin
-accountant
-paramedic
-other
-driver
-emt
-ambulance_dispatcher
-ambulance_coordinator
-```
-
-A super-administrator authority exists separately from normal administrator authority.
-
-Administrative rules include:
-
-```text
-Regular administrators cannot elevate another user to administrator authority without satisfying the access-control rules.
-
-Regular administrators cannot modify higher-authority administrator accounts.
-
-Super administrators have cross-clinic authority where explicitly permitted.
-
-A super administrator cannot modify another super administrator.
-
-A super administrator cannot assign super-administrator privileges.
-```
-
-The access-control layer is implemented under:
-
-```text
-app/modules/access_control/
-```
-
----
-
-# Multi-Clinic Tenant Isolation
-
-Clinic scope is resolved server-side.
-
-Protected business workflows derive clinic context from the authenticated user/staff relationship instead of trusting a client-supplied clinic identifier.
-
-Tenant isolation is enforced throughout:
-
-```text
-Routes
-Services
-Database access
-Authorization
-Clinical workflows
-Chat
-Emergency access
-Clinical safety
-Reporting
-```
-
-Cross-clinic resource access is rejected.
-
----
-
-# API Versioning
-
-The canonical API namespace is:
-
-```text
-/api/v1/
-```
-
-The URL path is the source of truth for API version selection.
-
-Current supported version:
-
-```text
-v1
-```
-
-Unsupported versions are rejected through the API version boundary.
-
-Example:
-
-```text
-/api/v2/...
-/api/v99/...
-```
-
-are not treated as valid supported API versions.
-
-API version selection is not controlled through JWT claims or arbitrary client version overrides.
-
-Example API paths:
-
-```text
-POST /api/v1/auth/login
-POST /api/v1/auth/register
-
-GET  /api/v1/patients
-GET  /api/v1/appointments
-
-GET  /api/v1/pharmacy/drugs
-POST /api/v1/prescriptions
-
-GET  /api/v1/reports
-GET  /api/v1/dashboard/...
-
-GET  /api/v1/chat/...
-
-GET  /api/v1/clinical-safety/rules
-GET  /api/v1/clinical-safety/alerts
-```
-
----
-
-# Validation and Error Handling
-
-Request validation uses Pydantic v2.
-
-Hardened request contracts use strict types where appropriate and reject unexpected fields.
-
-The core domain error model distinguishes:
-
-```text
-400  Domain Error
-402  Insufficient Credits
-404  Not Found
-409  Conflict
-422  Validation Error
-```
-
-The application uses centralized error handling so ordinary domain failures are returned as structured API responses instead of exposing arbitrary internal exceptions.
-
----
-
-# Database Architecture
-
-Database access follows SQLAlchemy 2.x patterns.
-
-The project consistently uses modern patterns including:
-
-```python
-db.select(...)
-db.session.execute(...)
-db.session.get(...)
-```
-
-Database hardening includes:
-
-```text
-Transactions
-Commit/rollback boundaries
-Deterministic ordering
-Pagination
-Lifecycle validation
-Historical-read semantics
-Tenant scoping
-Database-aware locking where required
-```
-
-PostgreSQL is the production persistence source of truth.
-
-Alembic / Flask-Migrate manages schema evolution.
-
----
-
-# Auditability
-
-Audit logging is implemented as a dedicated cross-cutting subsystem.
-
-Sensitive operations are designed to preserve accountability through:
-
-```text
-Authenticated actor identity
-Tenant context
-Action/event recording
-Resource identification
-Change tracking
-Administrative accountability
-Clinical accountability
-```
-
-Audit logging is distinct from:
-
-```text
-Backup
-Restore
-Recovery
-Observability
-```
-
-These concerns complement each other but are not interchangeable.
-
----
-
-# Security Model
-
-The platform uses multiple independent security controls:
-
-```text
-Authentication
-Authorization
-RBAC
-Tenant isolation
-IDOR protection
-Input validation
-Transactional boundaries
-Audit logging
-Token revocation
-Token-version invalidation
-Rate limiting
-Security services
-Clinical safety controls
-Emergency access controls
-Observability
-```
-
-Sensitive healthcare workflows are deliberately protected by layered controls rather than relying on a single security mechanism.
-
----
-
-# Emergency Clinical Access
-
-Emergency access is implemented under:
-
-```text
-app/core/emergency_access/
-```
-
-The current emergency-access layer includes:
-
-```text
-Emergency access records
+Clinical Safety
+Emergency Clinical Access / Break-Glass
 Consent Guard
-Emergency access service
-Consent Guard service
-Protected routes
-Request schemas
-Audit-aware emergency access workflows
-```
-
-Emergency access provides a controlled **Break-Glass** mechanism for exceptional access to protected clinical information.
-
-The design separates:
-
-```text
-Authorization to access protected information
-```
-
-from:
-
-```text
-Whether a clinical action is medically or operationally safe
-```
-
-Emergency access does not bypass Clinical Safety rules.
-
----
-
-# Clinical Safety
-
-Clinical Safety is implemented under:
-
-```text
-app/core/clinical_safety/
-```
-
-The subsystem includes:
-
-```text
-Clinical rules
-Clinical rule versions
-Rule evaluation
-Rule resolution
-Medication safety
-Clinical alerts
-Alert acknowledgement
-Alert override handling
-Alert resolution
-Clinical safety routes
-```
-
-Current clinical rule types include:
-
-```text
-DRUG_INTERACTION
-ALLERGY_CONFLICT
-CONTRAINDICATION
-MAX_DOSE
-MIN_DOSE
-AGE_RESTRICTION
-WEIGHT_RESTRICTION
-PREGNANCY_RESTRICTION
-DUPLICATE_THERAPY
-THERAPEUTIC_DUPLICATION
-LAB_CONFLICT
-RENAL_FUNCTION
-HEPATIC_FUNCTION
-DIAGNOSIS_CONFLICT
-FREQUENCY_LIMIT
-DURATION_LIMIT
-PATIENT_SPECIFIC_RESTRICTION
-```
-
-Rule severities include:
-
-```text
-INFO
-LOW
-MODERATE
-HIGH
-CRITICAL
-```
-
-Rule actions include:
-
-```text
-INFORM
-ALERT
-REQUIRE_ACKNOWLEDGEMENT
-REQUIRE_JUSTIFICATION
-BLOCK
-```
-
-Evaluation outcomes include:
-
-```text
-SAFE
-INFORMATION
-WARNING
-ACKNOWLEDGEMENT_REQUIRED
-JUSTIFICATION_REQUIRED
-BLOCKED
-```
-
----
-
-## Clinical Safety Rule Hierarchy
-
-Rules are resolved through layered scope and effective-version logic.
-
-The architecture supports:
-
-```text
-Global rules
-Clinic rules
-Department rules
-Patient-specific context
-```
-
-System hard-safety rules form an immutable safety floor.
-
-Hard rules:
-
-```text
-Are global
-Cannot be weakened
-Are controlled at super-admin level
-Must use BLOCK behavior
-Cannot be bypassed through ordinary acknowledgement
-```
-
-Rule versions become immutable once used in clinical evaluation.
-
-Updating a rule creates a new version rather than mutating the historical rule definition.
-
----
-
-# Medication Safety
-
-Medication safety reuses the existing prescription and drug domain rather than introducing duplicate medication models.
-
-Existing medication interaction data is reused through the existing prescription/drug infrastructure.
-
-Medication safety evaluation combines:
-
-```text
-Drug interaction checks
-Clinical rule evaluation
-Existing prescription context
-Patient/clinical context where available
-```
-
-The resulting safety outcome is aggregated deterministically.
-
----
-
-# Clinical Alerts
-
-Clinical alerts persist actual safety events.
-
-Alerts support:
-
-```text
-Deduplication
-Open state
-Acknowledgement
-Override
-Resolution
-Expiration
-Auditability
-Source/context tracking
-```
-
-Critical hard-rule alerts cannot be overridden.
-
-Acknowledgement is not equivalent to permission to proceed.
-
----
-
-# Internal Clinical Chat
-
-Internal Clinical Chat is implemented under:
-
-```text
-app/modules/chat/
-```
-
-The chat subsystem includes:
-
-```text
-Conversations
-Conversation participants
-Messages
-Message attachments
-Mentions
-Pins
-Reactions
-Read receipts
-Message revisions
-Reply support
-Chat outbox
-Chat usage
-Message search
-Retention
-Policy enforcement
-Security enforcement
-Socket.IO realtime communication
-Celery/outbox processing
-```
-
-The chat architecture supports:
-
-```text
-Direct messages
-Group conversations
-Clinic-scoped staff communication
-Department-aware controls
-Unread/read state
-Message lifecycle controls
-Realtime updates
-```
-
----
-
-# Chat Policy and Rule Engine
-
-Chat configuration is resolved through layered policy rules.
-
-The design supports:
-
-```text
-Hard limits
-Feature flags
-Clinic settings
-Default configuration
-```
-
-Current controls include:
-
-```text
-Maximum message length
-Maximum group participants
-Maximum attachment size
-Attachment type restrictions
-Direct messaging
-Message edit window
-Message deletion window
-Retention period
-Reactions
-Mentions
-Voice messages
-Conversation creation
-Department restrictions
-Feature availability
-```
-
-Hard ceilings cannot be weakened by ordinary clinic configuration.
-
----
-
-# Background Processing
-
-Celery is used for background and scheduled workloads.
-
-Redis provides the broker/result infrastructure.
-
-Current application background workflows include areas such as:
-
-```text
-Appointment reminders
-Overdue invoice processing
-AI usage resets
-Chat outbox processing
-Notification/background processing
-```
-
-Worker startup:
-
-```powershell
-celery -A celery_worker.celery worker --loglevel=info
-```
-
-Beat startup:
-
-```powershell
-celery -A celery_worker.celery beat --loglevel=info
-```
-
----
-
-# Notifications
-
-Notifications are implemented as a cross-cutting core subsystem.
-
-The notification layer integrates with application workflows and background processing.
-
-Notification infrastructure supports the platform's asynchronous and user-facing event workflows without coupling individual business modules directly to transport details.
-
----
-
-# Dashboard
-
-The Dashboard module provides role-aware aggregation and reporting views for areas such as:
-
-```text
-Clinical operations
-Finance
-Management
-Operations
-Patients
-Super administration
-Dashboard widgets
-```
-
-The dashboard is implemented under:
-
-```text
-app/modules/dashboard/
-```
-
----
-
-# Reports
-
-Reports are implemented under:
-
-```text
-app/modules/reports/
-```
-
-The reporting layer supports application-level reporting workflows and structured report schemas.
-
-Reporting remains separate from raw database access so authorization, tenant isolation, and business semantics can remain centralized.
-
----
-
-# Settings
-
-Settings are implemented under:
-
-```text
-app/modules/settings/
-```
-
-Current settings infrastructure covers clinic settings and integration/provider configuration.
-
-Provider configuration includes areas such as:
-
-```text
-Paystack
-Flutterwave
-Email
-SMS-related configuration
-Push notifications
-```
-
-Sensitive integration configuration is designed to avoid plaintext exposure in logs and normal API responses.
-
----
-
-# Asset Control
-
-Asset Control is implemented under:
-
-```text
-app/modules/asset_control/
-```
-
-Current asset areas include:
-
-```text
-Assets
-Assignments
-Maintenance
-History
-Lifecycle tracking
-```
-
-Asset operations are tenant-scoped and use authenticated server-side context.
-
----
-
-# AI Integration
-
-AI functionality is implemented under:
-
-```text
-app/modules/ai/
-```
-
-The AI subsystem provides provider-backed clinical utility workflows.
-
-A current example endpoint is:
-
-```text
-POST /api/v1/ai/drug-interactions
-```
-
-AI provider credentials are configuration concerns and are not intended to be supplied as arbitrary request data.
-
-AI workloads are separated from ordinary local performance benchmarks because external provider latency, quotas, rate limits, and availability can influence measurements.
-
----
-
-# Billing and Payments
-
-Billing is implemented under:
-
-```text
-app/modules/billing/
-```
-
-Payment-provider integration includes gateway abstractions for:
-
-```text
-Paystack
-Flutterwave
-Stripe
-```
-
-The billing layer separates provider-specific gateway logic from core billing workflows.
-
----
-
-# Pharmacy and Prescription
-
-Pharmacy and Prescription are separate application domains:
-
-```text
-app/modules/pharmacy/
-app/modules/prescription/
-```
-
-Prescription workflows integrate with existing:
-
-```text
-Drugs
-Drug interactions
-Medication orders
-Prescription items
-Clinical safety checks
-```
-
-The Clinical Safety subsystem reuses these domains rather than creating duplicate drug models.
-
----
-
-# Laboratory
-
-Laboratory functionality is implemented under:
-
-```text
-app/modules/lab/
-```
-
-The module contains:
-
-```text
-Lab models
-Schemas
-Services
-Routes
-```
-
-Clinical safety can consume laboratory-related context through relevant rule types such as:
-
-```text
-LAB_CONFLICT
-RENAL_FUNCTION
-HEPATIC_FUNCTION
-```
-
----
-
-# Consultation
-
-Consultation workflows are implemented under:
-
-```text
-app/modules/consultation/
-```
-
-Consultation access is tenant-scoped and integrates with authenticated clinical participants and appointment context where applicable.
-
----
-
-# Appointment
-
-Appointment workflows are implemented under:
-
-```text
-app/modules/appointment/
-```
-
-The system applies lifecycle validation and server-side authorization to appointment state changes.
-
-Appointment reminders are handled through background processing.
-
----
-
-# Ambulance
-
-Ambulance functionality is implemented under:
-
-```text
-app/modules/ambulance/
-```
-
-The current structure includes:
-
-```text
-Ambulance trips
-Ambulance vehicles
-Vehicle routes
-Trip routes
-```
-
----
-
-# HIE
-
-Health Information Exchange functionality is implemented under:
-
-```text
-app/modules/hie/
-```
-
-The current HIE structure includes provider integration support, including the existing Malaffi provider integration.
-
----
-
-# Patient
-
-Patient management is implemented under:
-
-```text
-app/modules/patient/
-```
-
-Patient records are tenant-scoped and protected by authorization and clinical-data access rules.
-
----
-
-# Ward
-
-Ward functionality is implemented under:
-
-```text
-app/modules/ward/
-```
-
-The ward domain is part of the broader inpatient/clinical workflow architecture.
-
----
-
-# Profile
-
-Profile is implemented under:
-
-```text
-app/modules/profile/
-```
-
-Profile is an aggregation layer combining information from existing entities rather than introducing a new primary profile database model.
-
----
-
-# Storage and Files
-
-Application file handling is separated from structured PostgreSQL data.
-
-Storage configuration includes:
-
-```text
-STORAGE_ROOT
-STORAGE_PUBLIC_BASE_URL
-```
-
-Profile images and other uploaded artifacts are handled through the storage subsystem.
-
-The system therefore has two important persistence domains:
-
-```text
-1. PostgreSQL structured application data
-2. Application-managed files/storage
-```
-
-Both domains are considered in backup and disaster-recovery workflows.
-
----
-
-# Backup and Disaster Recovery
-
-Backup and recovery are implemented under:
-
-```text
-app/core/backup/
-```
-
-Current components include:
-
-```text
-backup_service.py
-database_backup.py
-file_backup.py
-backup_storage.py
-backup_retention.py
-backup_verification.py
-restore_service.py
-restore_drill.py
-backup_tasks.py
-```
-
-The backup subsystem is not merely a directory scaffold.
-
-Implemented responsibilities include:
-
-```text
-PostgreSQL backup creation
-Database backup integrity checks
-File backup
-Backup storage management
-Retention handling
-Backup metadata
-Checksum verification
-Backup verification
-Database restore
-File restore
-Full restore orchestration
-Controlled restore drills
-Post-restore verification
-Authentication invalidation verification
-Chat outbox recovery verification
-```
-
----
-
-## Restore Drill Verification
-
-A recorded restore drill exists in:
-
-```text
-generated_reports/restore-drill-report.json
-```
-
-The recorded drill reports:
-
-```text
-success = true
-post_restore_verification_completed = true
-authentication_invalidated = true
-outbox_recovery_completed = true
-```
-
-The restored verification environment also recorded:
-
-```text
-clinics
-users
-audit events
-chat outbox entries
-migration revision
-```
-
-The existence of a successful restore drill does not, by itself, establish a contractual production RPO/RTO.
-
-Those values remain deployment and operational policy decisions.
-
----
-
-# Backup Retention
-
-Backup retention is implemented as a separate responsibility rather than embedding retention assumptions directly into backup creation.
-
-This separation supports:
-
-```text
-Retention rules
-Controlled cleanup
-Backup inventory
-Storage management
-Operational policy changes
-```
-
----
-
-# Resilience Testing
-
-The repository now contains an implemented resilience-testing framework under:
-
-```text
-load_tests/resilience/
-```
-
-Current areas include:
-
-```text
-Network profiles
-HTTP resilience
-Authentication resilience
-Socket.IO resilience
-Chat resilience
-Redis/Celery resilience
-Synchronization-related resilience
-Result reporting
-Automated resilience tests
-```
-
-Network conditions represented by the framework include:
-
-```text
-Slow 2G
-Slow 3G
-High latency
-Jitter
-Packet loss
-Bandwidth limitation
-Intermittent connectivity
-```
-
----
-
-## Recorded Resilience Run
-
-The repository contains:
-
-```text
-load_tests/resilience/results/resilience-all-20260923.json
-load_tests/resilience/results/resilience-all-20260923.junit.xml
-```
-
-Recorded run:
-
-```text
-Run ID:
-resilience-all-20260923
-
-Passed:
-47
-
-Failed:
-0
-
-Skipped:
-0
-
-Total:
-47
-```
-
-The recorded scenarios include areas such as:
-
-```text
-HTTP recovery
-HTTP network degradation
-HTTP pagination consistency
-Socket.IO reconnect
-Socket.IO authorization restoration
-Revoked-token rejection after reconnect
-Authentication recovery
-Login under degraded networks
-Token revocation recovery
-Chat recovery
-Chat outbox retry behavior
-Cross-clinic chat isolation
-Redis recovery
-Celery broker recovery
-Duplicate-state protection
-```
-
-Resilience testing is intentionally separated from clean performance benchmarking.
-
----
-
-# Performance and Load Testing
-
-Controlled load-testing infrastructure is implemented under:
-
-```text
-load_tests/
-```
-
-The performance framework uses Locust and project-specific validation helpers.
-
-The framework is designed to measure:
-
-```text
-API latency
-Throughput
-Database query behavior
-Database query counts
-Redis behavior
-Service performance
-Module workloads
-System-mixed workloads
-Performance regressions
-```
-
-The repository contains:
-
-```text
-Baseline tooling
-Scenario runners
-Result validation
-Structured benchmark output
-Locust CSV results
-Database/query tracing utilities
-System-mixed workloads
-```
-
-Load-test validity is treated as a correctness issue as well as a performance issue.
-
-Validation concerns include:
-
-```text
-Run identifiers
-Server-side logs
-Expected workload filters
-Failure counts
-Successful Locust termination
-Result artifact validity
-```
-
-Large-scale production capacity claims are not inferred from development-machine benchmarks.
-
-Distributed capacity testing is a separate future operational exercise.
-
----
-
-# Observability
-
-The observability layer covers:
-
-```text
-HTTP request metrics
-Database metrics
-Redis metrics
-Celery metrics
-Socket.IO metrics
-System metrics
-Aggregated performance metrics
-```
-
-Observability exists to make system behavior measurable across both application and supporting infrastructure.
-
----
-
-# Testing
-
-The project maintains a large Pytest-based test suite.
-
-Tests are organized under:
-
-```text
-app/tests/core/
-app/tests/modules/
-```
-
-Current test coverage includes dedicated suites for:
-
-```text
-Authentication
-API versioning
-Audit
-Backup
-Clinical Safety
-Emergency Access
-Notifications
-Observability
-
-Access Control
-AI
-Ambulance
-Appointments
-Asset Control
-Billing
-Chat
-Clinic
-Consultation
-Dashboard
-HIE
-Inventory
-Laboratory
-Patient
-Pharmacy
-Prescription
-Profile
-Reports
-Settings
-Staff
-Ward
-```
-
-Run the full test suite:
-
-```powershell
-pytest -q
-```
-
-Run a focused core suite:
-
-```powershell
-pytest app/tests/core/clinical_safety -q
-```
-
-Run backup tests:
-
-```powershell
-pytest app/tests/core/backup -q
-```
-
-Run emergency-access tests:
-
-```powershell
-pytest app/tests/core/emergency_access -q
-```
-
-Run chat tests:
-
-```powershell
-pytest app/tests/modules/chat -q
-```
-
-Run dashboard tests:
-
-```powershell
-pytest app/tests/modules/dashboard -q
-```
-
-Module-specific suites can be executed directly from their respective test directories.
-
----
-
-# Flutter Client Architecture
-
-Flutter is the planned client/UI layer for web-adjacent mobile workflows.
-
-The backend remains the authoritative system:
-
-```text
-Flutter
-   |
-   | API v1 / Socket.IO
-   v
-Flask Backend
-   |
-   +---- PostgreSQL
-   +---- Redis
-   +---- Celery
-```
-
-Local SQLite is intended for:
-
-```text
-Cache
-Offline state
-Pending operations
-Synchronization control
-Local client state
-```
-
-The backend continues to own:
-
-```text
-Authentication
-RBAC
-Tenant isolation
-Clinical safety
-Validation
-Business rules
-Audit
-Persistence
-```
-
----
-
-# Planned Offline Synchronization
-
-The future Flutter synchronization model is expected to include:
-
-```text
-Offline operation queue
-Incremental synchronization
-Sync cursors
-Record versions
-Timestamps
-Retry and backoff
-Idempotency
-Deduplication
-Conflict resolution
-Tombstones
-last_purged_at
-```
-
-Full offline synchronization should not be considered implemented until the synchronization layer and its recovery behavior are fully developed and verified.
-
----
-
-# Configuration
-
-Configuration is environment-driven.
-
-Important configuration areas include:
-
-```text
-DATABASE_URL
-REDIS_URL
-SECRET_KEY
-JWT_SECRET_KEY
-
-GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET
-GOOGLE_REDIRECT_URI
-
-STORAGE_ROOT
-STORAGE_PUBLIC_BASE_URL
-
-INTEGRATION_ENCRYPTION_KEY
-```
-
-Provider-specific credentials must remain outside committed source code.
-
-Secrets should be rotated immediately if they are exposed.
-
----
-
-# Production Entry Points
-
-Development execution:
-
-```powershell
-python run.py
-```
-
-WSGI entry point:
-
-```text
-wsgi:app
-```
-
-The Flask development server is not intended as the production serving architecture.
-
-Production deployment should use an appropriate production WSGI/Socket.IO-compatible deployment model.
-
----
-
-# Database Migrations
-
-Database schema changes are managed through:
-
-```text
-migrations/
-```
-
-with Alembic / Flask-Migrate.
-
-The repository contains migration history for the application's evolving schema, including areas such as:
-
-```text
-Authentication
-Appointments
-Chat
-Emergency Access
-Clinical Safety
-Assets
-Billing
-Notifications
-```
-
-Migration integrity is treated as part of deployment safety.
-
----
-
-# Repository Structure
-
-The current repository is broadly organized as:
-
-```text
-clinic-system-pro/
-├── app/
-│   ├── core/
-│   ├── modules/
-│   └── tests/
-├── generated_reports/
-├── load_tests/
-│   ├── common/
-│   ├── scenarios/
-│   └── resilience/
-├── migrations/
-├── training/
-├── requirements.txt
-├── run.py
-├── wsgi.py
-├── celery_worker.py
-├── verify_benchmark_dataset.py
-└── README.md
-```
-
----
-
-# Engineering Principles
-
-The project is developed around the following principles:
-
-```text
-Server-side authority
-Explicit authorization
-Strict tenant isolation
-Least-authority access control
-Validated inputs
-Transactional business operations
-Auditable state changes
-Deterministic data access
-Modern SQLAlchemy
-Source-of-truth separation
-Clinical safety before workflow execution
-Emergency access without clinical-safety bypass
-Performance testing before optimization
-Resilience testing separate from performance testing
-Backup and restore verification
-Recovery-aware architecture
-Infrastructure-aware production design
-```
-
----
-
-# Implementation Status Model
-
-Clinic System Pro distinguishes between:
-
-```text
-Implemented
-Hardened
-Verified
-Scaffolded
-Planned
-```
-
-A directory existing in the repository does not automatically mean that a feature is production-ready.
-
-A capability is treated as completed only when its:
-
-```text
-Implementation
-Integration
-Validation
-Authorization
-Tenant isolation
-Error behavior
-Audit behavior
-Tests
-```
-
-are sufficiently verified for its current engineering phase.
-
----
-
-# Current Milestone
-
-The current completed engineering milestone is:
-
-```text
-Clinical Safety + Emergency Access + Backup/Recovery +
-Resilience Verification
-```
-
-The Clinical Safety suite currently reports:
-
-```text
-134 passed
-```
-
-The recorded resilience run reports:
-
-```text
-47 passed
-0 failed
-```
-
-The recorded restore drill reports successful post-restore verification.
-
----
-
-# Next Planned Feature
-
-The next planned application feature is:
-
-```text
+Backup / Recovery
+Current-cycle Load Testing
 Feedback
-```
 
-The current repository does not yet contain a Feedback module.
-
-Feedback will therefore be designed as a new first-class capability rather than being retrofitted into an unrelated existing module.
-
-The feature design will follow the same project standards:
-
-```text
-Tenant isolation
-Authenticated actor context
-Strict request schemas
-RBAC
-Audit logging
-Transactional services
-Deterministic queries
-Pagination
-Validation
-Route/service separation
-Test coverage
-API versioning
-```
+The next active backend phase is Resilience Engineering.
 
 ---
 
-# Long-Term Roadmap
+# 55. Authoritative Master Roadmap
 
-The remaining roadmap is intentionally evolutionary.
+The project roadmap is divided into 33 major phases.
 
-```text
-Current:
-Feedback feature
-
-Then:
-Feedback hardening and integration
-
-Then:
-Reports / Notifications polish where still required
-
-Then:
-Performance optimization and regression verification
-
-Then:
-Additional distributed capacity validation
-
-Then:
-Production readiness review
-
-Then:
-Flutter offline/synchronization implementation
-
-Final backend migration:
-Rust White Glove Migration
-```
-
-The Rust White Glove Migration remains the final backend migration phase.
-
-It is not a replacement for:
-
-```text
-Security
-Clinical safety
-Backup
-Recovery
-Resilience
-Observability
-Testing
-```
+01. Current Backend State / Architecture Baseline
+02. Resilience Engineering
+03. Final Security / Compliance Hardening
+04. Observability / Operations
+05. Production Readiness
+06. Production-like Backend Environment
+07. Full Backend E2E
+08. Failure Injection
+09. Flutter Foundation
+10. Flutter Authentication + Session
+11. Flutter Core Clinical Workflows
+12. Flutter Feedback
+13. Flutter Chat + Realtime
+14. Flutter Offline-first Foundation
+15. Offline Queue + Idempotency
+16. Synchronization
+17. Conflict Resolution
+18. Offline Sensitive-data Security
+19. Flutter Break-glass + Consent
+20. Flutter Clinical Safety
+21. Flutter Notifications
+22. Device / Session Management
+23. Flutter Unit + Integration Testing
+24. Flutter Offline / Resilience Testing
+25. Full Cross-platform E2E
+26. Production Security Testing
+27. Backup / Restore Drill
+28. Release Candidate Freeze
+29. Deployment
+30. Post-deployment Validation
+31. Production Operations
+32. Future Distributed Scale
+33. White Glove / Rust
 
 ---
 
-# Important Project Boundary
+# 56. Phase 1 — Current Backend State
 
-Clinic System Pro is designed as a production-oriented healthcare backend, but repository implementation status must always be distinguished from deployment-specific operational guarantees.
+The backend architecture and major security foundations have already been developed and hardened.
 
-The repository can contain:
+This phase includes:
 
-```text
-Implemented code
-Passing tests
-Benchmark evidence
-Resilience evidence
-Restore-drill evidence
-```
-
-without automatically establishing:
-
-```text
-A production SLA
-A contractual RPO
-A contractual RTO
-Regulatory certification
-Production hosting availability
-Production-scale capacity
-Third-party provider availability
-```
-
-Those depend on deployment architecture, operational procedures, infrastructure, contracts, monitoring, security operations, and regulatory requirements.
+- architectural baseline
+- auth foundation
+- authorization
+- tenant isolation
+- validation
+- transactions
+- error handling
+- database integrity
+- lifecycle correctness
+- auditability
+- performance foundations
 
 ---
 
-# Development
+# 57. Phase 2 — Resilience Engineering
 
-Install dependencies:
+This is the next active phase.
 
-```powershell
-pip install -r requirements.txt
-```
+Work includes:
 
-Set the environment configuration required for the selected environment.
+- network degradation
+- high latency
+- jitter
+- packet loss
+- bandwidth limitation
+- intermittent connectivity
+- HTTP failure behavior
+- Socket.IO failure behavior
+- authentication resilience
+- chat resilience
+- sync resilience
+- retry behavior
+- timeout behavior
+- reconnect behavior
+- idempotency verification
+- failure reporting
+- measurable resilience evidence
 
-Run the application:
+Each scenario should produce reproducible results.
 
-```powershell
+---
+
+# 58. Phase 3 — Final Security / Compliance
+
+Planned focus:
+
+- security verification
+- authorization penetration testing
+- IDOR validation
+- privilege boundary testing
+- session/security edge cases
+- sensitive-data handling
+- audit verification
+- retention controls
+- compliance-oriented evidence collection
+
+Compliance claims must be based on actual legal, organizational, and operational requirements.
+
+The project must not claim certifications it has not obtained.
+
+---
+
+# 59. Phase 4 — Observability / Operations
+
+Planned focus:
+
+- operational metrics
+- structured logs
+- alerting
+- tracing where appropriate
+- failure dashboards
+- background job visibility
+- Redis visibility
+- database health
+- queue monitoring
+- operational runbooks
+
+---
+
+# 60. Phase 5 — Production Readiness
+
+Planned focus:
+
+- configuration review
+- secret handling
+- production deployment configuration
+- security review
+- operational runbooks
+- logging review
+- backup policy
+- restore readiness
+- migration readiness
+- health checks
+- startup/shutdown behavior
+- deployment validation
+
+---
+
+# 61. Phase 6 — Production-like Backend Environment
+
+Build an environment that resembles deployment conditions closely enough to validate:
+
+- networking
+- Redis
+- PostgreSQL
+- background workers
+- Socket.IO
+- reverse proxy behavior
+- production configuration
+- realistic service interactions
+
+---
+
+# 62. Phase 7 — Full Backend E2E
+
+End-to-end backend workflows will cover critical user journeys across:
+
+- authentication
+- patient workflows
+- appointments
+- consultations
+- laboratory
+- pharmacy
+- prescriptions
+- billing
+- ambulance
+- emergency access
+- clinical safety
+- feedback
+- chat
+- reporting
+
+---
+
+# 63. Phase 8 — Failure Injection
+
+Introduce controlled failures such as:
+
+- database interruption
+- Redis interruption
+- worker interruption
+- network interruption
+- delayed responses
+- connection loss
+- partial background processing
+- stale client state
+
+The goal is to verify recovery behavior rather than merely observe failure.
+
+---
+
+# 64. Phase 9 — Flutter Foundation
+
+Establish:
+
+- Flutter application structure
+- routing
+- state management
+- API client
+- secure storage
+- local SQLite
+- environment/configuration
+- basic UI architecture
+
+The backend remains authoritative.
+
+---
+
+# 65. Phase 10 — Flutter Authentication + Session
+
+Implement:
+
+- login
+- token storage
+- refresh
+- logout
+- session expiry
+- Google authentication where required
+- device/session handling
+
+---
+
+# 66. Phase 11 — Flutter Core Clinical Workflows
+
+Implement core client workflows for:
+
+- patient
+- appointment
+- consultation
+- laboratory
+- pharmacy
+- prescriptions
+- billing
+- ambulance
+- ward
+
+All operations use backend authorization.
+
+---
+
+# 67. Phase 12 — Flutter Feedback
+
+Connect the Flutter client to the already-hardened Feedback API.
+
+Client work includes:
+
+- feedback creation
+- feedback browsing
+- lifecycle visibility where authorized
+- comments
+- status presentation
+- error handling
+- offline-safe queuing later where required
+
+---
+
+# 68. Phase 13 — Flutter Chat + Realtime
+
+Implement:
+
+- conversations
+- messaging
+- realtime events
+- unread state
+- reactions
+- mentions
+- attachments where supported
+- reconnect behavior
+
+---
+
+# 69. Phase 14 — Flutter Offline-first
+
+Introduce:
+
+- local cache
+- offline state
+- local persistence
+- offline read behavior
+- queued write operations
+
+The server remains authoritative.
+
+---
+
+# 70. Phase 15 — Offline Queue / Idempotency
+
+Implement:
+
+- operation IDs
+- idempotency keys
+- retry management
+- duplicate detection
+- queue persistence
+- retry backoff
+- server validation
+
+---
+
+# 71. Phase 16 — Synchronization
+
+Implement synchronization between:
+
+Flutter local state
+        ↕
+Server state
+
+with explicit authorization and validation on the server.
+
+---
+
+# 72. Phase 17 — Conflict Resolution
+
+Define deterministic conflict behavior.
+
+Conflict resolution must not silently discard authoritative server data.
+
+---
+
+# 73. Phase 18 — Offline Sensitive-data Security
+
+Harden the client for:
+
+- protected local storage
+- secure tokens
+- sensitive cache handling
+- session invalidation
+- local data expiration
+- device security
+- logout cleanup
+
+---
+
+# 74. Phase 19 — Flutter Break-glass + Consent
+
+Integrate:
+
+- emergency access workflows
+- consent workflows
+- restricted emergency UI
+- reviewer state
+- scope display
+- countdown/expiry visibility
+- audit-aware user experience
+
+The Flutter client must follow backend emergency authorization rules.
+
+---
+
+# 75. Phase 20 — Flutter Clinical Safety
+
+Integrate:
+
+- clinical alerts
+- medication warnings
+- safety confirmations
+- blocking conditions
+- safe acknowledgement flows
+
+The client presents server-defined safety outcomes.
+
+---
+
+# 76. Phase 21 — Flutter Notifications
+
+Implement:
+
+- push notifications
+- notification center
+- notification preferences
+- secure deep links
+- workflow notifications
+
+---
+
+# 77. Phase 22 — Device / Session Management
+
+Implement:
+
+- session listing
+- device visibility
+- session revocation
+- secure logout
+- token invalidation
+
+---
+
+# 78. Phase 23 — Flutter Unit + Integration Testing
+
+Test:
+
+- widgets
+- services
+- state management
+- API client
+- secure storage
+- synchronization components
+
+---
+
+# 79. Phase 24 — Flutter Offline / Resilience Testing
+
+Test:
+
+- airplane mode
+- weak networks
+- high latency
+- reconnects
+- packet loss
+- duplicate submissions
+- expired sessions
+- interrupted sync
+- conflict recovery
+
+---
+
+# 80. Phase 25 — Full Cross-platform E2E
+
+Validate:
+
+Web
+Flutter
+Backend
+PostgreSQL
+Redis
+Workers
+Socket.IO
+
+as a complete system.
+
+---
+
+# 81. Phase 26 — Production Security Testing
+
+Perform final security verification including:
+
+- authentication
+- authorization
+- IDOR
+- privilege escalation
+- tenant escape attempts
+- session behavior
+- API abuse
+- sensitive-data exposure
+- client/server trust boundaries
+
+---
+
+# 82. Phase 27 — Backup / Restore Drill
+
+Perform a production-like drill that validates:
+
+- backup creation
+- restore
+- schema integrity
+- data integrity
+- authentication invalidation
+- background-job recovery
+- outbox recovery
+- application restart
+- post-restore validation
+
+---
+
+# 83. Phase 28 — Release Candidate Freeze
+
+Freeze the release candidate after:
+
+- backend tests
+- E2E
+- security testing
+- resilience
+- backup/restore
+- client testing
+- migration validation
+- configuration review
+
+Only critical fixes should be accepted after freeze.
+
+---
+
+# 84. Phase 29 — Deployment
+
+Deploy according to the finalized production architecture.
+
+Deployment must preserve:
+
+- tenant isolation
+- secure credentials
+- TLS
+- database integrity
+- backups
+- monitoring
+- auditability
+
+---
+
+# 85. Phase 30 — Post-deployment Validation
+
+Immediately validate:
+
+- health checks
+- authentication
+- database access
+- Redis
+- background jobs
+- notifications
+- core clinical workflows
+- backups
+- logging
+- alerts
+
+---
+
+# 86. Phase 31 — Production Operations
+
+Establish ongoing:
+
+- monitoring
+- backups
+- incident response
+- audit review
+- security maintenance
+- dependency updates
+- performance review
+- operational reporting
+
+---
+
+# 87. Phase 32 — Future Distributed Scale
+
+Only after sufficient production evidence should the system consider:
+
+- service decomposition
+- distributed workloads
+- advanced caching
+- queue scaling
+- regional deployment
+- read replicas
+- distributed event processing
+
+No unsupported scalability claims are made before this work is actually validated.
+
+---
+
+# 88. Phase 33 — White Glove / Rust
+
+The White Glove/Rust initiative is intentionally the final major backend phase.
+
+Rust should only be introduced where real evidence shows a measurable benefit.
+
+It is not being introduced prematurely simply because it is technically possible.
+
+Potential future areas include:
+
+- performance-critical services
+- high-throughput processing
+- specialized background workers
+- distributed workloads
+
+The existing Python backend remains the primary application platform until evidence justifies replacement or decomposition.
+
+---
+
+# 89. Important Project Boundaries
+
+These rules are intentionally preserved throughout development.
+
+### Do not restart completed work without regression evidence
+
+Completed load testing, profiling, security hardening, and architectural work should not be unnecessarily rebuilt.
+
+### Do not redesign the dashboard without evidence
+
+Optimization should follow profiling.
+
+### Do not duplicate DrugInteraction
+
+Medication safety logic belongs to the Clinical Safety architecture.
+
+### Break-Glass must not bypass Clinical Safety
+
+Emergency access provides controlled data access, not permission to ignore safety systems.
+
+### SQLite is never authoritative
+
+PostgreSQL remains the source of truth.
+
+### Offline mode never bypasses authorization
+
+Every synced operation remains subject to server-side authorization.
+
+### Do not claim unsupported scale
+
+Benchmarks are tied to their actual environment and workload.
+
+### Do not introduce Rust prematurely
+
+Rust is intentionally placed at the end of the roadmap.
+
+### Do not add unrelated features
+
+Feature development should follow the roadmap and actual platform requirements.
+
+---
+
+# 90. Development
+
+Typical development environment:
+
+Windows
+Python 3.12
+PostgreSQL
+Redis
+Flask
+SQLAlchemy
+Alembic
+Pytest
+
+Application development entry point:
+
 python run.py
-```
 
-Run tests:
+Typical test command:
 
-```powershell
 pytest -q
-```
 
-Run Celery worker:
+Feedback module:
 
-```powershell
-celery -A celery_worker.celery worker --loglevel=info
-```
+pytest app/tests/modules/feedback -q
 
-Run Celery Beat:
+Load testing:
 
-```powershell
-celery -A celery_worker.celery beat --loglevel=info
-```
+python -m load_tests.baseline
 
 ---
 
-# Project Philosophy
+# 91. Feedback Verification Command
 
-Clinic System Pro is being built as an engineering system rather than a collection of CRUD endpoints.
+The currently verified Feedback suite can be executed with:
 
-The architecture prioritizes:
+pytest app/tests/modules/feedback -q
 
-```text
-Security
-Correctness
-Tenant isolation
-Clinical safety
+Recorded result:
+
+95 passed
+
+---
+
+# 92. Engineering Philosophy
+
+Clinic System Pro v5 is being built around the principle that healthcare software must be:
+
+Secure
+Auditable
+Tenant-isolated
+Clinically safe
+Resilient
+Deterministic
+Recoverable
+Observable
+Testable
+Maintainable
+
+The objective is not simply to produce a large number of features.
+
+The objective is to establish a backend and client architecture where:
+
+- access is controlled
+- data is protected
+- clinical safety is explicit
+- failures are recoverable
+- operations are measurable
+- behavior is testable
+- sensitive actions are auditable
+- offline behavior remains safe
+- production claims are evidence-based
+
+---
+
+# 93. Current Project Position
+
+The project has progressed beyond the basic CRUD phase.
+
+The major current backend foundations are established:
+
+Architecture
+Authentication
+Authorization
+RBAC
+Tenant Isolation
+IDOR Protection
+Validation
+Transactions
+Errors
 Auditability
-Recoverability
-Resilience
-Observability
-Testability
+Clinical Safety
+Emergency Access
+Consent Guard
+Chat
+Settings
+Asset Control
+Dashboard
+Reports
+Backup / Recovery
 Performance
-Extensibility
-```
+Load Testing
+Observability
+Feedback
 
-The intended result is a backend that can support:
+The immediate engineering focus is now:
 
-```text
-Web clients
-Flutter/mobile clients
-Realtime clinical communication
-Multi-clinic deployments
-Clinical workflows
-Administrative workflows
-Financial workflows
-Healthcare interoperability
-AI-assisted workflows
-Offline-capable clients
-Enterprise operational controls
-```
+RESILIENCE ENGINEERING
 
-while preserving server-side authority over sensitive healthcare data and workflows.
+followed by:
+
+FINAL SECURITY / COMPLIANCE
+→ OBSERVABILITY / OPERATIONS
+→ PRODUCTION READINESS
+→ PRODUCTION-LIKE ENVIRONMENT
+→ FULL BACKEND E2E
+→ FAILURE INJECTION
+→ FLUTTER
+→ FULL CROSS-PLATFORM VALIDATION
+→ PRODUCTION
+→ FUTURE DISTRIBUTED SCALE
+→ WHITE GLOVE / RUST
+
+---
+
+# 94. Project Boundary Statement
+
+Clinic System Pro v5 is an engineering project under active development.
+
+Statements about:
+
+- HIPAA
+- regulatory compliance
+- production readiness
+- disaster recovery
+- RPO
+- RTO
+- scalability
+- security certifications
+- clinical effectiveness
+- uptime
+- enterprise SLA
+
+must only be made when supported by actual operational evidence, contracts, formal assessments, applicable law, and deployment-specific controls.
+
+The project documentation intentionally avoids claiming certifications or production guarantees that have not been independently established.
+
+---
+
+# 95. Final Roadmap Principle
+
+The roadmap is intentionally sequential.
+
+The project should not jump ahead merely because a later feature is technically interesting.
+
+The intended progression is:
+
+Harden
+→ Verify
+→ Stress
+→ Recover
+→ Secure
+→ Observe
+→ Deploy
+→ Operate
+→ Scale
+→ Optimize
+
+The next immediate engineering target is:
+
+Phase 2 — Resilience Engineering
