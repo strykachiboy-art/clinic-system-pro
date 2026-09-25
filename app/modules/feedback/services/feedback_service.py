@@ -8,6 +8,7 @@ from sqlalchemy import func
 from app.core.auth.user.models.user_model import User
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
+from app.core.enums.clinical_safety_enums import ClinicalRuleScope
 from app.core.enums.feedback_enums import (
     FeedbackCategory,
     FeedbackPriority,
@@ -41,6 +42,7 @@ from app.modules.pharmacy.models.pharmacy_model import Drug
 from app.modules.prescription.models.prescription_model import Prescription
 from app.modules.reports.models.reports_model import GeneratedReport
 from app.modules.settings.models.clinic_settings import ClinicSettings
+from app.modules.ward.models.ward_model import Admission
 from app.core.clinical_safety.models.clinical_alert_model import ClinicalAlert
 from app.core.clinical_safety.models.clinical_rule_model import ClinicalRule
 from app.core.emergency_access.models.emergency_access_model import (
@@ -76,7 +78,7 @@ TARGET_RESOURCES = {
     ("prescription", "prescription"): Prescription,
     ("inventory", "inventory_item"): InventoryItem,
     ("billing", "invoice"): Invoice,
-    ("ward", "admission"): None,
+    ("ward", "admission"): Admission,
     ("ambulance", "ambulance_trip"): AmbulanceTrip,
     ("asset_control", "asset"): Asset,
     ("chat", "conversation"): Conversation,
@@ -400,6 +402,33 @@ def _validate_target_actor_access(
         )
 
 
+def _get_target_clinic_id(
+    *,
+    model: type,
+    target: object,
+) -> int | None:
+    clinic_id = getattr(
+        target,
+        "clinic_id",
+        None,
+    )
+
+    if clinic_id is not None:
+        return clinic_id
+
+    if model is Admission:
+        return (
+            db.session.execute(
+                db.select(Patient.clinic_id).where(
+                    Patient.id == target.patient_id,
+                )
+            )
+            .scalar_one_or_none()
+        )
+
+    return None
+
+
 def _validate_target(
     *,
     actor_user_id: int,
@@ -461,14 +490,23 @@ def _validate_target(
             "Feedback target resource not found"
         )
 
-    model_clinic_id = getattr(
-        target,
-        "clinic_id",
-        None,
+    model_clinic_id = _get_target_clinic_id(
+        model=model,
+        target=target,
     )
 
     if model_clinic_id is None:
-        if model is ClinicalRule:
+        if (
+            model is ClinicalRule
+            and getattr(target, "scope", None)
+            == ClinicalRuleScope.GLOBAL
+        ):
+            _validate_target_actor_access(
+                actor_user_id=actor_user_id,
+                clinic_id=clinic_id,
+                model=model,
+                target=target,
+            )
             return
 
         raise ValidationError(
@@ -587,6 +625,7 @@ def _apply_status_transition(
         feedback.closed_at = now
 
     elif new_status == FeedbackStatus.REOPENED:
+        feedback.resolution_note = None
         feedback.resolved_at = None
         feedback.closed_at = None
 
@@ -650,13 +689,12 @@ def _create_feedback_audit(
     )
 
 
-@transactional
-def create_feedback(
+def _create_feedback_without_nested_transaction(
     *,
     actor_user_id: int,
     payload: FeedbackCreateSchema,
     clinic_id: int | None = None,
-    source: FeedbackSource = FeedbackSource.API,
+    source: FeedbackSource,
 ) -> Feedback:
     actor = _get_actor(
         actor_user_id,
@@ -676,12 +714,6 @@ def create_feedback(
 
     ensure_clinic_active(
         resolved_clinic_id,
-    )
-
-    source = _normalize_enum(
-        source,
-        FeedbackSource,
-        "feedback source",
     )
 
     _validate_target(
@@ -739,6 +771,48 @@ def create_feedback(
     )
 
     return feedback
+
+
+@transactional
+def create_feedback(
+    *,
+    actor_user_id: int,
+    payload: FeedbackCreateSchema,
+    clinic_id: int | None = None,
+    source: FeedbackSource = FeedbackSource.API,
+) -> Feedback:
+    source = _normalize_enum(
+        source,
+        FeedbackSource,
+        "feedback source",
+    )
+
+    if source == FeedbackSource.SYSTEM:
+        raise ValidationError(
+            "System feedback must use create_system_feedback"
+        )
+
+    return _create_feedback_without_nested_transaction(
+        actor_user_id=actor_user_id,
+        payload=payload,
+        clinic_id=clinic_id,
+        source=source,
+    )
+
+
+@transactional
+def create_system_feedback(
+    *,
+    actor_user_id: int,
+    payload: FeedbackCreateSchema,
+    clinic_id: int | None = None,
+) -> Feedback:
+    return _create_feedback_without_nested_transaction(
+        actor_user_id=actor_user_id,
+        payload=payload,
+        clinic_id=clinic_id,
+        source=FeedbackSource.SYSTEM,
+    )
 
 
 def get_feedback_for_actor(

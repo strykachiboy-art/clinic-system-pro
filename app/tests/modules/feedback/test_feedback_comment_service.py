@@ -1,5 +1,8 @@
 import pytest
 
+from app.core.enums.role_enums import Role
+from app.core.enums.staff_enums import StaffStatus
+
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.modules.feedback.schemas.feedback_comment_schema import (
     FeedbackCommentCreateSchema,
@@ -419,3 +422,32 @@ def test_update_feedback_comment_rejects_cross_clinic_access(
             feedback_id=feedback_other_clinic_item.id,
             clinic_id=clinic.id,
         )
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (StaffStatus.ACTIVE, True),
+        (StaffStatus.ON_LEAVE, False),
+        (StaffStatus.SUSPENDED, False),
+        (StaffStatus.TERMINATED, False),
+    ],
+)
+def test_is_active_staff_requires_active_staff_status(
+    clinic,
+    make_staff,
+    status,
+    expected,
+):
+    staff = make_staff(
+        clinic,
+        role=Role.DOCTOR,
+        status=status,
+    )
+
+    result = feedback_comment_service._is_active_staff(
+        actor=staff.user,
+        clinic_id=clinic.id,
+    )
+
+    assert result is expected
+

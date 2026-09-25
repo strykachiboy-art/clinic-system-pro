@@ -9,6 +9,7 @@ from app.core.auth.user.models.user_model import User
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -126,6 +127,7 @@ def _is_active_staff(
     ).where(
         Staff.user_id == actor.id,
         Staff.clinic_id == clinic_id,
+        Staff.status == StaffStatus.ACTIVE,
     )
 
     staff = db.session.execute(
