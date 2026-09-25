@@ -117,6 +117,15 @@ from app.modules.chat.models.conversation_model import Conversation
 from app.modules.chat.models.conversation_participant_model import (
     ConversationParticipant,
 )
+
+# Emergency Access
+from app.core.emergency_access.models.emergency_access_model import (
+    EmergencyAccessGrant,
+)
+from app.core.emergency_access.models.consent_guard_model import (
+    ConsentGuardEvaluation,
+)
+
 from app.modules.chat.models.message_model import Message
 from app.modules.chat.models.message_attachment_model import MessageAttachment
 from app.modules.chat.models.message_mention_model import MessageMention
@@ -218,6 +227,10 @@ __all__ = [
     "AssetHistory",
     "AssetAssignment",
     "AssetMaintenance",
+    
+    # Emergency Access
+    "EmergencyAccessGrant",
+    "ConsentGuardEvaluation"
 
     # Chat
     "Conversation",

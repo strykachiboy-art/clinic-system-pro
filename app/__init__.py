@@ -148,6 +148,10 @@ def register_blueprints(app):
     from app.modules.dashboard.routes.dashboard_route import (
         dashboard_bp
     )
+    
+    from app.core.emergency_access.routes.emergency_access_routes import (
+        emergency_access_bp,
+    )
 
     app.register_blueprint(web_bp)
 
@@ -178,6 +182,7 @@ def register_blueprints(app):
         access_control_bp,
         chat_bp,
         dashboard_bp,
+        emergency_access_bp
     )
 
     for blueprint in api_blueprints:
