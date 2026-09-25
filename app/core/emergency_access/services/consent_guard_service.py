@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.core.auth.user.models.user_model import User
 from app.core.emergency_access.models.consent_guard_model import (
     ConsentGuardEvaluation,
 )
@@ -19,6 +20,8 @@ from app.core.exceptions import (
 )
 from app.core.utils.decorators import transactional
 from app.extensions import db
+from app.modules.patient.models.patient_model import Patient
+from app.modules.staff.models.staff_model import Staff
 
 
 def _utcnow() -> datetime:
@@ -108,6 +111,55 @@ def _normalize_role(
         ) from exc
 
 
+def _get_actor(
+    actor_id: int,
+) -> User:
+    actor_id = _validate_positive_id(
+        actor_id,
+        "Actor ID",
+    )
+
+    actor = db.session.get(
+        User,
+        actor_id,
+    )
+
+    if actor is None:
+        raise NotFoundError(
+            f"User {actor_id} not found"
+        )
+
+    if not actor.is_active:
+        raise ValidationError(
+            f"User {actor.id} is inactive"
+        )
+
+    return actor
+
+
+def _ensure_actor_in_clinic(
+    actor: User,
+    clinic_id: int,
+):
+    if actor.clinic_id != clinic_id:
+        raise NotFoundError(
+            "User not found"
+        )
+
+    staff = db.session.execute(
+        db.select(Staff)
+        .where(
+            Staff.user_id == actor.id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if staff is not None and staff.clinic_id != clinic_id:
+        raise NotFoundError(
+            "User not found"
+        )
+
+
 @transactional
 def evaluate_consent_guard(
     *,
@@ -120,11 +172,6 @@ def evaluate_consent_guard(
     consent_reference: str | None = None,
     policy_context: dict | None = None,
 ) -> ConsentGuardEvaluation:
-    actor_id = _validate_positive_id(
-        actor_id,
-        "Actor ID",
-    )
-
     patient_id = _validate_positive_id(
         patient_id,
         "Patient ID",
@@ -133,6 +180,15 @@ def evaluate_consent_guard(
     clinic_id = _validate_positive_id(
         clinic_id,
         "Clinic ID",
+    )
+
+    actor = _get_actor(
+        actor_id,
+    )
+
+    _ensure_actor_in_clinic(
+        actor,
+        clinic_id,
     )
 
     recipient_role = _normalize_required_string(
@@ -173,15 +229,6 @@ def evaluate_consent_guard(
         recipient_role,
     )
 
-    decision = ConsentGuardDecision.DENY
-    effective_from = None
-    effective_until = None
-    emergency_access_id = None
-
-    from app.modules.patient.models.patient_model import (
-        Patient,
-    )
-
     patient = db.session.execute(
         db.select(Patient)
         .where(
@@ -196,6 +243,11 @@ def evaluate_consent_guard(
             f"Patient {patient_id} not found"
         )
 
+    decision = ConsentGuardDecision.DENY
+    effective_from = None
+    effective_until = None
+    emergency_access_id = None
+
     if emergency_exception:
         active_grant = db.session.execute(
             db.select(EmergencyAccessGrant)
@@ -205,7 +257,7 @@ def evaluate_consent_guard(
                 EmergencyAccessGrant.clinic_id
                 == clinic_id,
                 EmergencyAccessGrant.requester_user_id
-                == actor_id,
+                == actor.id,
                 EmergencyAccessGrant.status
                 == EmergencyAccessStatus.ACTIVE,
                 EmergencyAccessGrant.expires_at
@@ -231,26 +283,22 @@ def evaluate_consent_guard(
             effective_until = (
                 active_grant.expires_at
             )
-        else:
-            decision = ConsentGuardDecision.DENY
+
     else:
         if (
             role == Role.PATIENT
-            and patient.user_id == actor_id
+            and patient.user_id == actor.id
         ):
             decision = ConsentGuardDecision.ALLOW
+
         elif consent_reference:
             decision = ConsentGuardDecision.ALLOW
-        else:
-            decision = ConsentGuardDecision.DENY
 
     evaluation = ConsentGuardEvaluation(
-        emergency_access_id=(
-            emergency_access_id
-        ),
+        emergency_access_id=emergency_access_id,
         clinic_id=clinic_id,
         patient_id=patient_id,
-        requester_user_id=actor_id,
+        requester_user_id=actor.id,
         recipient_role=role.value,
         purpose=purpose,
         decision=decision,
