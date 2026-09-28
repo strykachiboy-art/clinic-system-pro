@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_data_integrity",
+        "pytest_return_code": 0,
+        "scenario": "data_integrity"
+      },
+      "duration_ms": 4922.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_data_integrity::test_patient_family_data_integrity_after_valid_workflow",
+      "status": "passed"
+    }
+  ],
+  "run_id": "data-integrity-regression-20260928",
+  "started_at": "2026-09-28T19:35:13.041140+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 0,
+    "total": 1
+  }
+}

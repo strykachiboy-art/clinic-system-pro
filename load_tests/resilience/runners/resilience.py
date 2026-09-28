@@ -51,6 +51,9 @@ SCENARIO_TEST_FILES = {
     "audit": (
         "test_audit_resilience.py"
     ),
+    "data_integrity": (
+        "test_data_integrity.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(
