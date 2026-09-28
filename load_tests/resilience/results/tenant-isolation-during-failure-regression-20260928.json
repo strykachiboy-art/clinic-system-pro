@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "tenant_isolation_during_failure"
+      },
+      "duration_ms": 4141.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_cross_clinic_patient_read_fails_closed_during_dependency_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "tenant_isolation_during_failure"
+      },
+      "duration_ms": 1138.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_same_clinic_patient_read_recovers_after_dependency_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "tenant_isolation_during_failure"
+      },
+      "duration_ms": 1073.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_cross_clinic_patient_mutation_remains_isolated_during_dependency_failure",
+      "status": "passed"
+    }
+  ],
+  "run_id": "tenant-isolation-during-failure-regression-20260928",
+  "started_at": "2026-09-28T20:20:45.969023+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 3,
+    "skipped": 0,
+    "total": 3
+  }
+}

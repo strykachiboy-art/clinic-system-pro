@@ -63,6 +63,9 @@ SCENARIO_TEST_FILES = {
     "security_during_failure": (
         "test_security_during_failure.py"
     ),
+    "tenant_isolation_during_failure": (
+        "test_tenant_isolation_during_failure.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(
