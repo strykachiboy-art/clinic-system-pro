@@ -14,9 +14,39 @@ def _utcnow() -> datetime:
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
 
+    __table_args__ = (
+        db.Index(
+            "ix_audit_logs_clinic_created_id",
+            "clinic_id",
+            "created_at",
+            "id",
+        ),
+        db.Index(
+            "ix_audit_logs_clinic_user_created_id",
+            "clinic_id",
+            "user_id",
+            "created_at",
+            "id",
+        ),
+        db.Index(
+            "ix_audit_logs_clinic_entity_created_id",
+            "clinic_id",
+            "entity_type",
+            "entity_id",
+            "created_at",
+            "id",
+        ),
+    )
+
     id = db.Column(
         db.Integer,
         primary_key=True,
+    )
+
+    clinic_id = db.Column(
+        db.Integer,
+        db.ForeignKey("clinics.id"),
+        nullable=True,
     )
 
     user_id = db.Column(
@@ -70,6 +100,10 @@ class AuditLog(db.Model):
         default=_utcnow,
         nullable=False,
         index=True,
+    )
+
+    clinic = db.relationship(
+        "Clinic",
     )
 
     user = db.relationship(
