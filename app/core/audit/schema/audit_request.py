@@ -1,7 +1,15 @@
-from datetime import datetime
-from typing import Any, Optional
+from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    StrictStr,
+    field_validator,
+)
 
 from app.core.enums.audit_enums import AuditAction
 
@@ -12,46 +20,63 @@ class AuditLogCreateSchema(BaseModel):
         description="The type of audit action performed",
     )
 
-    entity_type: str = Field(
+    entity_type: StrictStr = Field(
         ...,
+        min_length=1,
         max_length=80,
         description="The model or entity being acted upon",
     )
 
-    entity_id: int = Field(
+    entity_id: StrictInt = Field(
         ...,
         gt=0,
         description="Primary key ID of the entity",
     )
 
-    description: Optional[str] = Field(
+    description: StrictStr | None = Field(
         default=None,
         max_length=255,
         description="Human-readable description of the action",
     )
 
-    old_value: Optional[dict[str, Any]] = Field(
+    old_value: dict[str, Any] | None = Field(
         default=None,
         description="JSON dictionary of old values before the change",
     )
 
-    new_value: Optional[dict[str, Any]] = Field(
+    new_value: dict[str, Any] | None = Field(
         default=None,
         description="JSON dictionary of new values after the change",
     )
 
-    ip_address: Optional[str] = Field(
+    ip_address: StrictStr | None = Field(
         default=None,
         max_length=45,
         description="IP address associated with the action",
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
+    @field_validator(
+        "entity_type",
+        "description",
+        "ip_address",
+    )
+    @classmethod
+    def normalize_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
 
-class AuditLogResponseSchema(AuditLogCreateSchema):
-    id: int
-    user_id: Optional[int]
-    created_at: datetime
+        value = value.strip()
 
-    model_config = ConfigDict(from_attributes=True)
+        if not value:
+            raise ValueError(
+                "Value cannot be empty"
+            )
+
+        return value
