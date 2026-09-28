@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
@@ -7,7 +8,11 @@ import pytest
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.modules.profile.routes import profile_route
-from app.modules.profile.schemas.profile_schema import ProfileResponseSchema
+from app.modules.profile.schemas.profile_schema import (
+    ProfileImageRemoveResponseSchema,
+    ProfileImageUploadResponseSchema,
+    ProfileResponseSchema,
+)
 
 
 # ============================================================================
@@ -1075,3 +1080,313 @@ def test_profile_patch_route_exists(
     )
 
     assert response.status_code != 404
+
+# ============================================================================
+# PUBLIC PROFILE
+# ============================================================================
+
+
+def test_get_user_profile_returns_only_public_fields(
+    client,
+    staff,
+):
+    response = client.get(
+        f"/api/v1/profile/{staff.user.id}",
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+
+    user_data = body["data"]["user"]
+    staff_data = body["data"]["staff"]
+
+    assert set(user_data.keys()) == {
+        "id",
+        "profile_image_url",
+    }
+
+    assert user_data["id"] == staff.user.id
+
+    assert set(staff_data.keys()) == {
+        "id",
+        "user_id",
+        "first_name",
+        "last_name",
+        "specialty",
+        "status",
+    }
+
+    assert staff_data["id"] == staff.id
+    assert staff_data["user_id"] == staff.user.id
+
+    assert "email" not in user_data
+    assert "phone" not in user_data
+    assert "clinic_id" not in user_data
+    assert "profile_image_storage_key" not in user_data
+
+    assert "phone" not in staff_data
+    assert "email" not in staff_data
+    assert "clinic_id" not in staff_data
+
+
+def test_get_user_profile_rejects_inactive_user(
+    client,
+    staff,
+):
+    staff.user.is_active = False
+
+    response = client.get(
+        f"/api/v1/profile/{staff.user.id}",
+    )
+
+    assert response.status_code == 404
+
+
+def test_get_user_profile_rejects_missing_user(
+    client,
+):
+    response = client.get(
+        "/api/v1/profile/999999",
+    )
+
+    assert response.status_code == 404
+
+
+# ============================================================================
+# PROFILE IMAGE ? AUTHENTICATION / AUTHORIZATION
+# ============================================================================
+
+
+def test_upload_my_profile_image_requires_authentication(
+    client,
+    assert_unauthorized,
+):
+    response = client.post(
+        "/api/v1/profile/me/image",
+    )
+
+    assert_unauthorized(response)
+
+
+def test_delete_my_profile_image_requires_authentication(
+    client,
+    assert_unauthorized,
+):
+    response = client.delete(
+        "/api/v1/profile/me/image",
+    )
+
+    assert_unauthorized(response)
+
+
+def test_upload_my_profile_image_rejects_invalid_role(
+    client,
+    user,
+    auth_headers_for,
+    assert_forbidden,
+):
+    headers = auth_headers_for(
+        user,
+        role="invalid-role",
+    )
+
+    response = client.post(
+        "/api/v1/profile/me/image",
+        headers=headers,
+    )
+
+    assert_forbidden(response)
+
+
+def test_delete_my_profile_image_rejects_invalid_role(
+    client,
+    user,
+    auth_headers_for,
+    assert_forbidden,
+):
+    headers = auth_headers_for(
+        user,
+        role="invalid-role",
+    )
+
+    response = client.delete(
+        "/api/v1/profile/me/image",
+        headers=headers,
+    )
+
+    assert_forbidden(response)
+
+
+def test_upload_my_profile_image_requires_file(
+    client,
+    user,
+    auth_headers_for,
+):
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/v1/profile/me/image",
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Profile image file is required"
+    )
+
+
+# ============================================================================
+# PROFILE IMAGE ? JWT IDENTITY / OWNERSHIP
+# ============================================================================
+
+
+def test_upload_my_profile_image_uses_jwt_identity(
+    client,
+    user,
+    auth_headers_for,
+    profile_routes,
+    monkeypatch,
+):
+    profile = make_profile_response(
+        user_id=user.id,
+        email=user.email,
+        clinic_id=user.clinic_id,
+    )
+
+    profile.user.profile_image_storage_key = (
+        "profile_images/old.png"
+    )
+
+    get_profile_mock = Mock(
+        return_value=profile,
+    )
+
+    save_profile_image_mock = Mock(
+        return_value="profile_images/new.png",
+    )
+
+    upload_profile_image_mock = Mock(
+        return_value=ProfileImageUploadResponseSchema(
+            profile_image_storage_key=(
+                "profile_images/new.png"
+            ),
+        ),
+    )
+
+    delete_file_mock = Mock()
+
+    monkeypatch.setattr(
+        profile_routes,
+        "get_profile",
+        get_profile_mock,
+    )
+    monkeypatch.setattr(
+        profile_routes,
+        "save_profile_image",
+        save_profile_image_mock,
+    )
+    monkeypatch.setattr(
+        profile_routes,
+        "upload_profile_image",
+        upload_profile_image_mock,
+    )
+    monkeypatch.setattr(
+        profile_routes,
+        "delete_file",
+        delete_file_mock,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.post(
+        "/api/v1/profile/me/image",
+        headers=headers,
+        data={
+            "image": (
+                BytesIO(b"fake-image-content"),
+                "profile.png",
+                "image/png",
+            ),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+
+    upload_profile_image_mock.assert_called_once_with(
+        actor_user_id=user.id,
+        storage_key="profile_images/new.png",
+    )
+
+    delete_file_mock.assert_called_once_with(
+        "profile_images/old.png",
+    )
+
+
+def test_delete_my_profile_image_uses_jwt_identity(
+    client,
+    user,
+    auth_headers_for,
+    profile_routes,
+    monkeypatch,
+):
+    profile = make_profile_response(
+        user_id=user.id,
+        email=user.email,
+        clinic_id=user.clinic_id,
+    )
+
+    profile.user.profile_image_storage_key = (
+        "profile_images/current.png"
+    )
+
+    get_profile_mock = Mock(
+        return_value=profile,
+    )
+
+    remove_profile_image_mock = Mock(
+        return_value=ProfileImageRemoveResponseSchema(),
+    )
+
+    delete_file_mock = Mock()
+
+    monkeypatch.setattr(
+        profile_routes,
+        "get_profile",
+        get_profile_mock,
+    )
+    monkeypatch.setattr(
+        profile_routes,
+        "remove_profile_image",
+        remove_profile_image_mock,
+    )
+    monkeypatch.setattr(
+        profile_routes,
+        "delete_file",
+        delete_file_mock,
+    )
+
+    headers = auth_headers_for(user)
+
+    response = client.delete(
+        "/api/v1/profile/me/image",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    remove_profile_image_mock.assert_called_once_with(
+        actor_user_id=user.id,
+    )
+
+    delete_file_mock.assert_called_once_with(
+        "profile_images/current.png",
+    )
+

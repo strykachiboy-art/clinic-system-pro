@@ -11,7 +11,10 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.modules.profile.schemas.profile_schema import (
+    ProfileImageRemoveResponseSchema,
+    ProfileImageUploadResponseSchema,
     ProfileResponseSchema,
+    PublicProfileResponseSchema,
 )
 from app.modules.profile.services import profile_service
 
@@ -713,3 +716,265 @@ def test_update_profile_rejects_missing_authenticated_user(
         )
 
     db_session.rollback()
+
+# ============================================================================
+# PUBLIC PROFILE ? SECURITY
+# ============================================================================
+
+
+def test_get_public_profile_exposes_only_public_fields(
+    app,
+    staff,
+):
+    app.config["STORAGE_PUBLIC_BASE_URL"] = (
+        "https://cdn.example.com"
+    )
+
+    staff.user.profile_image_storage_key = (
+        "profile_images/public.png"
+    )
+
+    profile = profile_service.get_public_profile(
+        staff.user.id,
+    )
+
+    assert isinstance(
+        profile,
+        PublicProfileResponseSchema,
+    )
+
+    user_data = profile.user.model_dump(
+        mode="json",
+    )
+
+    staff_data = profile.staff.model_dump(
+        mode="json",
+    )
+
+    assert set(user_data.keys()) == {
+        "id",
+        "profile_image_url",
+    }
+
+    assert user_data == {
+        "id": staff.user.id,
+        "profile_image_url": (
+            "https://cdn.example.com/"
+            "profile_images/public.png"
+        ),
+    }
+
+    assert set(staff_data.keys()) == {
+        "id",
+        "user_id",
+        "first_name",
+        "last_name",
+        "specialty",
+        "status",
+    }
+
+    assert "email" not in user_data
+    assert "clinic_id" not in user_data
+    assert "profile_image_storage_key" not in user_data
+
+    assert "phone" not in staff_data
+    assert "email" not in staff_data
+    assert "clinic_id" not in staff_data
+
+
+def test_get_public_profile_rejects_inactive_user(
+    user,
+):
+    user.is_active = False
+
+    with pytest.raises(
+        NotFoundError,
+        match=f"User {user.id} not found",
+    ):
+        profile_service.get_public_profile(
+            user.id,
+        )
+
+
+def test_get_public_profile_rejects_missing_user():
+    with pytest.raises(
+        NotFoundError,
+        match="User 999999 not found",
+    ):
+        profile_service.get_public_profile(
+            999999,
+        )
+
+
+# ============================================================================
+# PROFILE IMAGE ? VALIDATION
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "storage_key",
+    [
+        "",
+        " ",
+    ],
+)
+def test_upload_profile_image_rejects_blank_storage_key(
+    user,
+    storage_key,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Profile image storage key cannot be blank",
+    ):
+        profile_service.upload_profile_image(
+            actor_user_id=user.id,
+            storage_key=storage_key,
+        )
+
+
+def test_upload_profile_image_rejects_oversized_storage_key(
+    user,
+):
+    storage_key = "x" * 501
+
+    with pytest.raises(
+        ValidationError,
+        match="Profile image storage key is too long",
+    ):
+        profile_service.upload_profile_image(
+            actor_user_id=user.id,
+            storage_key=storage_key,
+        )
+
+
+def test_upload_profile_image_rejects_duplicate_storage_key(
+    user,
+):
+    user.profile_image_storage_key = (
+        "profile_images/current.png"
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="already assigned",
+    ):
+        profile_service.upload_profile_image(
+            actor_user_id=user.id,
+            storage_key="profile_images/current.png",
+        )
+
+
+# ============================================================================
+# PROFILE IMAGE ? ASSIGNMENT / AUDIT
+# ============================================================================
+
+
+def test_upload_profile_image_assigns_image_to_actor(
+    user,
+    monkeypatch,
+):
+    audit_mock = Mock()
+
+    monkeypatch.setattr(
+        profile_service,
+        "create_audit_log",
+        audit_mock,
+    )
+
+    storage_key = (
+        "profile_images/new-profile.png"
+    )
+
+    result = profile_service.upload_profile_image(
+        actor_user_id=user.id,
+        storage_key=storage_key,
+    )
+
+    assert isinstance(
+        result,
+        ProfileImageUploadResponseSchema,
+    )
+
+    assert result.profile_image_storage_key == (
+        storage_key
+    )
+
+    assert user.profile_image_storage_key == (
+        storage_key
+    )
+
+    audit_mock.assert_called_once()
+
+    call_kwargs = audit_mock.call_args.kwargs
+
+    assert call_kwargs["entity_type"] == "User"
+    assert call_kwargs["entity_id"] == user.id
+
+    assert call_kwargs["old_value"] == {
+        "profile_image_storage_key": None,
+    }
+
+    assert call_kwargs["new_value"] == {
+        "profile_image_storage_key": storage_key,
+    }
+
+
+def test_remove_profile_image_requires_existing_image(
+    user,
+):
+    with pytest.raises(
+        NotFoundError,
+        match="User does not have a profile image",
+    ):
+        profile_service.remove_profile_image(
+            actor_user_id=user.id,
+        )
+
+
+def test_remove_profile_image_clears_actor_image(
+    user,
+    monkeypatch,
+):
+    audit_mock = Mock()
+
+    monkeypatch.setattr(
+        profile_service,
+        "create_audit_log",
+        audit_mock,
+    )
+
+    old_storage_key = (
+        "profile_images/current.png"
+    )
+
+    user.profile_image_storage_key = (
+        old_storage_key
+    )
+
+    result = profile_service.remove_profile_image(
+        actor_user_id=user.id,
+    )
+
+    assert isinstance(
+        result,
+        ProfileImageRemoveResponseSchema,
+    )
+
+    assert result.profile_image_storage_key is None
+    assert user.profile_image_storage_key is None
+
+    audit_mock.assert_called_once()
+
+    call_kwargs = audit_mock.call_args.kwargs
+
+    assert call_kwargs["entity_type"] == "User"
+    assert call_kwargs["entity_id"] == user.id
+
+    assert call_kwargs["old_value"] == {
+        "profile_image_storage_key": old_storage_key,
+    }
+
+    assert call_kwargs["new_value"] == {
+        "profile_image_storage_key": None,
+    }
+
