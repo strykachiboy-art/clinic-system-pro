@@ -1,0 +1,738 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 4229.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_normally",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1133.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_under_high_latency",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1032.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_under_slow_network_profile[profile0-0.7]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 965.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_under_slow_network_profile[profile1-0.25]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1016.9999999999999,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_with_jitter_profile",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 958.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_request_succeeds_with_bandwidth_limitation",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 3.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_packet_loss_is_classified_before_request_dispatch",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 4.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_interruption_is_classified_before_request_dispatch",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1405.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_patient_response_preserves_expected_pagination_contract",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 987.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_profiles_do_not_change_endpoint_contract[profile0]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1140.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_profiles_do_not_change_endpoint_contract[profile1]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 965.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_profiles_do_not_change_endpoint_contract[profile2]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1037.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_profiles_do_not_change_endpoint_contract[profile3]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 965.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_profiles_do_not_change_endpoint_contract[profile4]",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_http_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1277.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_http_resilience::test_http_repeated_read_requests_remain_consistent",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1002.9999999999999,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_connects_and_restores_authenticated_context",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1012.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_disconnects_cleanly",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 951.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_reconnects_with_valid_credentials",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1267.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_rejects_reconnect_with_revoked_token",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1609.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_rejoins_authorized_conversation_after_reconnect",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1314.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_does_not_restore_unauthorized_conversation_after_reconnect",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 640.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_rejects_invalid_reconnect_credentials",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_socketio_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1056.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_socketio_resilience::test_socket_repeated_reconnects_remain_authenticated",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1056.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_authenticated_request_remains_valid_under_network_degradation",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1463.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_login_recovers_after_intermittent_interruption",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1627.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_login_recovers_after_packet_loss",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1881.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_login_succeeds_under_high_latency",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1533.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_login_succeeds_under_jitter",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1938.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_login_succeeds_under_slow_2g",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 3955.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_logout_revokes_access_after_network_delay",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1432.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_refresh_succeeds_under_bandwidth_limit",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1173.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_revoked_refresh_token_cannot_be_reused_after_recovery",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_auth_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1378.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_auth_resilience::test_token_version_invalidation_survives_network_recovery",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 2067.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_chat_message_read_recovers_under_high_latency",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1515.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_chat_message_recovers_after_interruption",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1842.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_chat_message_recovers_after_packet_loss",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 2839.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_chat_message_succeeds_under_slow_2g",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 2898.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_cross_clinic_chat_request_remains_isolated_after_latency",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1904.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_failed_outbox_event_can_be_retried",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 2620.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_outbox_failed_event_returns_to_pending",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1899.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_outbox_message_enters_pending_state_after_creation",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_chat_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1354.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_chat_resilience::test_stale_processing_event_is_requeued",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1139.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience::test_celery_broker_failure_leaves_notification_pending",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 976.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience::test_celery_broker_recovers_without_duplicate_state_change",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 719.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience::test_celery_beat_schedule_references_registered_tasks",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 966.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience::test_redis_auth_fails_closed_during_outage",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1035.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_redis_celery_resilience::test_redis_auth_recovers_after_outage",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_audit_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1347.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_audit_resilience::test_patient_and_audit_rollback_together",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_audit_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1036.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_audit_resilience::test_audit_patient_write_and_read_round_trip",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_data_integrity",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 887.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_data_integrity::test_patient_family_data_integrity_after_valid_workflow",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_idempotency_recovery",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1108.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_idempotency_recovery::test_duplicate_activation_is_idempotent",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_idempotency_recovery",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1071.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_idempotency_recovery::test_failed_deactivation_recovers_without_duplicate_transition",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_recovery",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1080.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_recovery::test_system_recovers_across_database_and_redis_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1247.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_failed_privileged_role_change_fails_closed",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1320.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_authorization_recovers_without_partial_role_change",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 2017.9999999999998,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_non_super_admin_cannot_bypass_authorization_after_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1012.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_cross_clinic_patient_read_fails_closed_during_dependency_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1217.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_same_clinic_patient_read_recovers_after_dependency_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1038.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_tenant_isolation_during_failure::test_cross_clinic_patient_mutation_remains_isolated_during_dependency_failure",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_dependency_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 774.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_dependency_failure::test_postgres_commit_timeout_rolls_back_patient_creation",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_dependency_failure",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 993.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_dependency_failure::test_postgres_connection_failure_rolls_back_and_recovers",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_recovery",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 673.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_recovery::test_failed_patient_transaction_recovers_for_retry",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_recovery",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 708.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_recovery::test_failed_family_member_transaction_recovers_for_retry",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 1098.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_resilience::test_failure_after_patient_flush_rolls_back_patient_and_audit",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_resilience",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 689.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_resilience::test_failure_after_family_member_flush_does_not_leave_orphan_record",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_worker_interruption",
+        "pytest_return_code": 0,
+        "scenario": "all"
+      },
+      "duration_ms": 736.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_worker_interruption::test_worker_interruption_recovers_stale_event_for_retry",
+      "status": "passed"
+    }
+  ],
+  "run_id": "resilience-phase2-final-20260928",
+  "started_at": "2026-09-28T20:44:17.976535+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 66,
+    "skipped": 0,
+    "total": 66
+  }
+}

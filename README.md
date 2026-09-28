@@ -2,7 +2,7 @@
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete and the next active backend phase is Resilience Engineering.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, and the next active backend phase is Final Security / Compliance Hardening.**
 
 **Status date: September 2026**
 
@@ -1029,78 +1029,86 @@ Retention, RPO, RTO, storage policy, geographic redundancy, and final production
 
 # 40. Resilience Engineering
 
-Resilience Engineering is the next active backend phase.
+Resilience Engineering has been completed and verified for the current backend Phase 2 scope.
 
-The project already has a structural resilience framework and historical resilience evidence.
-
-The existing resilience structure is:
+The verified resilience framework includes:
 
 load_tests/resilience/
-├── README.md
-├── __init__.py
-├── common/
-│   ├── __init__.py
-│   ├── network.py
-│   ├── socketio.py
-│   ├── assertions.py
-│   └── results.py
-├── profiles/
-│   ├── __init__.py
-│   ├── slow_2g.py
-│   ├── slow_3g.py
-│   ├── high_latency.py
-│   ├── jitter.py
-│   ├── packet_loss.py
-│   ├── bandwidth_limited.py
-│   └── intermittent.py
-├── scenarios/
-│   ├── __init__.py
-│   ├── http_resilience.py
-│   ├── socketio_resilience.py
-│   ├── auth_resilience.py
-│   ├── chat_resilience.py
-│   └── sync_resilience.py
-├── runners/
-│   ├── __init__.py
-│   ├── resilience.py
-│   └── resilience_report.py
-└── results/
-    └── .gitkeep
+??? README.md
+??? __init__.py
+??? checks/
+?   ??? __init__.py
+?   ??? integrity.py
+??? common/
+?   ??? __init__.py
+?   ??? assertions.py
+?   ??? faults.py
+?   ??? network.py
+?   ??? results.py
+?   ??? socketio.py
+??? profiles/
+??? scenarios/
+??? runners/
+??? results/
+??? tests/
 
-These files are not considered evidence by themselves.
+Unused empty fault/check scaffolding was removed after verification.
 
-Structural scaffolding must be backed by real execution and measured results.
+The active synthetic fault-injection engine is:
 
-## Historical Resilience Evidence
+load_tests/resilience/common/faults.py
 
-A previous recorded resilience run achieved:
+The active integrity verification layer is:
 
-47 passed
+load_tests/resilience/checks/integrity.py
+
+## Phase 2 Final Resilience Evidence
+
+Final regression run:
+
+66 passed
 0 failed
 0 skipped
 
-This is historical evidence.
+Runtime:
 
-It does not mean the entire Resilience Engineering phase is complete.
+88.89 seconds
 
-The active phase is to systematically exercise real failure conditions and document observed behavior.
+Run ID:
 
-Planned areas include:
+resilience-phase2-final-20260928
 
-- slow 2G
-- slow 3G
+Result artifact:
+
+load_tests/resilience/results/resilience-phase2-final-20260928.json
+
+Verified resilience areas include:
+
+- network degradation
 - high latency
 - jitter
 - packet loss
-- bandwidth limits
+- bandwidth limitation
 - intermittent connectivity
-- HTTP resilience
-- Socket.IO resilience
+- HTTP failure behavior
+- Socket.IO failure behavior
 - authentication resilience
 - chat resilience
-- synchronization resilience
+- Redis/Celery resilience
+- database interruption
+- transaction recovery
+- worker interruption
+- partial background-processing recovery
+- audit resilience
+- data integrity
+- idempotency/recovery
+- security during failure
+- tenant isolation during failure
+- reproducible failure evidence
 
----
+The current backend Phase 2 Resilience Engineering work is considered complete.
+
+Backend offline synchronization is intentionally deferred to the Flutter/offline roadmap and is not treated as a backend Phase 2 blocker.
 
 # 41. Performance and Load Testing
 
@@ -1195,25 +1203,33 @@ Instead, schema behavior is covered through service and route contract verificat
 Important verified checkpoints include:
 
 Clinical Safety:
+
 134 passed
 
 Feedback:
-95 passed
 
-Historical Resilience Run:
-47 passed
+95 passed
+0 failed
+0 errors
+
+Phase 2 Resilience:
+
+66 passed
 0 failed
 0 skipped
 
+Run ID:
+
+resilience-phase2-final-20260928
+
 Restore Drill:
+
 success = true
 post_restore_verification = true
 authentication_invalidated = true
 outbox_recovery_completed = true
 
 Historical full-suite checkpoints have also exceeded six thousand passing tests, but full-suite counts should be treated as time-specific snapshots rather than permanent guarantees.
-
----
 
 # 44. Flutter Client Architecture
 
@@ -1468,47 +1484,73 @@ Verification requires actual tests, integration, and appropriate operational evi
 
 # 54. Current Milestone
 
-The following areas are currently implemented or substantially hardened:
+The following areas are currently implemented, hardened, or verified:
 
 Core Backend Architecture
+
 Authentication
+
 Authorization
+
 RBAC
+
 Tenant Isolation
+
 IDOR Protection
+
 Validation
+
 Transactions
+
 Errors
+
 Pagination
+
 Historical Reads
+
 Audit
+
 SQLAlchemy Modernization
+
 Migration Cleanup
+
 Performance Hardening
+
 Observability
+
 Settings
+
 Asset Control
+
 Dashboard
+
 Advanced Access Control
+
 Internal Clinical Chat
+
 Clinical Safety
+
 Emergency Clinical Access / Break-Glass
+
 Consent Guard
+
 Backup / Recovery
+
 Current-cycle Load Testing
+
 Feedback
 
-The next active backend phase is Resilience Engineering.
+Resilience Engineering
 
----
+The next active backend phase is Final Security / Compliance Hardening.
 
 # 55. Authoritative Master Roadmap
 
 The project roadmap is divided into 33 major phases.
 
 01. Current Backend State / Architecture Baseline
-02. Resilience Engineering
-03. Final Security / Compliance Hardening
+02. Resilience Engineering ? COMPLETED
+03. Final Security / Compliance Hardening ? ACTIVE
 04. Observability / Operations
 05. Production Readiness
 06. Production-like Backend Environment
@@ -1562,11 +1604,21 @@ This phase includes:
 
 ---
 
-# 57. Phase 2 — Resilience Engineering
+# 57. Phase 2 ? Resilience Engineering
 
-This is the next active phase.
+Status: COMPLETED
 
-Work includes:
+Final verification:
+
+66 passed
+0 failed
+0 skipped
+
+Run ID:
+
+resilience-phase2-final-20260928
+
+The completed backend scope covered:
 
 - network degradation
 - high latency
@@ -1578,17 +1630,21 @@ Work includes:
 - Socket.IO failure behavior
 - authentication resilience
 - chat resilience
-- sync resilience
-- retry behavior
-- timeout behavior
-- reconnect behavior
-- idempotency verification
-- failure reporting
-- measurable resilience evidence
+- Redis/Celery resilience
+- database interruption
+- transaction recovery
+- worker interruption
+- partial background-processing recovery
+- audit resilience
+- data integrity
+- idempotency/recovery
+- security during failure
+- tenant isolation during failure
+- reproducible failure evidence
 
-Each scenario should produce reproducible results.
+Backend Phase 2 is closed.
 
----
+Flutter offline synchronization remains part of the later Flutter/offline roadmap.
 
 # 58. Phase 3 — Final Security / Compliance
 
@@ -2195,48 +2251,69 @@ The project has progressed beyond the basic CRUD phase.
 The major current backend foundations are established:
 
 Architecture
+
 Authentication
+
 Authorization
+
 RBAC
+
 Tenant Isolation
+
 IDOR Protection
+
 Validation
+
 Transactions
+
 Errors
+
 Auditability
+
 Clinical Safety
+
 Emergency Access
+
 Consent Guard
+
 Chat
+
 Settings
+
 Asset Control
+
 Dashboard
+
 Reports
+
 Backup / Recovery
+
 Performance
+
 Load Testing
+
 Observability
+
 Feedback
+
+Resilience Engineering
 
 The immediate engineering focus is now:
 
-RESILIENCE ENGINEERING
+FINAL SECURITY / COMPLIANCE HARDENING
 
 followed by:
 
-FINAL SECURITY / COMPLIANCE
-→ OBSERVABILITY / OPERATIONS
-→ PRODUCTION READINESS
-→ PRODUCTION-LIKE ENVIRONMENT
-→ FULL BACKEND E2E
-→ FAILURE INJECTION
-→ FLUTTER
-→ FULL CROSS-PLATFORM VALIDATION
-→ PRODUCTION
-→ FUTURE DISTRIBUTED SCALE
-→ WHITE GLOVE / RUST
-
----
+OBSERVABILITY / OPERATIONS
+? PRODUCTION READINESS
+? PRODUCTION-LIKE ENVIRONMENT
+? FULL BACKEND E2E
+? FAILURE INJECTION
+? FLUTTER
+? FULL CROSS-PLATFORM VALIDATION
+? PRODUCTION
+? FUTURE DISTRIBUTED SCALE
+? WHITE GLOVE / RUST
 
 # 94. Project Boundary Statement
 
@@ -2283,4 +2360,4 @@ Harden
 
 The next immediate engineering target is:
 
-Phase 2 — Resilience Engineering
+Phase 3 ? Final Security / Compliance Hardening
