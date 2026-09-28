@@ -1044,7 +1044,7 @@ def test_add_batch_rejects_expired_batch(
             drug_id=drug.id,
             batch_number="B-EXPIRED",
             quantity_on_hand=10,
-            expiry_date=date.today(),
+            expiry_date=pharmacy_service._utc_today(),
         )
 
 
