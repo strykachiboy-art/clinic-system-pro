@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from app.extensions import db
 
 from app.core.audit.models.audit_model import AuditLog
+from app.core.audit.services.audit_writer import write_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import (
     NotFoundError,
@@ -17,10 +17,6 @@ DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
 MAX_IP_ADDRESS_LENGTH = 45
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _validate_positive_id(
@@ -150,24 +146,12 @@ def create_audit_log(
     old_value=None,
     new_value=None,
     user_id: Optional[int] = None,
+    clinic_id: Optional[int] = None,
     resource_type: Optional[str] = None,
     resource_id: Optional[int] = None,
     details=None,
     ip_address: Optional[str] = None,
 ) -> AuditLog:
-    """
-    Create an audit record.
-
-    Supports both the current entity_* API and the
-    legacy resource_* aliases used by older services.
-
-    The caller is responsible for committing the
-    surrounding transaction.
-
-    IP address is optional because audit records may
-    originate from API requests, background jobs,
-    scheduled tasks, or internal system operations.
-    """
 
     action = _normalize_action(action)
 
@@ -204,6 +188,11 @@ def create_audit_log(
         "User ID",
     )
 
+    clinic_id = _normalize_optional_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     description = _normalize_optional_string(
         description,
         "Audit description",
@@ -211,11 +200,10 @@ def create_audit_log(
     )
 
     ip_address = _normalize_ip_address(
-        ip_address
+        ip_address,
     )
 
-    log = AuditLog(
-        user_id=user_id,
+    return write_audit_log(
         action=action,
         entity_type=resolved_entity_type,
         entity_id=resolved_entity_id,
@@ -226,12 +214,10 @@ def create_audit_log(
             if new_value is not None
             else details
         ),
+        user_id=user_id,
+        clinic_id=clinic_id,
         ip_address=ip_address,
     )
-
-    db.session.add(log)
-
-    return log
 
 
 def list_audit_logs(
