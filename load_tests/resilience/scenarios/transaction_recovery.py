@@ -198,7 +198,7 @@ def test_failed_family_member_transaction_recovers_for_retry(
             patient.id,
             {
                 "full_name": "Recovery Member",
-                "relation": "Sibling",
+                "relation": "sibling",
                 "phone": "+2348111111111",
             },
         )
@@ -233,7 +233,7 @@ def test_failed_family_member_transaction_recovers_for_retry(
             patient.id,
             {
                 "full_name": "Recovery Member",
-                "relation": "Sibling",
+                "relation": "sibling",
                 "phone": "+2348111111111",
             },
         )
