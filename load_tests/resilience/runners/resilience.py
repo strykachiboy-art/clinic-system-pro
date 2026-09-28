@@ -57,6 +57,9 @@ SCENARIO_TEST_FILES = {
     "idempotency_recovery": (
         "test_idempotency_recovery.py"
     ),
+    "recovery": (
+        "test_recovery.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(

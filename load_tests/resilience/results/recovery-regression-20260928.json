@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_recovery",
+        "pytest_return_code": 0,
+        "scenario": "recovery"
+      },
+      "duration_ms": 4728.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_recovery::test_system_recovers_across_database_and_redis_failure",
+      "status": "passed"
+    }
+  ],
+  "run_id": "recovery-regression-20260928",
+  "started_at": "2026-09-28T19:56:01.534775+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 0,
+    "total": 1
+  }
+}

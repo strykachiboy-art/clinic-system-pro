@@ -156,6 +156,7 @@ def test_scenario_test_paths_all_excludes_sync():
         "test_audit_resilience.py",
         "test_data_integrity.py",
         "test_idempotency_recovery.py",
+        "test_recovery.py",
     }
 
     assert (
