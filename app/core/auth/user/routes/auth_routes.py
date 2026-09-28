@@ -40,6 +40,16 @@ auth_bp = Blueprint(
 )
 
 
+def _safe_validation_errors(exc):
+    return [
+        {
+            "type": error.get("type"),
+            "loc": list(error.get("loc", ())),
+            "msg": error.get("msg"),
+        }
+        for error in exc.errors()
+    ]
+
 @auth_bp.post("/register")
 def register():
     payload = request.get_json(
@@ -55,7 +65,7 @@ def register():
             {
                 "success": False,
                 "error": "Validation failed",
-                "details": exc.errors(),
+"details": _safe_validation_errors(exc),
             }
         ), 400
 
@@ -109,7 +119,7 @@ def login():
             {
                 "success": False,
                 "error": "Validation failed",
-                "details": exc.errors(),
+"details": _safe_validation_errors(exc),
             }
         ), 400
 
@@ -194,7 +204,7 @@ def google_callback():
             {
                 "success": False,
                 "error": "Validation failed",
-                "details": exc.errors(),
+"details": _safe_validation_errors(exc),
             }
         ), 400
 

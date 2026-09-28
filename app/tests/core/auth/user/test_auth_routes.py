@@ -1642,3 +1642,134 @@ class TestAuthRouteRegistration:
         )
 
         assert method in rule.methods
+# ============================================================================
+# CREDENTIAL / SECRET EXPOSURE
+# ============================================================================
+
+
+def test_register_validation_does_not_echo_password(
+    client,
+    monkeypatch,
+):
+    service = Mock()
+
+    monkeypatch.setattr(
+        auth_routes,
+        "register_user",
+        service,
+    )
+
+    secret_password = "S" * 129
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "credential-test@example.com",
+            "password": secret_password,
+        },
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert secret_password not in response.get_data(
+        as_text=True,
+    )
+
+    for error in body["details"]:
+        assert "input" not in error
+        assert "ctx" not in error
+
+    service.assert_not_called()
+
+
+def test_login_validation_does_not_echo_password(
+    client,
+    monkeypatch,
+):
+    service = Mock()
+
+    monkeypatch.setattr(
+        auth_routes,
+        "authenticate_user",
+        service,
+    )
+
+    secret_password = "L" * 129
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "admin@test.com",
+            "password": secret_password,
+        },
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert secret_password not in response.get_data(
+        as_text=True,
+    )
+
+    for error in body["details"]:
+        assert "input" not in error
+        assert "ctx" not in error
+
+    service.assert_not_called()
+
+
+def test_google_callback_validation_does_not_echo_oauth_code(
+    client,
+    monkeypatch,
+):
+    validate_state = Mock()
+    authenticate = Mock()
+
+    monkeypatch.setattr(
+        auth_routes,
+        "validate_google_oauth_state",
+        validate_state,
+    )
+
+    monkeypatch.setattr(
+        auth_routes,
+        "authenticate_google_code",
+        authenticate,
+    )
+
+    secret_code = "C" * 4097
+
+    response = client.get(
+        "/api/v1/auth/google/callback",
+        query_string={
+            "code": secret_code,
+            "state": "valid-state",
+        },
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == "Validation failed"
+    assert "details" in body
+    assert secret_code not in response.get_data(
+        as_text=True,
+    )
+
+    for error in body["details"]:
+        assert "input" not in error
+        assert "ctx" not in error
+
+    validate_state.assert_not_called()
+    authenticate.assert_not_called()

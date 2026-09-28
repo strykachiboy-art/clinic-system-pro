@@ -43,6 +43,34 @@ def create_app(config_name=None):
         config_by_name[config_name]
     )
 
+    if config_name == "production":
+        secret_key = os.environ.get(
+            "SECRET_KEY"
+        )
+
+        jwt_secret_key = os.environ.get(
+            "JWT_SECRET_KEY"
+        )
+
+        if (
+            not secret_key
+            or not secret_key.strip()
+        ):
+            raise RuntimeError(
+                "Production SECRET_KEY is not configured"
+            )
+
+        if (
+            not jwt_secret_key
+            or not jwt_secret_key.strip()
+        ):
+            raise RuntimeError(
+                "Production JWT_SECRET_KEY is not configured"
+            )
+
+        app.config["SECRET_KEY"] = secret_key
+        app.config["JWT_SECRET_KEY"] = jwt_secret_key
+
     init_extensions(app)
 
     init_celery_metrics(celery)
