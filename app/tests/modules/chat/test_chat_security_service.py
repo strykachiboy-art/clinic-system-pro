@@ -586,3 +586,145 @@ def test_participant_must_belong_to_conversation(
             participant,
             conversation_two,
         )
+# ============================================================================
+# ATTACHMENT ACCESS SECURITY
+# ============================================================================
+
+
+def test_user_can_access_attachment_in_own_conversation(
+    db,
+    make_user,
+    make_clinic,
+):
+    clinic = make_clinic()
+
+    user = make_user(
+        clinic=clinic,
+    )
+
+    conversation = Conversation(
+        clinic_id=clinic.id,
+        created_by_id=user.id,
+    )
+
+    db.session.add(
+        conversation
+    )
+    db.session.flush()
+
+    make_participant(
+        clinic,
+        conversation,
+        user,
+    )
+
+    message = make_message(
+        clinic,
+        conversation,
+        user,
+    )
+
+    result = (
+        ChatSecurityService
+        .ensure_user_can_access_attachment(
+            user.id,
+            message.id,
+        )
+    )
+
+    assert result.id == message.id
+
+
+def test_user_cannot_access_attachment_from_other_clinic(
+    db,
+    make_user,
+    make_clinic,
+):
+    clinic_one = make_clinic()
+    clinic_two = make_clinic()
+
+    user_one = make_user(
+        clinic=clinic_one,
+    )
+
+    user_two = make_user(
+        clinic=clinic_two,
+    )
+
+    conversation = Conversation(
+        clinic_id=clinic_two.id,
+        created_by_id=user_two.id,
+    )
+
+    db.session.add(
+        conversation
+    )
+    db.session.flush()
+
+    make_participant(
+        clinic_two,
+        conversation,
+        user_two,
+    )
+
+    message = make_message(
+        clinic_two,
+        conversation,
+        user_two,
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Resource not found",
+    ):
+        ChatSecurityService.ensure_user_can_access_attachment(
+            user_one.id,
+            message.id,
+        )
+
+
+def test_user_cannot_access_attachment_without_participation(
+    db,
+    make_user,
+    make_clinic,
+):
+    clinic = make_clinic()
+
+    owner = make_user(
+        clinic=clinic,
+    )
+
+    other_user = make_user(
+        clinic=clinic,
+    )
+
+    conversation = Conversation(
+        clinic_id=clinic.id,
+        created_by_id=owner.id,
+    )
+
+    db.session.add(
+        conversation
+    )
+    db.session.flush()
+
+    make_participant(
+        clinic,
+        conversation,
+        owner,
+    )
+
+    message = make_message(
+        clinic,
+        conversation,
+        owner,
+    )
+
+    with pytest.raises(
+        NotFoundError,
+        match="Conversation participant not found",
+    ):
+        ChatSecurityService.ensure_user_can_access_attachment(
+            other_user.id,
+            message.id,
+        )
