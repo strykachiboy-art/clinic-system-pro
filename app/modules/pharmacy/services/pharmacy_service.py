@@ -814,7 +814,7 @@ def create_drug(
         action=AuditAction.CREATE,
         entity_type="Drug",
         entity_id=drug.id,
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "name": drug.name,
             "is_controlled": drug.is_controlled,
@@ -955,7 +955,7 @@ def update_drug(
         action=AuditAction.UPDATE,
         entity_type="Drug",
         entity_id=drug.id,
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "updated_fields": list(
                 updates.keys()
@@ -1010,7 +1010,7 @@ def set_drug_active_status(
         action=AuditAction.STATUS_CHANGE,
         entity_type="Drug",
         entity_id=drug.id,
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "previous_status": previous_status,
             "new_status": is_active,
@@ -1345,7 +1345,7 @@ def add_batch(
         action=AuditAction.CREATE,
         entity_type="DrugBatch",
         entity_id=batch.id,
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "drug_id": drug_id,
             "batch_number": batch.batch_number,
@@ -1932,7 +1932,7 @@ def create_dispense_record(
             if staff.user is not None
             else None
         ),
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "prescription_id": prescription.id,
             "dispensed_by_id": staff.id,
@@ -2240,7 +2240,7 @@ def cancel_dispense_record(
         action=AuditAction.STATUS_CHANGE,
         entity_type="DispenseRecord",
         entity_id=record.id,
-        details={
+        new_value={
             "clinic_id": clinic_id,
             "prescription_id": prescription.id,
             "previous_status": previous_status,

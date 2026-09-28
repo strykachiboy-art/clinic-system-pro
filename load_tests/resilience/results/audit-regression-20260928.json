@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_audit_resilience",
+        "pytest_return_code": 0,
+        "scenario": "audit"
+      },
+      "duration_ms": 9785.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_audit_resilience::test_patient_and_audit_rollback_together",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_audit_resilience",
+        "pytest_return_code": 0,
+        "scenario": "audit"
+      },
+      "duration_ms": 1358.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_audit_resilience::test_audit_patient_write_and_read_round_trip",
+      "status": "passed"
+    }
+  ],
+  "run_id": "audit-regression-20260928",
+  "started_at": "2026-09-28T18:16:18.954816+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 2
+  }
+}

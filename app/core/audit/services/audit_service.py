@@ -2,20 +2,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.extensions import db
-
 from app.core.audit.models.audit_model import AuditLog
 from app.core.audit.services.audit_writer import write_audit_log
 from app.core.enums.audit_enums import AuditAction
-from app.core.exceptions import (
-    NotFoundError,
-    ValidationError,
-)
+from app.core.exceptions import ValidationError
 
 
-DEFAULT_PAGE = 1
-DEFAULT_PER_PAGE = 20
-MAX_PER_PAGE = 100
 MAX_IP_ADDRESS_LENGTH = 45
 
 
@@ -104,39 +96,6 @@ def _normalize_ip_address(
     )
 
 
-def _validate_pagination(
-    page: int,
-    per_page: int,
-):
-    """
-    Validate and normalize pagination parameters.
-    """
-    if (
-        isinstance(page, bool)
-        or not isinstance(page, int)
-        or page <= 0
-    ):
-        raise ValidationError(
-            "Page must be a positive integer"
-        )
-
-    if (
-        isinstance(per_page, bool)
-        or not isinstance(per_page, int)
-        or per_page <= 0
-    ):
-        raise ValidationError(
-            "Per page must be a positive integer"
-        )
-
-    if per_page > MAX_PER_PAGE:
-        raise ValidationError(
-            f"Per page cannot exceed {MAX_PER_PAGE}"
-        )
-
-    return page, per_page
-
-
 def create_audit_log(
     *,
     action: AuditAction,
@@ -147,28 +106,12 @@ def create_audit_log(
     new_value=None,
     user_id: Optional[int] = None,
     clinic_id: Optional[int] = None,
-    resource_type: Optional[str] = None,
-    resource_id: Optional[int] = None,
-    details=None,
     ip_address: Optional[str] = None,
 ) -> AuditLog:
-
     action = _normalize_action(action)
 
-    resolved_entity_type = (
-        entity_type
-        if entity_type is not None
-        else resource_type
-    )
-
-    resolved_entity_id = (
-        entity_id
-        if entity_id is not None
-        else resource_id
-    )
-
     resolved_entity_type = _normalize_optional_string(
-        resolved_entity_type,
+        entity_type,
         "Audit entity type",
         max_length=80,
     )
@@ -179,7 +122,7 @@ def create_audit_log(
         )
 
     _validate_positive_id(
-        resolved_entity_id,
+        entity_id,
         "Audit entity ID",
     )
 
@@ -206,119 +149,17 @@ def create_audit_log(
     return write_audit_log(
         action=action,
         entity_type=resolved_entity_type,
-        entity_id=resolved_entity_id,
+        entity_id=entity_id,
         description=description,
         old_value=old_value,
-        new_value=(
-            new_value
-            if new_value is not None
-            else details
-        ),
+        new_value=new_value,
         user_id=user_id,
         clinic_id=clinic_id,
         ip_address=ip_address,
     )
 
 
-def list_audit_logs(
-    *,
-    user_id: Optional[int] = None,
-    action: Optional[AuditAction] = None,
-    entity_type: Optional[str] = None,
-    entity_id: Optional[int] = None,
-    page: int = DEFAULT_PAGE,
-    per_page: int = DEFAULT_PER_PAGE,
-):
-    """
-    Return paginated audit logs.
-
-    All filters are optional.
-
-    Results are ordered newest-first using both
-    created_at and id for deterministic pagination.
-    """
-
-    if user_id is not None:
-        _validate_positive_id(
-            user_id,
-            "User ID",
-        )
-
-    if entity_id is not None:
-        _validate_positive_id(
-            entity_id,
-            "Entity ID",
-        )
-
-    page, per_page = _validate_pagination(
-        page,
-        per_page,
-    )
-
-    if action is not None:
-        action = _normalize_action(action)
-
-    entity_type = _normalize_optional_string(
-        entity_type,
-        "Entity type",
-        max_length=80,
-    )
-
-    query = AuditLog.query
-
-    if user_id is not None:
-        query = query.filter(
-            AuditLog.user_id == user_id
-        )
-
-    if action is not None:
-        query = query.filter(
-            AuditLog.action == action
-        )
-
-    if entity_type is not None:
-        query = query.filter(
-            AuditLog.entity_type == entity_type
-        )
-
-    if entity_id is not None:
-        query = query.filter(
-            AuditLog.entity_id == entity_id
-        )
-
-    return (
-        query
-        .order_by(
-            AuditLog.created_at.desc(),
-            AuditLog.id.desc(),
-        )
-        .paginate(
-            page=page,
-            per_page=per_page,
-            error_out=False,
-        )
-    )
 
 
-def get_audit_log_by_id(
-    log_id: int,
-) -> AuditLog:
-    """
-    Return one audit log by primary key.
-    """
-    _validate_positive_id(
-        log_id,
-        "Audit log ID",
-    )
 
-    log = db.session.get(
-        AuditLog,
-        log_id,
-    )
 
-    if log is None:
-        raise NotFoundError(
-            f"Audit log {log_id} not found"
-        )
-
-    return log

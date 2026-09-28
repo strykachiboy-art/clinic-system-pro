@@ -48,6 +48,9 @@ SCENARIO_TEST_FILES = {
     "redis_celery": (
         "test_redis_celery_resilience.py"
     ),
+    "audit": (
+        "test_audit_resilience.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(

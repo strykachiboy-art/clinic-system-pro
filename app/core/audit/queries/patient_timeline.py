@@ -4,16 +4,22 @@ from typing import Optional
 
 from app.extensions import db
 
+from app.core.audit.models.audit_model import AuditLog
 from app.core.audit.queries.audit_queries import (
     build_audit_query,
 )
 from app.core.enums.audit_enums import AuditAction
 
 
-PATIENT_ENTITY_TYPE = "Patient"
+PATIENT_ENTITY_TYPES = frozenset(
+    {
+        "Patient",
+        "patient",
+    }
+)
 
 
-def get_patient_timeline(
+def _build_patient_timeline_query(
     *,
     actor_role,
     actor_clinic_id: Optional[int],
@@ -26,8 +32,30 @@ def get_patient_timeline(
         actor_clinic_id=actor_clinic_id,
         target_clinic_id=target_clinic_id,
         action=action,
-        entity_type=PATIENT_ENTITY_TYPE,
         entity_id=patient_id,
+    )
+
+    return statement.where(
+        AuditLog.entity_type.in_(
+            PATIENT_ENTITY_TYPES
+        )
+    )
+
+
+def get_patient_timeline(
+    *,
+    actor_role,
+    actor_clinic_id: Optional[int],
+    patient_id: int,
+    target_clinic_id: Optional[int] = None,
+    action: Optional[AuditAction] = None,
+):
+    statement = _build_patient_timeline_query(
+        actor_role=actor_role,
+        actor_clinic_id=actor_clinic_id,
+        target_clinic_id=target_clinic_id,
+        patient_id=patient_id,
+        action=action,
     )
 
     return db.session.execute(
@@ -45,13 +73,12 @@ def get_patient_timeline_page(
     page: int = 1,
     per_page: int = 20,
 ):
-    statement = build_audit_query(
+    statement = _build_patient_timeline_query(
         actor_role=actor_role,
         actor_clinic_id=actor_clinic_id,
         target_clinic_id=target_clinic_id,
+        patient_id=patient_id,
         action=action,
-        entity_type=PATIENT_ENTITY_TYPE,
-        entity_id=patient_id,
     )
 
     return db.paginate(
@@ -70,13 +97,12 @@ def count_patient_timeline(
     target_clinic_id: Optional[int] = None,
     action: Optional[AuditAction] = None,
 ) -> int:
-    statement = build_audit_query(
+    statement = _build_patient_timeline_query(
         actor_role=actor_role,
         actor_clinic_id=actor_clinic_id,
         target_clinic_id=target_clinic_id,
+        patient_id=patient_id,
         action=action,
-        entity_type=PATIENT_ENTITY_TYPE,
-        entity_id=patient_id,
     ).order_by(None)
 
     count_statement = db.select(

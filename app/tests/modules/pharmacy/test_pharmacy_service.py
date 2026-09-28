@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -3108,4 +3108,4 @@ def test_cancel_dispense_record_writes_audit_log(
     assert kwargs["action"] == AuditAction.STATUS_CHANGE
     assert kwargs["entity_type"] == "DispenseRecord"
     assert kwargs["entity_id"] == record.id
-    assert kwargs["details"]["new_status"] == "cancelled"
+    assert kwargs["new_value"]["new_status"] == "cancelled"

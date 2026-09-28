@@ -153,6 +153,7 @@ def test_scenario_test_paths_all_excludes_sync():
         "test_auth_resilience.py",
         "test_chat_resilience.py",
         "test_redis_celery_resilience.py",
+        "test_audit_resilience.py",
     }
 
     assert (

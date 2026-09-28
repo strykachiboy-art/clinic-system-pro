@@ -162,16 +162,16 @@ def _audit(
     *,
     actor_id: Optional[int],
     action: AuditAction,
-    resource_type: str,
-    resource_id: int,
+    entity_type: str,
+    entity_id: int,
     description: str,
     changes: Optional[dict] = None,
 ) -> None:
     create_audit_log(
         user_id=actor_id,
         action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
         description=description,
         new_value=_serialize_audit_changes(
             changes or {}
@@ -621,8 +621,8 @@ def create_patient(
     _audit(
         actor_id=actor_id,
         action=AuditAction.CREATE,
-        resource_type="patient",
-        resource_id=patient.id,
+        entity_type="patient",
+        entity_id=patient.id,
         description=(
             f"Created patient {patient.id} "
             f"in clinic {clinic_id}"
@@ -710,8 +710,8 @@ def update_patient(
         _audit(
             actor_id=actor_id,
             action=AuditAction.UPDATE,
-            resource_type="patient",
-            resource_id=patient.id,
+            entity_type="patient",
+            entity_id=patient.id,
             description=(
                 f"Updated patient {patient.id} "
                 f"in clinic {patient.clinic_id}"
@@ -755,8 +755,8 @@ def set_active_status(
     _audit(
         actor_id=actor_id,
         action=AuditAction.UPDATE,
-        resource_type="patient",
-        resource_id=patient.id,
+        entity_type="patient",
+        entity_id=patient.id,
         description=(
             f"Changed patient {patient.id} active status "
             f"in clinic {patient.clinic_id}"
@@ -870,8 +870,8 @@ def add_family_member(
     _audit(
         actor_id=actor_id,
         action=AuditAction.CREATE,
-        resource_type="patient_family_member",
-        resource_id=member.id,
+        entity_type="patient_family_member",
+        entity_id=member.id,
         description=(
             f"Added family member {member.id} "
             f"to patient {patient.id}"
@@ -959,8 +959,8 @@ def update_family_member(
         _audit(
             actor_id=actor_id,
             action=AuditAction.UPDATE,
-            resource_type="patient_family_member",
-            resource_id=member.id,
+            entity_type="patient_family_member",
+            entity_id=member.id,
             description=(
                 f"Updated family member {member.id} "
                 f"for patient {patient.id}"
@@ -997,8 +997,8 @@ def remove_family_member(
     _audit(
         actor_id=actor_id,
         action=AuditAction.DELETE,
-        resource_type="patient_family_member",
-        resource_id=member.id,
+        entity_type="patient_family_member",
+        entity_id=member.id,
         description=(
             f"Removed family member {member.id} "
             f"from patient {patient.id}"
@@ -1150,8 +1150,8 @@ def add_insurance(
     _audit(
         actor_id=actor_id,
         action=AuditAction.CREATE,
-        resource_type="patient_insurance",
-        resource_id=insurance.id,
+        entity_type="patient_insurance",
+        entity_id=insurance.id,
         description=(
             f"Added insurance {insurance.id} "
             f"to patient {patient.id}"
@@ -1285,8 +1285,8 @@ def update_insurance(
         _audit(
             actor_id=actor_id,
             action=AuditAction.UPDATE,
-            resource_type="patient_insurance",
-            resource_id=insurance.id,
+            entity_type="patient_insurance",
+            entity_id=insurance.id,
             description=(
                 f"Updated insurance {insurance.id} "
                 f"for patient {patient.id}"
@@ -1451,8 +1451,8 @@ def record_vitals(
     _audit(
         actor_id=actor_id,
         action=AuditAction.CREATE,
-        resource_type="patient_vitals",
-        resource_id=vitals.id,
+        entity_type="patient_vitals",
+        entity_id=vitals.id,
         description=(
             f"Recorded vitals {vitals.id} "
             f"for patient {patient.id}"

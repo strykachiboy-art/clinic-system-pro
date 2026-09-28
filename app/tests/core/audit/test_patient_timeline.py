@@ -249,3 +249,38 @@ def test_non_admin_cannot_read_patient_timeline(
             actor_clinic_id=1,
             patient_id=100,
         )
+        
+def test_patient_timeline_reads_production_patient_audit_writer(
+    db_session,
+    clinic,
+    user,
+):
+    from app.core.audit.queries.patient_timeline import (
+        get_patient_timeline,
+    )
+    from app.modules.patient.services.patient_service import (
+        create_patient,
+    )
+
+    patient = create_patient(
+        clinic.id,
+        {
+            "first_name": "Timeline",
+            "last_name": "Integration",
+            "email": "timeline-integration@test.com",
+        },
+        actor_id=user.id,
+    )
+
+    result = get_patient_timeline(
+        actor_role=Role.ADMIN,
+        actor_clinic_id=clinic.id,
+        patient_id=patient.id,
+    )
+
+    assert len(result) == 1
+    assert result[0].entity_id == patient.id
+    assert result[0].entity_type == "patient"
+    assert result[0].user_id == user.id
+    assert result[0].clinic_id == clinic.id
+    assert result[0].action == AuditAction.CREATE
