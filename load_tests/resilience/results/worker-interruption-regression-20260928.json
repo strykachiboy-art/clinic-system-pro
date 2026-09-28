@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_worker_interruption",
+        "pytest_return_code": 0,
+        "scenario": "worker_interruption"
+      },
+      "duration_ms": 16618.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_worker_interruption::test_worker_interruption_recovers_stale_event_for_retry",
+      "status": "passed"
+    }
+  ],
+  "run_id": "worker-interruption-regression-20260928",
+  "started_at": "2026-09-28T20:33:15.221954+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 0,
+    "total": 1
+  }
+}

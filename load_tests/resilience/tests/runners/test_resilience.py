@@ -159,6 +159,10 @@ def test_scenario_test_paths_all_excludes_sync():
         "test_recovery.py",
         "test_security_during_failure.py",
         "test_tenant_isolation_during_failure.py",
+        "test_dependency_failure.py",
+        "test_transaction_recovery.py",
+        "test_transaction_resilience.py",
+        "test_worker_interruption.py",
     }
 
     assert (

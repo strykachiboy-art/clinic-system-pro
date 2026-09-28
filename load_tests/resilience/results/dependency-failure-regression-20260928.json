@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_dependency_failure",
+        "pytest_return_code": 0,
+        "scenario": "dependency_failure"
+      },
+      "duration_ms": 4211.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_dependency_failure::test_postgres_commit_timeout_rolls_back_patient_creation",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_dependency_failure",
+        "pytest_return_code": 0,
+        "scenario": "dependency_failure"
+      },
+      "duration_ms": 840.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_dependency_failure::test_postgres_connection_failure_rolls_back_and_recovers",
+      "status": "passed"
+    }
+  ],
+  "run_id": "dependency-failure-regression-20260928",
+  "started_at": "2026-09-28T20:28:01.744761+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 2
+  }
+}

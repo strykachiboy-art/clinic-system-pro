@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_recovery",
+        "pytest_return_code": 0,
+        "scenario": "transaction_recovery"
+      },
+      "duration_ms": 5407.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_recovery::test_failed_patient_transaction_recovers_for_retry",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_recovery",
+        "pytest_return_code": 0,
+        "scenario": "transaction_recovery"
+      },
+      "duration_ms": 1100.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_recovery::test_failed_family_member_transaction_recovers_for_retry",
+      "status": "passed"
+    }
+  ],
+  "run_id": "transaction-recovery-regression-20260928",
+  "started_at": "2026-09-28T20:28:19.252485+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 2
+  }
+}

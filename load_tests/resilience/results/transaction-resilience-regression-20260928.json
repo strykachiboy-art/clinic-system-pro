@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_resilience",
+        "pytest_return_code": 0,
+        "scenario": "transaction_resilience"
+      },
+      "duration_ms": 5413.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_resilience::test_failure_after_patient_flush_rolls_back_patient_and_audit",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_transaction_resilience",
+        "pytest_return_code": 0,
+        "scenario": "transaction_resilience"
+      },
+      "duration_ms": 875.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_transaction_resilience::test_failure_after_family_member_flush_does_not_leave_orphan_record",
+      "status": "passed"
+    }
+  ],
+  "run_id": "transaction-resilience-regression-20260928",
+  "started_at": "2026-09-28T20:28:35.627328+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 2
+  }
+}

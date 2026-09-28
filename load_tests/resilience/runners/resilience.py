@@ -66,6 +66,18 @@ SCENARIO_TEST_FILES = {
     "tenant_isolation_during_failure": (
         "test_tenant_isolation_during_failure.py"
     ),
+    "dependency_failure": (
+        "test_dependency_failure.py"
+    ),
+    "transaction_recovery": (
+        "test_transaction_recovery.py"
+    ),
+    "transaction_resilience": (
+        "test_transaction_resilience.py"
+    ),
+    "worker_interruption": (
+        "test_worker_interruption.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(
