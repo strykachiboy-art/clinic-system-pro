@@ -54,6 +54,9 @@ SCENARIO_TEST_FILES = {
     "data_integrity": (
         "test_data_integrity.py"
     ),
+    "idempotency_recovery": (
+        "test_idempotency_recovery.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(

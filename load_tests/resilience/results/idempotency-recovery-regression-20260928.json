@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_idempotency_recovery",
+        "pytest_return_code": 0,
+        "scenario": "idempotency_recovery"
+      },
+      "duration_ms": 4658.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_idempotency_recovery::test_duplicate_activation_is_idempotent",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_idempotency_recovery",
+        "pytest_return_code": 0,
+        "scenario": "idempotency_recovery"
+      },
+      "duration_ms": 1268.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_idempotency_recovery::test_failed_deactivation_recovers_without_duplicate_transition",
+      "status": "passed"
+    }
+  ],
+  "run_id": "idempotency-recovery-regression-20260928",
+  "started_at": "2026-09-28T19:52:02.136507+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0,
+    "total": 2
+  }
+}
