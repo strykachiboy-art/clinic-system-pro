@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "security_during_failure"
+      },
+      "duration_ms": 5121.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_failed_privileged_role_change_fails_closed",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "security_during_failure"
+      },
+      "duration_ms": 2037.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_authorization_recovers_without_partial_role_change",
+      "status": "passed"
+    },
+    {
+      "details": {
+        "classname": "load_tests.resilience.tests.scenarios.test_security_during_failure",
+        "pytest_return_code": 0,
+        "scenario": "security_during_failure"
+      },
+      "duration_ms": 3674.0,
+      "message": null,
+      "name": "load_tests.resilience.tests.scenarios.test_security_during_failure::test_non_super_admin_cannot_bypass_authorization_after_failure",
+      "status": "passed"
+    }
+  ],
+  "run_id": "security-during-failure-regression-20260928",
+  "started_at": "2026-09-28T20:03:06.245667+00:00",
+  "summary": {
+    "failed": 0,
+    "passed": 3,
+    "skipped": 0,
+    "total": 3
+  }
+}

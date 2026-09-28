@@ -60,6 +60,9 @@ SCENARIO_TEST_FILES = {
     "recovery": (
         "test_recovery.py"
     ),
+    "security_during_failure": (
+        "test_security_during_failure.py"
+    ),
 }
 
 RUN_ID_PATTERN = re.compile(
