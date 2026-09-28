@@ -1,18 +1,34 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity
+from pydantic import ValidationError as PydanticValidationError
 
-from app.core.audit.schema.audit_response import (
-    AuditLogResponseSchema,
+from app.core.auth.user.models.user_model import User
+from app.core.audit.filters.audit_filters import (
+    split_audit_filters,
 )
-from app.core.audit.services.audit_service import (
-    get_audit_log_by_id,
+from app.core.audit.queries.audit_queries import (
+    get_audit_log,
     list_audit_logs,
 )
-from app.core.enums.audit_enums import AuditAction
+from app.core.audit.schema.audit_filter import (
+    AuditLogFilterSchema,
+)
+from app.core.audit.security.audit_permissions import (
+    can_read_audit_logs,
+)
+from app.core.audit.serialization.audit_serializer import (
+    serialize_audit_log,
+    serialize_audit_page,
+)
 from app.core.enums.role_enums import Role
-from app.core.exceptions import ValidationError
+from app.core.exceptions import (
+    NotFoundError,
+    ValidationError,
+)
 from app.core.utils.decorators import role_required
+from app.extensions import db
 
 
 audit_bp = Blueprint(
@@ -22,153 +38,154 @@ audit_bp = Blueprint(
 )
 
 
-def _get_int_query_param(
-    name: str,
-    *,
-    default: int | None = None,
-) -> int | None:
-    """
-    Parse an integer query parameter without silently converting malformed
-    values to None.
+AUDIT_READ_ROLES = (
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+)
 
-    Examples:
-        ?page=2     -> 2
-        ?page=abc   -> ValidationError
-        missing     -> default
-    """
 
-    raw_value = request.args.get(name)
+def _get_current_user() -> User:
+    identity = get_jwt_identity()
 
-    if raw_value is None:
-        return default
-
-    raw_value = raw_value.strip()
-
-    if not raw_value:
+    if isinstance(identity, bool):
         raise ValidationError(
-            f"{name} must be an integer"
+            "Invalid authentication identity"
         )
 
     try:
-        return int(raw_value)
-    except (TypeError, ValueError):
+        user_id = int(identity)
+    except (TypeError, ValueError) as exc:
         raise ValidationError(
-            f"{name} must be an integer"
+            "Invalid authentication identity"
+        ) from exc
+
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if user is None:
+        raise ValidationError(
+            "Authenticated user could not be resolved"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "User account is inactive"
+        )
+
+    return user
+
+
+def _coerce_query_parameters() -> dict:
+    params = request.args.to_dict(
+        flat=True
+    )
+
+    for field_name in (
+        "user_id",
+        "entity_id",
+        "page",
+        "per_page",
+    ):
+        if field_name not in params:
+            continue
+
+        raw_value = params[field_name]
+
+        try:
+            params[field_name] = int(
+                raw_value
+            )
+        except (TypeError, ValueError):
+            pass
+
+    return params
+
+
+def _get_filters() -> AuditLogFilterSchema:
+    return AuditLogFilterSchema.model_validate(
+        _coerce_query_parameters()
+    )
+
+
+def _authorize_audit_reader(user: User) -> None:
+    if not can_read_audit_logs(
+        actor_role=user.role,
+        actor_clinic_id=user.clinic_id,
+        target_clinic_id=user.clinic_id,
+    ):
+        raise ValidationError(
+            "Insufficient audit permissions"
+        )
+
+    if (
+        user.role is Role.ADMIN
+        and user.clinic_id is None
+    ):
+        raise ValidationError(
+            "Audit administrator must belong to a clinic"
         )
 
 
 @audit_bp.get("")
-@role_required(Role.ADMIN)
+@role_required(*AUDIT_READ_ROLES)
 def get_audit_logs():
-    """
-    Return paginated audit logs.
+    user = _get_current_user()
 
-    Supported query parameters:
-        user_id
-        action
-        entity_type
-        entity_id
-        page
-        per_page
-    """
+    _authorize_audit_reader(user)
 
-    user_id = _get_int_query_param(
-        "user_id",
+    filters = _get_filters()
+
+    query_filters, pagination = split_audit_filters(
+        filters
     )
 
-    entity_id = _get_int_query_param(
-        "entity_id",
+    result = list_audit_logs(
+        actor_role=user.role,
+        actor_clinic_id=user.clinic_id,
+        **query_filters,
+        **pagination,
     )
-
-    page = _get_int_query_param(
-        "page",
-        default=1,
-    )
-
-    per_page = _get_int_query_param(
-        "per_page",
-        default=20,
-    )
-
-    action_value = request.args.get(
-        "action",
-    )
-
-    action = None
-
-    if action_value is not None:
-        action_value = action_value.strip()
-
-        if not action_value:
-            raise ValidationError(
-                "Action cannot be empty"
-            )
-
-        try:
-            action = AuditAction(
-                action_value
-            )
-        except ValueError:
-            raise ValidationError(
-                "Invalid audit action"
-            )
-
-    entity_type = request.args.get(
-        "entity_type",
-    )
-
-    pagination = list_audit_logs(
-        user_id=user_id,
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        page=page,
-        per_page=per_page,
-    )
-
-    response_data = [
-        AuditLogResponseSchema
-        .model_validate(log)
-        .model_dump(mode="json")
-        for log in pagination.items
-    ]
 
     return jsonify(
         {
             "success": True,
-            "data": {
-                "items": response_data,
-                "total": pagination.total,
-                "page": pagination.page,
-                "per_page": pagination.per_page,
-                "pages": pagination.pages,
-                "has_next": pagination.has_next,
-                "has_prev": pagination.has_prev,
-            },
+            "data": serialize_audit_page(
+                result
+            ),
         }
     ), 200
 
 
 @audit_bp.get("/<int:log_id>")
-@role_required(Role.ADMIN)
-def get_audit_log(log_id: int):
-    """
-    Return a single audit log by ID.
-    """
+@role_required(*AUDIT_READ_ROLES)
+def get_single_audit_log(log_id: int):
+    user = _get_current_user()
 
-    log = get_audit_log_by_id(
-        log_id,
+    _authorize_audit_reader(user)
+
+    audit_log = get_audit_log(
+        audit_log_id=log_id,
+        actor_role=user.role,
+        actor_clinic_id=user.clinic_id,
     )
 
-    result = (
-        AuditLogResponseSchema
-        .model_validate(log)
-        .model_dump(mode="json")
-    )
+    if audit_log is None:
+        raise NotFoundError(
+            "Audit log not found"
+        )
 
     return jsonify(
         {
             "success": True,
-            "data": result,
+            "data": serialize_audit_log(
+                audit_log
+            ),
         }
     ), 200
