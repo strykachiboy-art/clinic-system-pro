@@ -6,14 +6,10 @@ from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import NotFoundError, ValidationError
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
 def make_audit_log(
     *,
     user_id=1,
+    clinic_id=None,
     action=AuditAction.CREATE,
     entity_type="Patient",
     entity_id=100,
@@ -24,6 +20,7 @@ def make_audit_log(
 ):
     return AuditLog(
         user_id=user_id,
+        clinic_id=clinic_id,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -34,11 +31,6 @@ def make_audit_log(
     )
 
 
-# ============================================================================
-# CREATE
-# ============================================================================
-
-
 def test_create_audit_log_creates_record(db_session):
     log = service.create_audit_log(
         action=AuditAction.CREATE,
@@ -46,6 +38,7 @@ def test_create_audit_log_creates_record(db_session):
         entity_id=100,
         description="Patient created",
         user_id=1,
+        clinic_id=1,
         new_value={"status": "active"},
     )
 
@@ -53,6 +46,7 @@ def test_create_audit_log_creates_record(db_session):
 
     assert log.id is not None
     assert log.user_id == 1
+    assert log.clinic_id == 1
     assert log.action == AuditAction.CREATE
     assert log.entity_type == "Patient"
     assert log.entity_id == 100
@@ -117,11 +111,6 @@ def test_create_audit_log_entity_arguments_take_precedence(
 
     assert log.entity_type == "Patient"
     assert log.entity_id == 100
-
-
-# ============================================================================
-# ENTITY VALIDATION
-# ============================================================================
 
 
 @pytest.mark.parametrize(
@@ -197,11 +186,6 @@ def test_create_audit_log_strips_entity_type(db_session):
     assert log.entity_type == "Patient"
 
 
-# ============================================================================
-# OPTIONAL VALUES
-# ============================================================================
-
-
 def test_create_audit_log_allows_missing_user_id(
     db_session,
 ):
@@ -239,6 +223,46 @@ def test_create_audit_log_rejects_invalid_user_id(
             entity_id=100,
             user_id=user_id,
         )
+
+
+@pytest.mark.parametrize(
+    "clinic_id",
+    [
+        0,
+        -1,
+        True,
+        False,
+        "1",
+    ],
+)
+def test_create_audit_log_rejects_invalid_clinic_id(
+    clinic_id,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Clinic ID must be a positive integer",
+    ):
+        service.create_audit_log(
+            action=AuditAction.CREATE,
+            entity_type="Patient",
+            entity_id=100,
+            clinic_id=clinic_id,
+        )
+
+
+def test_create_audit_log_stores_clinic_id(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.CREATE,
+        entity_type="Patient",
+        entity_id=100,
+        clinic_id=1,
+    )
+
+    db_session.flush()
+
+    assert log.clinic_id == 1
 
 
 def test_create_audit_log_normalizes_description(
@@ -282,11 +306,6 @@ def test_create_audit_log_rejects_long_description():
             entity_id=100,
             description="A" * 256,
         )
-
-
-# ============================================================================
-# IP ADDRESS
-# ============================================================================
 
 
 def test_create_audit_log_stores_ip_address(
@@ -386,11 +405,6 @@ def test_create_audit_log_rejects_ip_address_over_45_characters():
         )
 
 
-# ============================================================================
-# AUDIT VALUES
-# ============================================================================
-
-
 def test_create_audit_log_preserves_old_and_new_values(
     db_session,
 ):
@@ -416,6 +430,46 @@ def test_create_audit_log_preserves_old_and_new_values(
 
     assert log.old_value == old_value
     assert log.new_value == new_value
+
+
+def test_create_audit_log_redacts_sensitive_values(
+    db_session,
+):
+    log = service.create_audit_log(
+        action=AuditAction.UPDATE,
+        entity_type="User",
+        entity_id=100,
+        old_value={
+            "password": "old-secret",
+            "profile": {
+                "status": "active",
+            },
+        },
+        new_value={
+            "password": "new-secret",
+            "access_token": "secret-token",
+            "profile": {
+                "status": "disabled",
+            },
+        },
+    )
+
+    db_session.flush()
+
+    assert log.old_value == {
+        "password": "[REDACTED]",
+        "profile": {
+            "status": "active",
+        },
+    }
+
+    assert log.new_value == {
+        "password": "[REDACTED]",
+        "access_token": "[REDACTED]",
+        "profile": {
+            "status": "disabled",
+        },
+    }
 
 
 def test_new_value_takes_precedence_over_details(
@@ -451,11 +505,6 @@ def test_details_are_used_when_new_value_missing(
     assert log.new_value == {
         "status": "active",
     }
-
-
-# ============================================================================
-# LIST
-# ============================================================================
 
 
 def test_list_audit_logs_returns_paginated_result(
@@ -757,11 +806,6 @@ def test_list_audit_logs_returns_empty_when_no_match(
     assert result.has_prev is False
 
 
-# ============================================================================
-# PAGINATION VALIDATION
-# ============================================================================
-
-
 @pytest.mark.parametrize(
     "page",
     [
@@ -805,11 +849,6 @@ def test_list_audit_logs_rejects_invalid_per_page(
         service.list_audit_logs(
             per_page=per_page,
         )
-
-
-# ============================================================================
-# FILTER VALIDATION
-# ============================================================================
 
 
 @pytest.mark.parametrize(
@@ -879,11 +918,6 @@ def test_list_audit_logs_allows_empty_entity_type(
     assert result.has_prev is False
 
 
-# ============================================================================
-# ORDERING
-# ============================================================================
-
-
 def test_list_audit_logs_returns_newest_first(
     db_session,
 ):
@@ -911,16 +945,12 @@ def test_list_audit_logs_returns_newest_first(
     )
 
 
-# ============================================================================
-# GET
-# ============================================================================
-
-
 def test_get_audit_log_by_id_returns_record(
     db_session,
 ):
     log = make_audit_log(
         user_id=1,
+        clinic_id=1,
         entity_type="Patient",
         entity_id=100,
         description="Patient created",
@@ -936,6 +966,7 @@ def test_get_audit_log_by_id_returns_record(
 
     assert result.id == log.id
     assert result.user_id == 1
+    assert result.clinic_id == 1
     assert result.entity_type == "Patient"
     assert result.entity_id == 100
     assert result.description == "Patient created"

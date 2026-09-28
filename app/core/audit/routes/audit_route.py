@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from app.core.audit.schema.audit_request import AuditLogResponseSchema
+from app.core.audit.schema.audit_response import (
+    AuditLogResponseSchema,
+)
 from app.core.audit.services.audit_service import (
     get_audit_log_by_id,
     list_audit_logs,
