@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity
 
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
+from app.extensions import db
 
 from app.modules.hie.schemas.hie_schema import (
     HIEClinicalDataQuerySchema,
@@ -49,10 +51,34 @@ HIE_VIEW_ROLES = (
 
 
 def _get_current_user() -> User:
-    user = getattr(
-        g,
-        "current_user",
-        None,
+    identity = get_jwt_identity()
+
+    if (
+        isinstance(identity, bool)
+        or identity is None
+    ):
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    try:
+        user_id = int(identity)
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise ValidationError(
+            "Invalid authentication identity"
+        ) from exc
+
+    if user_id <= 0:
+        raise ValidationError(
+            "Invalid authentication identity"
+        )
+
+    user = db.session.get(
+        User,
+        user_id,
     )
 
     if user is None:
@@ -66,10 +92,6 @@ def _get_current_user() -> User:
         )
 
     return user
-
-
-def _get_current_user_id() -> int:
-    return _get_current_user().id
 
 
 def _get_current_clinic_id() -> int:
@@ -191,8 +213,10 @@ def patient_query():
 
     user = _get_current_user()
 
+    clinic_id = _get_current_clinic_id()
+
     result = query_patient(
-        clinic_id=user.clinic_id,
+        clinic_id=clinic_id,
         requesting_user_id=user.id,
         purpose_of_use=payload.purpose_of_use,
         patient_identifier=payload.patient_identifier,
@@ -214,8 +238,10 @@ def clinical_data_query():
 
     user = _get_current_user()
 
+    clinic_id = _get_current_clinic_id()
+
     result = query_clinical_data(
-        clinic_id=user.clinic_id,
+        clinic_id=clinic_id,
         requesting_user_id=user.id,
         purpose_of_use=payload.purpose_of_use,
         patient_identifier=payload.patient_identifier,
