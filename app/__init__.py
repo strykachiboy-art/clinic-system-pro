@@ -26,6 +26,9 @@ from app.core.observability import (
 from app.core.observability.request_context import (
     init_request_context,
 )
+from app.core.observability.tracing import (
+    init_tracing,
+)
 from app.core.security.http_security import (
     register_security_headers,
 )
@@ -144,6 +147,7 @@ def create_app(config_name=None):
     init_celery_metrics(celery)
     init_db_metrics(app)
     init_request_context(app)
+    init_tracing(app)
     init_request_metrics(app)
 
     with app.app_context():

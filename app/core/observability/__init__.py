@@ -38,8 +38,23 @@ from app.core.observability.system_metrics import (
     collect_system_metrics,
 )
 
+from app.core.observability.tracing import (
+    TRACE_ID_HEADER,
+    SPAN_ID_HEADER,
+    get_span_id,
+    get_trace_id,
+    init_tracing,
+    trace_span,
+)
+
 __all__ = [
     "aggregate_performance_metrics",
+    "TRACE_ID_HEADER",
+    "SPAN_ID_HEADER",
+    "get_span_id",
+    "get_trace_id",
+    "init_tracing",
+    "trace_span",
     "AlertDeliverySink",
     "build_alert_delivery_events",
     "deliver_alert_events",

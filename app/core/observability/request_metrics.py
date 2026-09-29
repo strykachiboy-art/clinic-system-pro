@@ -8,6 +8,9 @@ from app import extensions
 from app.core.observability.failure_events import (
     record_failure_event,
 )
+from app.core.observability.tracing import (
+    get_trace_id,
+)
 
 
 REQUEST_METRICS_STATE_KEY = "_clinic_request_metrics"
@@ -140,6 +143,7 @@ def init_request_metrics(app: Flask) -> None:
             db_time_ms,
             extra={
                 "performance_event": True,
+                "trace_id": get_trace_id(),
                 "request_id": getattr(
                     g,
                     "request_id",

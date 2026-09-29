@@ -10,6 +10,9 @@ from app.core.exceptions import DomainError
 from app.core.observability.failure_events import (
     record_failure_event,
 )
+from app.core.observability.tracing import (
+    get_trace_id,
+)
 from app import extensions
 
 
@@ -99,6 +102,7 @@ def register_error_handlers(app: Flask) -> None:
                 "operational_event": True,
                 "event": "application.error",
                 "request_id": request_id,
+                "trace_id": get_trace_id(),
                 "method": method,
                 "route": route,
                 "status": 500,
