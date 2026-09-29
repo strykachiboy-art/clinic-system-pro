@@ -1076,7 +1076,7 @@ class TestRefreshRoute:
                 fake_get,
             )
 
-            response = auth_routes.refresh.__wrapped__()
+            response = auth_routes.refresh.__wrapped__.__wrapped__()
 
             assert response[1] == 401
 
@@ -1148,7 +1148,7 @@ class TestRefreshRoute:
                 ),
             )
 
-            response = auth_routes.refresh.__wrapped__()
+            response = auth_routes.refresh.__wrapped__.__wrapped__()
 
             assert response[1] == 401
 
