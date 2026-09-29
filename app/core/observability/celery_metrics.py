@@ -14,6 +14,9 @@ from celery.signals import (
 )
 
 from app import extensions
+from app.core.observability.failure_events import (
+    record_failure_event,
+)
 
 
 CELERY_METRICS_STATE_KEY = "_clinic_celery_metrics"
@@ -238,6 +241,16 @@ def _record_task_runtime(
             "failed_tasks",
         )
 
+        record_failure_event(
+            redis_client=_get_redis_client(),
+            event_type="celery.task_failure",
+            component="celery",
+            severity="error",
+            error_type="TaskFailure",
+            task_name=task_name,
+            task_id=str(task_id),
+        )
+
     _set_redis_metric(
         aggregate_key,
         "last_runtime_ms",
@@ -370,6 +383,16 @@ def _handle_task_retry(
     _increment_redis_metric(
         _task_metric_key(task_name),
         "retry_events",
+    )
+
+    record_failure_event(
+        redis_client=_get_redis_client(),
+        event_type="celery.task_retry",
+        component="celery",
+        severity="warning",
+        error_type="TaskRetry",
+        task_name=task_name,
+        task_id=str(task_id) if task_id else None,
     )
 
 

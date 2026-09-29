@@ -7,6 +7,10 @@ from pydantic import ValidationError as PydanticValidationError
 from werkzeug.exceptions import HTTPException
 
 from app.core.exceptions import DomainError
+from app.core.observability.failure_events import (
+    record_failure_event,
+)
+from app import extensions
 
 
 logger = logging.getLogger(__name__)
@@ -101,6 +105,22 @@ def register_error_handlers(app: Flask) -> None:
                 "error_type": type(error).__name__,
             },
         )
+
+        try:
+            record_failure_event(
+                redis_client=extensions.redis_client,
+                event_type="application.error",
+                component="api",
+                severity="error",
+                request_id=request_id,
+                method=method,
+                route=route,
+                status=500,
+                error_type=type(error).__name__,
+            )
+        except Exception:
+            pass
+
 
         return _error_response(
             "Internal server error",

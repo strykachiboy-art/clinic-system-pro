@@ -4,6 +4,11 @@ import time
 
 from flask import Flask, g, request
 
+from app import extensions
+from app.core.observability.failure_events import (
+    record_failure_event,
+)
+
 
 REQUEST_METRICS_STATE_KEY = "_clinic_request_metrics"
 MAX_LOAD_TEST_ID_LENGTH = 128
@@ -152,6 +157,25 @@ def init_request_metrics(app: Flask) -> None:
                 "db_time_ms": db_time_ms,
             },
         )
+
+        if response.status_code >= 500:
+            try:
+                record_failure_event(
+                    redis_client=extensions.redis_client,
+                    event_type="http.5xx",
+                    component="api",
+                    severity="error",
+                    request_id=getattr(
+                        g,
+                        "request_id",
+                        None,
+                    ),
+                    method=request.method,
+                    route=route,
+                    status=response.status_code,
+                )
+            except Exception:
+                pass
 
         return response
 
