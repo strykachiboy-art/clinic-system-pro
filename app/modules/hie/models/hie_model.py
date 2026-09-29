@@ -32,7 +32,6 @@ class HIEIntegration(db.Model):
     provider = db.Column(
         db.String(50),
         nullable=False,
-        default="malaffi",
         index=True,
     )
 

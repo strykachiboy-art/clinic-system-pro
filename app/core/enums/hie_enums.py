@@ -20,3 +20,11 @@ class HIESubmissionStatus(str, Enum):
     PENDING = "pending"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+class HIEPurposeOfUse(str, Enum):
+    TREATMENT = "treatment"
+    PAYMENT = "payment"
+    HEALTHCARE_OPERATIONS = "healthcare_operations"
+    PUBLIC_HEALTH = "public_health"
+    INDIVIDUAL_ACCESS = "individual_access"

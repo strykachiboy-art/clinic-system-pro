@@ -12,13 +12,14 @@ from pydantic import (
 from app.core.enums.hie_enums import (
     HIEIntegrationStatus,
     HIEOperation,
+    HIEPurposeOfUse,
     HIESubmissionStatus,
 )
 
 
 class HIEIntegrationCreateSchema(BaseModel):
     provider: str = Field(
-        default="malaffi",
+        ...,
         min_length=1,
         max_length=50,
     )
@@ -41,11 +42,16 @@ class HIEIntegrationCreateSchema(BaseModel):
 
     @field_validator("provider")
     @classmethod
-    def validate_provider(cls, value: str) -> str:
+    def validate_provider(
+        cls,
+        value: str,
+    ) -> str:
         value = value.strip().lower()
 
         if not value:
-            raise ValueError("Provider is required")
+            raise ValueError(
+                "Provider is required"
+            )
 
         return value
 
@@ -160,6 +166,84 @@ class HIEIntegrationResponseSchema(BaseModel):
     )
 
 
+class HIEPatientQuerySchema(BaseModel):
+    patient_identifier: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+    )
+
+    purpose_of_use: HIEPurposeOfUse = Field(
+        ...,
+    )
+
+    integration_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
+    @field_validator("patient_identifier")
+    @classmethod
+    def validate_patient_identifier(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Patient identifier is required"
+            )
+
+        return value
+
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+    )
+
+
+class HIEClinicalDataQuerySchema(BaseModel):
+    patient_identifier: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+    )
+
+    purpose_of_use: HIEPurposeOfUse = Field(
+        ...,
+    )
+
+    filters: Optional[dict[str, Any]] = Field(
+        default=None,
+    )
+
+    integration_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+    )
+
+    @field_validator("patient_identifier")
+    @classmethod
+    def validate_patient_identifier(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Patient identifier is required"
+            )
+
+        return value
+
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+    )
+
+
 class HIESubmissionCreateSchema(BaseModel):
     integration_id: int = Field(
         ...,
@@ -250,10 +334,12 @@ class HIESubmissionListResponseSchema(BaseModel):
         ...,
         ge=0,
     )
+
     page: int = Field(
         ...,
         ge=1,
     )
+
     per_page: int = Field(
         ...,
         ge=1,

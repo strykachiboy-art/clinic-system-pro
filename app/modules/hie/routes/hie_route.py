@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
+from flask import Blueprint, g, jsonify, request
 
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 from app.core.utils.decorators import role_required
-from app.extensions import db
 
 from app.modules.hie.schemas.hie_schema import (
+    HIEClinicalDataQuerySchema,
     HIEIntegrationCreateSchema,
     HIEIntegrationResponseSchema,
     HIEIntegrationUpdateSchema,
+    HIEPatientQuerySchema,
     HIESubmissionListResponseSchema,
     HIESubmissionQuerySchema,
     HIESubmissionResponseSchema,
@@ -22,6 +22,8 @@ from app.modules.hie.services.hie_service import (
     create_hie_integration,
     get_hie_integration,
     list_hie_submissions,
+    query_clinical_data,
+    query_patient,
     update_hie_integration,
 )
 
@@ -47,18 +49,10 @@ HIE_VIEW_ROLES = (
 
 
 def _get_current_user() -> User:
-    identity = get_jwt_identity()
-
-    try:
-        user_id = int(identity)
-    except (TypeError, ValueError):
-        raise ValidationError(
-            "Invalid authentication identity"
-        )
-
-    user = db.session.get(
-        User,
-        user_id,
+    user = getattr(
+        g,
+        "current_user",
+        None,
     )
 
     if user is None:
@@ -74,6 +68,10 @@ def _get_current_user() -> User:
     return user
 
 
+def _get_current_user_id() -> int:
+    return _get_current_user().id
+
+
 def _get_current_clinic_id() -> int:
     user = _get_current_user()
 
@@ -83,7 +81,12 @@ def _get_current_clinic_id() -> int:
         None,
     )
 
-    if clinic_id is None or clinic_id <= 0:
+    if (
+        clinic_id is None
+        or isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
         raise ValidationError(
             "Authenticated user is not associated with a clinic"
         )
@@ -176,6 +179,53 @@ def update_integration(
     return jsonify({
         "success": True,
         "data": response.model_dump(mode="json"),
+    }), 200
+
+
+@hie_bp.post("/queries/patient")
+@role_required(*HIE_VIEW_ROLES)
+def patient_query():
+    payload = HIEPatientQuerySchema.model_validate(
+        request.get_json(silent=True) or {}
+    )
+
+    user = _get_current_user()
+
+    result = query_patient(
+        clinic_id=user.clinic_id,
+        requesting_user_id=user.id,
+        purpose_of_use=payload.purpose_of_use,
+        patient_identifier=payload.patient_identifier,
+        integration_id=payload.integration_id,
+    )
+
+    return jsonify({
+        "success": True,
+        "data": result,
+    }), 200
+
+
+@hie_bp.post("/queries/clinical-data")
+@role_required(*HIE_VIEW_ROLES)
+def clinical_data_query():
+    payload = HIEClinicalDataQuerySchema.model_validate(
+        request.get_json(silent=True) or {}
+    )
+
+    user = _get_current_user()
+
+    result = query_clinical_data(
+        clinic_id=user.clinic_id,
+        requesting_user_id=user.id,
+        purpose_of_use=payload.purpose_of_use,
+        patient_identifier=payload.patient_identifier,
+        filters=payload.filters,
+        integration_id=payload.integration_id,
+    )
+
+    return jsonify({
+        "success": True,
+        "data": result,
     }), 200
 
 
