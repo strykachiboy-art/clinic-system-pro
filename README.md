@@ -1,8 +1,8 @@
-# Clinic System Pro v5
+﻿# Clinic System Pro v5
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, the targeted Phase 3 security/compliance hardening scope is GREEN, the pre-full-suite security gate is GREEN with 115 focused security tests passing, and the full-project regression gate is next.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, and Phase 5 Production Readiness is now the active engineering phase.**
 
 **Status date: September 29, 2026**
 
@@ -43,11 +43,11 @@ The project deliberately separates completed implementation from planned work. A
 The project uses a modular Flask backend with clear separation between:
 
 Routes
-    ↓
+    â†“
 Schemas / Validation
-    ↓
+    â†“
 Services / Business Logic
-    ↓
+    â†“
 Models / Database
 
 Cross-cutting infrastructure is handled through dedicated core modules for:
@@ -385,13 +385,13 @@ consultation:123:read
 The emergency-access architecture is designed around:
 
 Request
-    ↓
+    â†“
 Review / Grant
-    ↓
+    â†“
 Limited Scope
-    ↓
+    â†“
 Time-Bounded Access
-    ↓
+    â†“
 Audit / Expiry / Revocation
 
 Break-glass access must never bypass Clinical Safety controls.
@@ -504,11 +504,11 @@ hipaa_log_redaction
 Configuration resolution follows the intended hierarchy of:
 
 Hard limit
-    ↓
+    â†“
 Feature flag
-    ↓
+    â†“
 Clinic setting
-    ↓
+    â†“
 Default
 
 The system currently enforces ceilings such as:
@@ -527,24 +527,24 @@ The Feedback module is fully implemented and verified for the current backend cy
 Module structure:
 
 app/modules/feedback/
-├── __init__.py
-├── models/
-│   ├── __init__.py
-│   ├── feedback_model.py
-│   └── feedback_comment_model.py
-├── schemas/
-│   ├── __init__.py
-│   ├── feedback_schema.py
-│   ├── feedback_comment_schema.py
-│   ├── feedback_query_schema.py
-│   └── feedback_reaction_schema.py
-├── services/
-│   ├── __init__.py
-│   ├── feedback_service.py
-│   └── feedback_comment_service.py
-└── routes/
-    ├── __init__.py
-    └── feedback_routes.py
+â”œâ”€â”€ __init__.py
+â”œâ”€â”€ models/
+â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”œâ”€â”€ feedback_model.py
+â”‚   â””â”€â”€ feedback_comment_model.py
+â”œâ”€â”€ schemas/
+â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”œâ”€â”€ feedback_schema.py
+â”‚   â”œâ”€â”€ feedback_comment_schema.py
+â”‚   â”œâ”€â”€ feedback_query_schema.py
+â”‚   â””â”€â”€ feedback_reaction_schema.py
+â”œâ”€â”€ services/
+â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”œâ”€â”€ feedback_service.py
+â”‚   â””â”€â”€ feedback_comment_service.py
+â””â”€â”€ routes/
+    â”œâ”€â”€ __init__.py
+    â””â”€â”€ feedback_routes.py
 
 Supported feedback types:
 
@@ -1260,15 +1260,15 @@ Offline-first capability is planned carefully because healthcare data is sensiti
 The intended model is:
 
 Flutter
-    ↓
+    â†“
 Local SQLite
-    ↓
+    â†“
 Offline Queue
-    ↓
+    â†“
 Server Sync
-    ↓
+    â†“
 Authorization / Validation
-    ↓
+    â†“
 Canonical PostgreSQL State
 
 SQLite is never the authoritative medical record.
@@ -1369,41 +1369,41 @@ Existing migrations should not be rewritten merely to make history appear cleane
 At a high level:
 
 clinic-system-pro/
-├── app/
-│   ├── core/
-│   │   ├── emergency_access/
-│   │   ├── clinical_safety/
-│   │   ├── auth/
-│   │   ├── errors/
-│   │   ├── audit/
-│   │   └── ...
-│   ├── modules/
-│   │   ├── feedback/
-│   │   ├── patient/
-│   │   ├── appointment/
-│   │   ├── consultation/
-│   │   ├── lab/
-│   │   ├── pharmacy/
-│   │   ├── prescription/
-│   │   ├── inventory/
-│   │   ├── billing/
-│   │   ├── ward/
-│   │   ├── ambulance/
-│   │   ├── hie/
-│   │   ├── reports/
-│   │   ├── notifications/
-│   │   ├── settings/
-│   │   ├── asset_control/
-│   │   ├── chat/
-│   │   └── ...
-│   ├── tests/
-│   └── ...
-├── load_tests/
-├── migrations/
-├── run.py
-├── wsgi.py
-├── README.md
-└── ...
+â”œâ”€â”€ app/
+â”‚   â”œâ”€â”€ core/
+â”‚   â”‚   â”œâ”€â”€ emergency_access/
+â”‚   â”‚   â”œâ”€â”€ clinical_safety/
+â”‚   â”‚   â”œâ”€â”€ auth/
+â”‚   â”‚   â”œâ”€â”€ errors/
+â”‚   â”‚   â”œâ”€â”€ audit/
+â”‚   â”‚   â””â”€â”€ ...
+â”‚   â”œâ”€â”€ modules/
+â”‚   â”‚   â”œâ”€â”€ feedback/
+â”‚   â”‚   â”œâ”€â”€ patient/
+â”‚   â”‚   â”œâ”€â”€ appointment/
+â”‚   â”‚   â”œâ”€â”€ consultation/
+â”‚   â”‚   â”œâ”€â”€ lab/
+â”‚   â”‚   â”œâ”€â”€ pharmacy/
+â”‚   â”‚   â”œâ”€â”€ prescription/
+â”‚   â”‚   â”œâ”€â”€ inventory/
+â”‚   â”‚   â”œâ”€â”€ billing/
+â”‚   â”‚   â”œâ”€â”€ ward/
+â”‚   â”‚   â”œâ”€â”€ ambulance/
+â”‚   â”‚   â”œâ”€â”€ hie/
+â”‚   â”‚   â”œâ”€â”€ reports/
+â”‚   â”‚   â”œâ”€â”€ notifications/
+â”‚   â”‚   â”œâ”€â”€ settings/
+â”‚   â”‚   â”œâ”€â”€ asset_control/
+â”‚   â”‚   â”œâ”€â”€ chat/
+â”‚   â”‚   â””â”€â”€ ...
+â”‚   â”œâ”€â”€ tests/
+â”‚   â””â”€â”€ ...
+â”œâ”€â”€ load_tests/
+â”œâ”€â”€ migrations/
+â”œâ”€â”€ run.py
+â”œâ”€â”€ wsgi.py
+â”œâ”€â”€ README.md
+â””â”€â”€ ...
 
 ---
 
@@ -1484,7 +1484,7 @@ Verification requires actual tests, integration, and appropriate operational evi
 
 # 54. Current Milestone
 
-The following areas are currently implemented, hardened, or verified:
+The following areas are currently implemented, hardened, verified, or formally closed:
 
 Core Backend Architecture
 
@@ -1546,29 +1546,26 @@ Feedback
 
 Resilience Engineering
 
-Targeted Final Security / Compliance Hardening
+Final Security / Compliance Hardening
 
-Pre-Full-Suite Security Verification
+Full Project Regression
 
-The targeted Phase 3 hardening scope is GREEN.
+Phase 3 is formally closed.
 
-Current immediate gate:
+Phase 4 Observability / Operations is formally closed.
 
-PHASE 3 FULL REGRESSION + EXIT REVIEW
+Current immediate engineering phase:
 
-The full regression suite remains the final integration gate before formally closing Phase 3.
-
-The controlled operational Backup / Restore Drill remains a separate verification activity after the software regression gate.
-
+PHASE 5 - PRODUCTION READINESS
 # 55. Authoritative Master Roadmap
 
 The project roadmap is divided into 33 major phases.
 
 01. Current Backend State / Architecture Baseline
-02. Resilience Engineering ? COMPLETED
-03. Final Security / Compliance Hardening ? TARGETED HARDENING GREEN / FULL REGRESSION IN PROGRESS
-04. Observability / Operations
-05. Production Readiness
+02. Resilience Engineering - COMPLETED
+03. Final Security / Compliance Hardening - COMPLETED
+04. Observability / Operations - COMPLETED
+05. Production Readiness - CURRENT
 06. Production-like Backend Environment
 07. Full Backend E2E
 08. Failure Injection
@@ -1600,7 +1597,7 @@ The project roadmap is divided into 33 major phases.
 
 ---
 
-# 56. Phase 1 — Current Backend State
+# 56. Phase 1 â€” Current Backend State
 
 The backend architecture and major security foundations have already been developed and hardened.
 
@@ -1662,9 +1659,9 @@ Backend Phase 2 is closed.
 
 Flutter offline synchronization remains part of the later Flutter/offline roadmap.
 
-# 58. Phase 3 — Final Security / Compliance
+# 58. Phase 3 â€” Final Security / Compliance
 
-Status: TARGETED HARDENING GREEN / FULL REGRESSION PENDING
+Status: COMPLETE
 
 The targeted Phase 3 security hardening pass has been completed across the current backend security boundaries.
 
@@ -1690,7 +1687,7 @@ Verified areas include:
 
 ## Current Phase 3 Verification Gate
 
-The pre-full-suite security verification gate is GREEN.
+The pre-full-suite security verification gate was GREEN, and the subsequent full-project regression also passed.
 
 Focused security verification:
 
@@ -1759,20 +1756,27 @@ Phase 2 resilience final suite: 66 passed, 0 failed, 0 skipped
 
 Focused Phase 3 security verification: 115 passed
 
-The full `pytest -q` regression suite is now the remaining integration gate for the Phase 3 exit review.
+The full `pytest -q` regression suite passed with 7,226 passed and 0 failed. Phase 3 is formally closed.
 
 Compliance claims must be based on actual legal, organizational, and operational requirements.
 
 The project must not claim certifications it has not obtained.
 
-# 59. Phase 4 — Observability / Operations
+# 59. Phase 4 - Observability / Operations
 
-Planned focus:
+Status: GREEN / COMPLETE
+
+Phase 4 has passed its formal exit review.
+
+Verified implementation includes:
 
 - operational metrics
 - structured logs
+- request correlation
 - alerting
-- tracing where appropriate
+- alert state management
+- alert delivery boundary
+- tracing
 - failure dashboards
 - background job visibility
 - Redis visibility
@@ -1780,9 +1784,33 @@ Planned focus:
 - queue monitoring
 - operational runbooks
 
----
+Formal exit-review evidence:
 
-# 60. Phase 5 — Production Readiness
+- 19 required observability files present
+- 5 operational runbooks present
+- 4 required operational routes registered
+- 128 observability tests passed
+- 0 observability test failures
+
+Verified operational routes:
+
+/health/live
+/health/ready
+/api/v1/operations
+/api/v1/operations/failures
+
+Formal gate:
+
+PHASE 4 EXIT REVIEW: GREEN
+
+Phase 4 is closed.
+
+The project now advances to Phase 5 - Production Readiness.
+# 60. Phase 5 - Production Readiness
+
+Status: CURRENT / ACTIVE
+
+Phase 5 converts the verified backend into a deployment-ready production candidate.
 
 Planned focus:
 
@@ -1790,18 +1818,24 @@ Planned focus:
 - secret handling
 - production deployment configuration
 - security review
-- operational runbooks
 - logging review
 - backup policy
 - restore readiness
 - migration readiness
 - health checks
-- startup/shutdown behavior
+- startup behavior
+- shutdown behavior
 - deployment validation
+- production configuration consistency
+- operational readiness verification
+- final regression validation
 
----
+Phase 5 must establish evidence for production deployment readiness.
 
-# 61. Phase 6 — Production-like Backend Environment
+Production readiness must not be inferred merely from passing application tests.
+
+The phase remains subject to explicit verification gates before production deployment.
+# 61. Phase 6 â€” Production-like Backend Environment
 
 Build an environment that resembles deployment conditions closely enough to validate:
 
@@ -1816,7 +1850,7 @@ Build an environment that resembles deployment conditions closely enough to vali
 
 ---
 
-# 62. Phase 7 — Full Backend E2E
+# 62. Phase 7 â€” Full Backend E2E
 
 End-to-end backend workflows will cover critical user journeys across:
 
@@ -1837,7 +1871,7 @@ End-to-end backend workflows will cover critical user journeys across:
 
 ---
 
-# 63. Phase 8 — Failure Injection
+# 63. Phase 8 â€” Failure Injection
 
 Introduce controlled failures such as:
 
@@ -1854,7 +1888,7 @@ The goal is to verify recovery behavior rather than merely observe failure.
 
 ---
 
-# 64. Phase 9 — Flutter Foundation
+# 64. Phase 9 â€” Flutter Foundation
 
 Establish:
 
@@ -1871,7 +1905,7 @@ The backend remains authoritative.
 
 ---
 
-# 65. Phase 10 — Flutter Authentication + Session
+# 65. Phase 10 â€” Flutter Authentication + Session
 
 Implement:
 
@@ -1885,7 +1919,7 @@ Implement:
 
 ---
 
-# 66. Phase 11 — Flutter Core Clinical Workflows
+# 66. Phase 11 â€” Flutter Core Clinical Workflows
 
 Implement core client workflows for:
 
@@ -1903,7 +1937,7 @@ All operations use backend authorization.
 
 ---
 
-# 67. Phase 12 — Flutter Feedback
+# 67. Phase 12 â€” Flutter Feedback
 
 Connect the Flutter client to the already-hardened Feedback API.
 
@@ -1919,7 +1953,7 @@ Client work includes:
 
 ---
 
-# 68. Phase 13 — Flutter Chat + Realtime
+# 68. Phase 13 â€” Flutter Chat + Realtime
 
 Implement:
 
@@ -1934,7 +1968,7 @@ Implement:
 
 ---
 
-# 69. Phase 14 — Flutter Offline-first
+# 69. Phase 14 â€” Flutter Offline-first
 
 Introduce:
 
@@ -1948,7 +1982,7 @@ The server remains authoritative.
 
 ---
 
-# 70. Phase 15 — Offline Queue / Idempotency
+# 70. Phase 15 â€” Offline Queue / Idempotency
 
 Implement:
 
@@ -1962,19 +1996,19 @@ Implement:
 
 ---
 
-# 71. Phase 16 — Synchronization
+# 71. Phase 16 â€” Synchronization
 
 Implement synchronization between:
 
 Flutter local state
-        ↕
+        â†•
 Server state
 
 with explicit authorization and validation on the server.
 
 ---
 
-# 72. Phase 17 — Conflict Resolution
+# 72. Phase 17 â€” Conflict Resolution
 
 Define deterministic conflict behavior.
 
@@ -1982,7 +2016,7 @@ Conflict resolution must not silently discard authoritative server data.
 
 ---
 
-# 73. Phase 18 — Offline Sensitive-data Security
+# 73. Phase 18 â€” Offline Sensitive-data Security
 
 Harden the client for:
 
@@ -1996,7 +2030,7 @@ Harden the client for:
 
 ---
 
-# 74. Phase 19 — Flutter Break-glass + Consent
+# 74. Phase 19 â€” Flutter Break-glass + Consent
 
 Integrate:
 
@@ -2012,7 +2046,7 @@ The Flutter client must follow backend emergency authorization rules.
 
 ---
 
-# 75. Phase 20 — Flutter Clinical Safety
+# 75. Phase 20 â€” Flutter Clinical Safety
 
 Integrate:
 
@@ -2026,7 +2060,7 @@ The client presents server-defined safety outcomes.
 
 ---
 
-# 76. Phase 21 — Flutter Notifications
+# 76. Phase 21 â€” Flutter Notifications
 
 Implement:
 
@@ -2038,7 +2072,7 @@ Implement:
 
 ---
 
-# 77. Phase 22 — Device / Session Management
+# 77. Phase 22 â€” Device / Session Management
 
 Implement:
 
@@ -2050,7 +2084,7 @@ Implement:
 
 ---
 
-# 78. Phase 23 — Flutter Unit + Integration Testing
+# 78. Phase 23 â€” Flutter Unit + Integration Testing
 
 Test:
 
@@ -2063,7 +2097,7 @@ Test:
 
 ---
 
-# 79. Phase 24 — Flutter Offline / Resilience Testing
+# 79. Phase 24 â€” Flutter Offline / Resilience Testing
 
 Test:
 
@@ -2079,7 +2113,7 @@ Test:
 
 ---
 
-# 80. Phase 25 — Full Cross-platform E2E
+# 80. Phase 25 â€” Full Cross-platform E2E
 
 Validate:
 
@@ -2095,7 +2129,7 @@ as a complete system.
 
 ---
 
-# 81. Phase 26 — Production Security Testing
+# 81. Phase 26 â€” Production Security Testing
 
 Perform final security verification including:
 
@@ -2111,7 +2145,7 @@ Perform final security verification including:
 
 ---
 
-# 82. Phase 27 — Backup / Restore Drill
+# 82. Phase 27 â€” Backup / Restore Drill
 
 Status: IMPLEMENTATION VERIFIED / OPERATIONAL DRILL PENDING
 
@@ -2149,7 +2183,7 @@ post_restore_verification_completed: true
 processing_outbox_count: 0
 ```
 
-# 83. Phase 28 — Release Candidate Freeze
+# 83. Phase 28 â€” Release Candidate Freeze
 
 Freeze the release candidate after:
 
@@ -2166,7 +2200,7 @@ Only critical fixes should be accepted after freeze.
 
 ---
 
-# 84. Phase 29 — Deployment
+# 84. Phase 29 â€” Deployment
 
 Deploy according to the finalized production architecture.
 
@@ -2182,7 +2216,7 @@ Deployment must preserve:
 
 ---
 
-# 85. Phase 30 — Post-deployment Validation
+# 85. Phase 30 â€” Post-deployment Validation
 
 Immediately validate:
 
@@ -2199,7 +2233,7 @@ Immediately validate:
 
 ---
 
-# 86. Phase 31 — Production Operations
+# 86. Phase 31 â€” Production Operations
 
 Establish ongoing:
 
@@ -2214,7 +2248,7 @@ Establish ongoing:
 
 ---
 
-# 87. Phase 32 — Future Distributed Scale
+# 87. Phase 32 â€” Future Distributed Scale
 
 Only after sufficient production evidence should the system consider:
 
@@ -2230,7 +2264,7 @@ No unsupported scalability claims are made before this work is actually validate
 
 ---
 
-# 88. Phase 33 — White Glove / Rust
+# 88. Phase 33 â€” White Glove / Rust
 
 The White Glove/Rust initiative is intentionally the final major backend phase.
 
@@ -2369,7 +2403,7 @@ The objective is to establish a backend and client architecture where:
 
 The project has progressed beyond the basic CRUD phase.
 
-The major current backend foundations are established:
+The major backend foundations are established:
 
 Architecture
 
@@ -2419,23 +2453,33 @@ Feedback
 
 Resilience Engineering
 
-The immediate engineering focus is now:
+Final Security / Compliance Hardening
 
-PHASE 3 FULL REGRESSION + EXIT REVIEW
+Full Project Regression
+
+Phase 3 is formally closed.
+
+Phase 4 Observability / Operations is formally closed with a GREEN exit review.
+
+The current engineering focus is now:
+
+PHASE 5 - PRODUCTION READINESS
 
 followed by:
 
-OBSERVABILITY / OPERATIONS
-? PRODUCTION READINESS
-? PRODUCTION-LIKE ENVIRONMENT
-? FULL BACKEND E2E
-? FAILURE INJECTION
-? FLUTTER
-? FULL CROSS-PLATFORM VALIDATION
-? PRODUCTION
-? FUTURE DISTRIBUTED SCALE
-? WHITE GLOVE / RUST
-
+PRODUCTION-LIKE BACKEND ENVIRONMENT
+-> FULL BACKEND E2E
+-> FAILURE INJECTION
+-> FLUTTER
+-> FULL CROSS-PLATFORM VALIDATION
+-> PRODUCTION SECURITY TESTING
+-> BACKUP / RESTORE DRILL
+-> RELEASE CANDIDATE
+-> DEPLOYMENT
+-> POST-DEPLOYMENT VALIDATION
+-> PRODUCTION OPERATIONS
+-> FUTURE DISTRIBUTED SCALE
+-> WHITE GLOVE / RUST
 # 94. Project Boundary Statement
 
 Clinic System Pro v5 is an engineering project under active development.
@@ -2469,18 +2513,19 @@ The project should not jump ahead merely because a later feature is technically 
 The intended progression is:
 
 Harden
-→ Verify
-→ Stress
-→ Recover
-→ Secure
-→ Observe
-→ Deploy
-→ Operate
-→ Scale
-→ Optimize
+-> Verify
+-> Stress
+-> Recover
+-> Secure
+-> Observe
+-> Prepare for Production
+-> Deploy
+-> Operate
+-> Scale
+-> Optimize
 
-The next immediate engineering target is:
+Current phase:
 
-Phase 3 Full Regression + Exit Review
+PHASE 5 - PRODUCTION READINESS
 
-The targeted Phase 3 hardening scope is already GREEN; the remaining gate is the full-project regression before formally closing the phase.
+The immediate objective is to establish concrete evidence that the verified backend is correctly configured, deployable, recoverable, observable, secure, and operationally ready for a production-like environment.
