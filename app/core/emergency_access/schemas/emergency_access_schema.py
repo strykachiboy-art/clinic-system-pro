@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    field_validator,
 )
 
 from app.core.enums.emergency_access_enums import (
@@ -40,6 +41,21 @@ class EmergencyAccessRequestSchema(BaseModel):
         max_length=50,
     )
 
+    @field_validator("reason", "purpose")
+    @classmethod
+    def validate_non_blank_text(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Value cannot be blank"
+            )
+
+        return value
+
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -68,6 +84,21 @@ class EmergencyAccessRevokeSchema(BaseModel):
         min_length=1,
         max_length=500,
     )
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Reason cannot be blank"
+            )
+
+        return value
 
     model_config = ConfigDict(
         extra="forbid",

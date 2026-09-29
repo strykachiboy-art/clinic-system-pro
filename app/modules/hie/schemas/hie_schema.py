@@ -6,6 +6,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     field_validator,
 )
 
@@ -177,7 +178,7 @@ class HIEPatientQuerySchema(BaseModel):
         ...,
     )
 
-    integration_id: Optional[int] = Field(
+    integration_id: Optional[StrictInt] = Field(
         default=None,
         gt=0,
     )
@@ -218,7 +219,7 @@ class HIEClinicalDataQuerySchema(BaseModel):
         default=None,
     )
 
-    integration_id: Optional[int] = Field(
+    integration_id: Optional[StrictInt] = Field(
         default=None,
         gt=0,
     )
@@ -250,7 +251,7 @@ class HIESubmissionCreateSchema(BaseModel):
         gt=0,
     )
 
-    patient_id: Optional[int] = Field(
+    patient_id: Optional[StrictInt] = Field(
         default=None,
         gt=0,
     )
@@ -293,12 +294,12 @@ class HIESubmissionResponseSchema(BaseModel):
 
 
 class HIESubmissionQuerySchema(BaseModel):
-    integration_id: Optional[int] = Field(
+    integration_id: Optional[StrictInt] = Field(
         default=None,
         gt=0,
     )
 
-    patient_id: Optional[int] = Field(
+    patient_id: Optional[StrictInt] = Field(
         default=None,
         gt=0,
     )
@@ -311,12 +312,12 @@ class HIESubmissionQuerySchema(BaseModel):
         default=None,
     )
 
-    page: int = Field(
+    page: StrictInt = Field(
         default=1,
         ge=1,
     )
 
-    per_page: int = Field(
+    per_page: StrictInt = Field(
         default=20,
         ge=1,
         le=100,
@@ -335,12 +336,12 @@ class HIESubmissionListResponseSchema(BaseModel):
         ge=0,
     )
 
-    page: int = Field(
+    page: StrictInt = Field(
         ...,
         ge=1,
     )
 
-    per_page: int = Field(
+    per_page: StrictInt = Field(
         ...,
         ge=1,
         le=100,

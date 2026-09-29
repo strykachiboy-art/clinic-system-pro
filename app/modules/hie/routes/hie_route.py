@@ -258,7 +258,7 @@ def clinical_data_query():
 @hie_bp.get("/submissions")
 @role_required(*HIE_VIEW_ROLES)
 def get_submissions():
-    payload = HIESubmissionQuerySchema.model_validate(
+    payload = HIESubmissionQuerySchema.model_validate_strings(
         request.args.to_dict()
     )
 
