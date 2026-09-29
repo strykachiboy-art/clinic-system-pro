@@ -283,6 +283,10 @@ def register_blueprints(app):
         dashboard_bp,
     )
 
+    from app.core.observability.operations_routes import (
+        operations_bp,
+    )
+
     from app.core.emergency_access.routes.emergency_access_routes import (
         emergency_access_bp,
     )
@@ -330,6 +334,7 @@ def register_blueprints(app):
         access_control_bp,
         chat_bp,
         dashboard_bp,
+        operations_bp,
         emergency_access_bp,
         clinical_safety_bp,
         feedback_bp,
