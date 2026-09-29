@@ -6,6 +6,7 @@ import pytest
 from app.core.enums.hie_enums import (
     HIEIntegrationStatus,
     HIEOperation,
+    HIEPurposeOfUse,
     HIESubmissionStatus,
 )
 from app.core.enums.role_enums import Role
@@ -17,7 +18,7 @@ def make_integration(
     *,
     integration_id=1,
     clinic_id=1,
-    provider="malaffi",
+    provider="test-hie-provider",
     status=HIEIntegrationStatus.PENDING,
     endpoint_url=None,
     organization_id="ORG-001",
@@ -106,7 +107,7 @@ def test_create_integration_success(
 
     integration = make_integration(
         clinic_id=clinic.id,
-        provider="malaffi",
+        provider="test-hie-provider",
         status=HIEIntegrationStatus.PENDING,
         endpoint_url="https://hie.example.com/",
     )
@@ -126,7 +127,7 @@ def test_create_integration_success(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
-            "provider": "MALAFFI",
+            "provider": " TEST-HIE-PROVIDER ",
             "endpoint_url": "https://hie.example.com",
             "organization_id": " ORG-001 ",
             "facility_id": " FAC-001 ",
@@ -141,7 +142,7 @@ def test_create_integration_success(
     assert body["success"] is True
     assert body["data"]["id"] == integration.id
     assert body["data"]["clinic_id"] == clinic.id
-    assert body["data"]["provider"] == "malaffi"
+    assert body["data"]["provider"] == "test-hie-provider"
     assert body["data"]["status"] == (
         HIEIntegrationStatus.PENDING.value
     )
@@ -150,7 +151,7 @@ def test_create_integration_success(
     )
 
     assert called["clinic_id"] == clinic.id
-    assert called["provider"] == "malaffi"
+    assert called["provider"] == "test-hie-provider"
     assert called["endpoint_url"] == (
         "https://hie.example.com/"
     )
@@ -172,6 +173,7 @@ def test_create_integration_uses_authenticated_clinic(
 
     integration = make_integration(
         clinic_id=clinic.id,
+        provider="test-hie-provider",
     )
 
     called = {}
@@ -189,13 +191,33 @@ def test_create_integration_uses_authenticated_clinic(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
-            "provider": "malaffi",
+            "provider": "test-hie-provider",
         },
         headers=headers,
     )
 
     assert response.status_code == 201
     assert called["clinic_id"] == clinic.id
+    assert called["provider"] == "test-hie-provider"
+
+
+def test_create_integration_requires_provider(
+    app,
+    auth_headers_for,
+    user,
+):
+    headers = auth_headers_for(
+        user,
+        role=Role.ADMIN,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/integrations",
+        json={},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_create_integration_rejects_client_clinic_id(
@@ -211,52 +233,13 @@ def test_create_integration_rejects_client_clinic_id(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
-            "provider": "malaffi",
+            "provider": "test-hie-provider",
             "clinic_id": 999999,
         },
         headers=headers,
     )
 
     assert response.status_code == 422
-
-
-def test_create_integration_defaults_provider_to_malaffi(
-    app,
-    clinic,
-    auth_headers_for,
-    user,
-    monkeypatch,
-):
-    headers = auth_headers_for(
-        user,
-        role=Role.ADMIN,
-    )
-
-    integration = make_integration(
-        clinic_id=clinic.id,
-        provider="malaffi",
-    )
-
-    called = {}
-
-    def fake_create_hie_integration(**kwargs):
-        called.update(kwargs)
-        return integration
-
-    monkeypatch.setattr(
-        hie_route,
-        "create_hie_integration",
-        fake_create_hie_integration,
-    )
-
-    response = app.test_client().post(
-        "/api/v1/hie/integrations",
-        json={},
-        headers=headers,
-    )
-
-    assert response.status_code == 201
-    assert called["provider"] == "malaffi"
 
 
 def test_create_integration_rejects_unknown_field(
@@ -272,7 +255,7 @@ def test_create_integration_rejects_unknown_field(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
-            "provider": "malaffi",
+            "provider": "test-hie-provider",
             "unknown_field": "bad",
         },
         headers=headers,
@@ -315,6 +298,7 @@ def test_create_integration_rejects_invalid_endpoint(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
+            "provider": "test-hie-provider",
             "endpoint_url": "not-a-url",
         },
         headers=headers,
@@ -336,6 +320,7 @@ def test_create_integration_rejects_empty_identifier(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
+            "provider": "test-hie-provider",
             "organization_id": "   ",
         },
         headers=headers,
@@ -357,7 +342,7 @@ def test_create_integration_forbidden_for_doctor(
     response = app.test_client().post(
         "/api/v1/hie/integrations",
         json={
-            "provider": "malaffi",
+            "provider": "test-hie-provider",
         },
         headers=headers,
     )
@@ -380,6 +365,7 @@ def test_get_integration_success(
     integration = make_integration(
         integration_id=7,
         clinic_id=clinic.id,
+        provider="test-hie-provider",
         status=HIEIntegrationStatus.ACTIVE,
     )
 
@@ -407,7 +393,7 @@ def test_get_integration_success(
     assert body["success"] is True
     assert body["data"]["id"] == 7
     assert body["data"]["clinic_id"] == clinic.id
-    assert body["data"]["provider"] == "malaffi"
+    assert body["data"]["provider"] == "test-hie-provider"
     assert body["data"]["status"] == (
         HIEIntegrationStatus.ACTIVE.value
     )
@@ -431,6 +417,7 @@ def test_get_integration_uses_authenticated_clinic(
     integration = make_integration(
         integration_id=15,
         clinic_id=clinic.id,
+        provider="test-hie-provider",
     )
 
     called = {}
@@ -470,7 +457,7 @@ def test_update_integration_success(
     integration = make_integration(
         integration_id=5,
         clinic_id=clinic.id,
-        provider="malaffi",
+        provider="test-hie-provider",
         status=HIEIntegrationStatus.ACTIVE,
         endpoint_url="https://hie.example.com/",
         organization_id="ORG-NEW",
@@ -492,7 +479,7 @@ def test_update_integration_success(
     response = app.test_client().patch(
         "/api/v1/hie/integrations/5",
         json={
-            "provider": "MALAFFI",
+            "provider": " TEST-HIE-PROVIDER ",
             "status": HIEIntegrationStatus.ACTIVE.value,
             "endpoint_url": "https://hie.example.com",
             "organization_id": "ORG-NEW",
@@ -508,13 +495,14 @@ def test_update_integration_success(
     assert body["success"] is True
     assert body["data"]["id"] == 5
     assert body["data"]["clinic_id"] == clinic.id
+    assert body["data"]["provider"] == "test-hie-provider"
     assert body["data"]["status"] == (
         HIEIntegrationStatus.ACTIVE.value
     )
 
     assert called["clinic_id"] == clinic.id
     assert called["integration_id"] == 5
-    assert called["provider"] == "malaffi"
+    assert called["provider"] == "test-hie-provider"
     assert called["status"] == HIEIntegrationStatus.ACTIVE
     assert called["endpoint_url"] == (
         "https://hie.example.com/"
@@ -558,7 +546,7 @@ def test_update_integration_normalizes_provider(
 
     integration = make_integration(
         clinic_id=clinic.id,
-        provider="malaffi",
+        provider="test-hie-provider",
     )
 
     called = {}
@@ -576,13 +564,13 @@ def test_update_integration_normalizes_provider(
     response = app.test_client().patch(
         "/api/v1/hie/integrations/1",
         json={
-            "provider": "  MALAFFI  ",
+            "provider": "  TEST-HIE-PROVIDER  ",
         },
         headers=headers,
     )
 
     assert response.status_code == 200
-    assert called["provider"] == "malaffi"
+    assert called["provider"] == "test-hie-provider"
 
 
 def test_update_integration_rejects_unknown_field(
@@ -599,6 +587,352 @@ def test_update_integration_rejects_unknown_field(
         "/api/v1/hie/integrations/1",
         json={
             "unknown_field": "bad",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_patient_query_uses_authenticated_user_context(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+    monkeypatch,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    called = {}
+
+    def fake_query_patient(**kwargs):
+        called.update(kwargs)
+
+        return {
+            "status_code": 200,
+            "records": [],
+        }
+
+    monkeypatch.setattr(
+        hie_route,
+        "query_patient",
+        fake_query_patient,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["status_code"] == 200
+
+    assert called["clinic_id"] == clinic.id
+    assert called["requesting_user_id"] == query_user.id
+    assert called["purpose_of_use"] is HIEPurposeOfUse.TREATMENT
+    assert called["patient_identifier"] == "REMOTE-001"
+    assert called["integration_id"] is None
+
+
+def test_patient_query_rejects_client_supplied_authorization_context(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+            "clinic_id": 999999,
+            "requesting_user_id": 999999,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_patient_query_requires_purpose_of_use(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_patient_query_rejects_unknown_field(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+            "requesting_user_id": 999999,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_patient_query_passes_explicit_integration_id(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+    monkeypatch,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    called = {}
+
+    def fake_query_patient(**kwargs):
+        called.update(kwargs)
+
+        return {
+            "status_code": 200,
+            "records": [],
+        }
+
+    monkeypatch.setattr(
+        hie_route,
+        "query_patient",
+        fake_query_patient,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-002",
+            "purpose_of_use": "healthcare_operations",
+            "integration_id": 27,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert called["clinic_id"] == clinic.id
+    assert called["requesting_user_id"] == query_user.id
+    assert called["purpose_of_use"] is (
+        HIEPurposeOfUse.HEALTHCARE_OPERATIONS
+    )
+    assert called["patient_identifier"] == "REMOTE-002"
+    assert called["integration_id"] == 27
+
+
+def test_clinical_data_query_uses_authenticated_user_context(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+    monkeypatch,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.NURSE,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.NURSE,
+    )
+
+    called = {}
+
+    def fake_query_clinical_data(**kwargs):
+        called.update(kwargs)
+
+        return {
+            "status_code": 200,
+            "records": [],
+        }
+
+    monkeypatch.setattr(
+        hie_route,
+        "query_clinical_data",
+        fake_query_clinical_data,
+    )
+
+    filters = {
+        "resource_type": "Medication",
+    }
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-003",
+            "purpose_of_use": "treatment",
+            "filters": filters,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.get_json()
+
+    assert body["success"] is True
+    assert body["data"]["status_code"] == 200
+
+    assert called["clinic_id"] == clinic.id
+    assert called["requesting_user_id"] == query_user.id
+    assert called["purpose_of_use"] is HIEPurposeOfUse.TREATMENT
+    assert called["patient_identifier"] == "REMOTE-003"
+    assert called["filters"] == filters
+    assert called["integration_id"] is None
+
+
+def test_clinical_data_query_rejects_client_supplied_authorization_context(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-004",
+            "purpose_of_use": "treatment",
+            "filters": {},
+            "clinic_id": 999999,
+            "requesting_user_id": 999999,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_clinical_data_query_rejects_invalid_filters(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-004",
+            "purpose_of_use": "treatment",
+            "filters": [],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_clinical_data_query_rejects_invalid_purpose(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    query_user = make_user(
+        clinic,
+        role=Role.DOCTOR,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=Role.DOCTOR,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-004",
+            "purpose_of_use": "not-a-purpose",
+            "filters": {},
         },
         headers=headers,
     )
@@ -1016,6 +1350,8 @@ def test_get_submissions_serializes_submission_fields(
         ("post", "/api/v1/hie/integrations"),
         ("get", "/api/v1/hie/integrations/1"),
         ("patch", "/api/v1/hie/integrations/1"),
+        ("post", "/api/v1/hie/queries/patient"),
+        ("post", "/api/v1/hie/queries/clinical-data"),
         ("get", "/api/v1/hie/submissions"),
     ],
 )
@@ -1079,6 +1415,105 @@ def test_get_integration_allowed_for_hie_view_roles(
     assert response.status_code == 200
 
 
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.ADMIN,
+        Role.DOCTOR,
+        Role.NURSE,
+        Role.LAB_TECHNICIAN,
+        Role.PHARMACIST,
+    ],
+)
+def test_patient_query_allowed_for_hie_view_roles(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+    role,
+    monkeypatch,
+):
+    query_user = make_user(
+        clinic,
+        role=role,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=role,
+    )
+
+    monkeypatch.setattr(
+        hie_route,
+        "query_patient",
+        lambda **kwargs: {
+            "status_code": 200,
+            "records": [],
+        },
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.ADMIN,
+        Role.DOCTOR,
+        Role.NURSE,
+        Role.LAB_TECHNICIAN,
+        Role.PHARMACIST,
+    ],
+)
+def test_clinical_data_query_allowed_for_hie_view_roles(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+    role,
+    monkeypatch,
+):
+    query_user = make_user(
+        clinic,
+        role=role,
+    )
+
+    headers = auth_headers_for(
+        query_user,
+        role=role,
+    )
+
+    monkeypatch.setattr(
+        hie_route,
+        "query_clinical_data",
+        lambda **kwargs: {
+            "status_code": 200,
+            "records": [],
+        },
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+            "filters": {},
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+
 def test_get_integration_forbidden_for_patient(
     app,
     clinic,
@@ -1097,6 +1532,63 @@ def test_get_integration_forbidden_for_patient(
 
     response = app.test_client().get(
         "/api/v1/hie/integrations/1",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_patient_query_forbidden_for_patient(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    patient_user = make_user(
+        clinic,
+        role=Role.PATIENT,
+    )
+
+    headers = auth_headers_for(
+        patient_user,
+        role=Role.PATIENT,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/patient",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_clinical_data_query_forbidden_for_patient(
+    app,
+    clinic,
+    auth_headers_for,
+    make_user,
+):
+    patient_user = make_user(
+        clinic,
+        role=Role.PATIENT,
+    )
+
+    headers = auth_headers_for(
+        patient_user,
+        role=Role.PATIENT,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/hie/queries/clinical-data",
+        json={
+            "patient_identifier": "REMOTE-001",
+            "purpose_of_use": "treatment",
+            "filters": {},
+        },
         headers=headers,
     )
 
