@@ -110,6 +110,7 @@ def init_request_metrics(app: Flask) -> None:
         logger.info(
             (
                 "performance.request "
+                "request_id=%s "
                 "load_test_id=%s "
                 "method=%s "
                 "route=%s "
@@ -118,6 +119,11 @@ def init_request_metrics(app: Flask) -> None:
                 "response_size_bytes=%s "
                 "db_query_count=%s "
                 "db_time_ms=%.3f"
+            ),
+            getattr(
+                g,
+                "request_id",
+                None,
             ),
             load_test_id,
             request.method,
@@ -129,6 +135,11 @@ def init_request_metrics(app: Flask) -> None:
             db_time_ms,
             extra={
                 "performance_event": True,
+                "request_id": getattr(
+                    g,
+                    "request_id",
+                    None,
+                ),
                 "load_test_id": load_test_id,
                 "method": request.method,
                 "route": route,

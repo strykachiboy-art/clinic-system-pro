@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Flask, jsonify
+from flask import Flask, g, has_request_context, jsonify, request
 from pydantic import ValidationError as PydanticValidationError
 from werkzeug.exceptions import HTTPException
 
@@ -73,9 +73,33 @@ def register_error_handlers(app: Flask) -> None:
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception):
+        request_id = None
+        method = None
+        route = None
+
+        if has_request_context():
+            request_id = getattr(
+                g,
+                "request_id",
+                None,
+            )
+            method = request.method
+
+            if request.url_rule is not None:
+                route = request.url_rule.rule
+
         logger.exception(
-            "Unhandled application error",
+            "application.error",
             exc_info=error,
+            extra={
+                "operational_event": True,
+                "event": "application.error",
+                "request_id": request_id,
+                "method": method,
+                "route": route,
+                "status": 500,
+                "error_type": type(error).__name__,
+            },
         )
 
         return _error_response(

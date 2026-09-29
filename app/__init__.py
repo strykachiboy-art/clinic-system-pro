@@ -15,10 +15,16 @@ from app.extensions import (
 from app.core.api import register_api_blueprint
 from app.core.api.versioning import validate_api_version
 from app.core.error_handlers import register_error_handlers
+from app.core.observability.health_routes import (
+    health_bp,
+)
 from app.core.observability import (
     init_celery_metrics,
     init_db_metrics,
     init_request_metrics,
+)
+from app.core.observability.request_context import (
+    init_request_context,
 )
 from app.core.security.http_security import (
     register_security_headers,
@@ -137,6 +143,7 @@ def create_app(config_name=None):
 
     init_celery_metrics(celery)
     init_db_metrics(app)
+    init_request_context(app)
     init_request_metrics(app)
 
     with app.app_context():
@@ -290,6 +297,10 @@ def register_blueprints(app):
 
     app.register_blueprint(
         web_bp
+    )
+
+    app.register_blueprint(
+        health_bp
     )
 
     api_blueprints = (
