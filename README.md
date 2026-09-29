@@ -2,9 +2,9 @@
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, and the next active backend phase is Final Security / Compliance Hardening.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, the targeted Phase 3 security/compliance hardening scope is GREEN, and the full regression gate is in progress.**
 
-**Status date: September 2026**
+**Status date: September 29, 2026**
 
 ---
 
@@ -1542,7 +1542,9 @@ Feedback
 
 Resilience Engineering
 
-The next active backend phase is Final Security / Compliance Hardening.
+Targeted Final Security / Compliance Hardening
+
+The Phase 3 targeted security scope is GREEN. Full-project regression and the formal Phase 3 exit review remain the final gates before moving to Observability / Operations.
 
 # 55. Authoritative Master Roadmap
 
@@ -1550,7 +1552,7 @@ The project roadmap is divided into 33 major phases.
 
 01. Current Backend State / Architecture Baseline
 02. Resilience Engineering ? COMPLETED
-03. Final Security / Compliance Hardening ? ACTIVE
+03. Final Security / Compliance Hardening ? TARGETED HARDENING GREEN / FULL REGRESSION IN PROGRESS
 04. Observability / Operations
 05. Production Readiness
 06. Production-like Backend Environment
@@ -1648,17 +1650,34 @@ Flutter offline synchronization remains part of the later Flutter/offline roadma
 
 # 58. Phase 3 — Final Security / Compliance
 
-Planned focus:
+Status: TARGETED HARDENING GREEN / FULL REGRESSION IN PROGRESS
 
-- security verification
-- authorization penetration testing
-- IDOR validation
-- privilege boundary testing
-- session/security edge cases
-- sensitive-data handling
-- audit verification
-- retention controls
-- compliance-oriented evidence collection
+The targeted Phase 3 hardening pass has been completed across the current backend security boundaries.
+
+Verified areas include:
+
+- profile and public-profile security
+- password, credential, and secret handling
+- file and attachment security
+- Google OAuth state race protection
+- external integration and webhook trust boundaries
+- background-job tenant context
+- realtime chat authorization
+- HIE data-access boundaries
+- security behavior during failure and recovery
+- validation/input-abuse resistance at security boundaries
+- audit tamper-resistance and actor integrity
+
+Current targeted verification evidence includes:
+
+Audit tamper-resistance: 11 passed
+Audit test suite: 223 passed
+Core security suite: 108 passed
+Phase 2 resilience final suite: 66 passed, 0 failed, 0 skipped
+
+The audit hardening specifically verifies server-authoritative actor attribution, tenant-consistent audit records, sensitive-value redaction, transactional behavior, historical audit persistence, absence of public audit mutation endpoints, and rejection of client-controlled actor scope.
+
+The full `pytest -q` regression suite is the remaining integration gate for the Phase 3 exit review.
 
 Compliance claims must be based on actual legal, organizational, and operational requirements.
 
@@ -2300,7 +2319,7 @@ Resilience Engineering
 
 The immediate engineering focus is now:
 
-FINAL SECURITY / COMPLIANCE HARDENING
+PHASE 3 FULL REGRESSION + EXIT REVIEW
 
 followed by:
 
@@ -2360,4 +2379,6 @@ Harden
 
 The next immediate engineering target is:
 
-Phase 3 ? Final Security / Compliance Hardening
+Phase 3 Full Regression + Exit Review
+
+The targeted Phase 3 hardening scope is already GREEN; the remaining gate is the full-project regression before formally closing the phase.
