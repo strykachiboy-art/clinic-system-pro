@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from celery import Celery
 from celery.schedules import crontab
 from flask_cors import CORS
@@ -41,13 +43,64 @@ def check_if_token_revoked(
     return is_token_revoked(jwt_payload)
 
 
+def _resolve_cors_origins(
+    app,
+):
+    configured_origins = app.config.get(
+        "CORS_ALLOWED_ORIGINS",
+        "*",
+    )
+
+    if isinstance(
+        configured_origins,
+        str,
+    ):
+        configured_origins = (
+            configured_origins.strip()
+        )
+
+        if configured_origins == "*":
+            return "*"
+
+        return [
+            origin.strip()
+            for origin in configured_origins.split(",")
+            if origin.strip()
+        ]
+
+    if isinstance(
+        configured_origins,
+        (list, tuple, set),
+    ):
+        return [
+            str(origin).strip()
+            for origin in configured_origins
+            if str(origin).strip()
+        ]
+
+    return configured_origins
+
+
 def init_extensions(app):
     global redis_client
 
     db.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(
+        app,
+        db,
+    )
     jwt.init_app(app)
-    cors.init_app(app)
+
+    cors_origins = _resolve_cors_origins(
+        app
+    )
+
+    cors.init_app(
+        app,
+        origins=cors_origins,
+        supports_credentials=False,
+    )
+
     limiter.init_app(app)
 
     redis_url = app.config["REDIS_URL"]
@@ -58,11 +111,18 @@ def init_extensions(app):
     )
 
     socketio_options = {
-        "cors_allowed_origins": "*",
+        "cors_allowed_origins": (
+            cors_origins
+        ),
     }
 
-    if not app.config.get("TESTING", False):
-        socketio_options["message_queue"] = redis_url
+    if not app.config.get(
+        "TESTING",
+        False,
+    ):
+        socketio_options[
+            "message_queue"
+        ] = redis_url
 
     socketio.init_app(
         app,

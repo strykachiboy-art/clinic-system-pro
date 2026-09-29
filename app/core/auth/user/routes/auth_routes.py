@@ -1,4 +1,10 @@
-from flask import Blueprint, jsonify, request
+from flask import (
+    Blueprint,
+    current_app,
+    jsonify,
+    request,
+)
+
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -6,6 +12,7 @@ from flask_jwt_extended import (
     get_jwt_identity,
     jwt_required,
 )
+
 from pydantic import ValidationError as PydanticValidationError
 
 from app import db
@@ -31,6 +38,7 @@ from app.core.auth.user.services.user_service import (
 )
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError
+from app.extensions import limiter
 
 
 auth_bp = Blueprint(
@@ -50,7 +58,14 @@ def _safe_validation_errors(exc):
         for error in exc.errors()
     ]
 
+
 @auth_bp.post("/register")
+@limiter.limit(
+    lambda: current_app.config.get(
+        "AUTH_REGISTER_RATE_LIMIT",
+        "10 per minute",
+    )
+)
 def register():
     payload = request.get_json(
         silent=True
@@ -65,7 +80,9 @@ def register():
             {
                 "success": False,
                 "error": "Validation failed",
-"details": _safe_validation_errors(exc),
+                "details": _safe_validation_errors(
+                    exc
+                ),
             }
         ), 400
 
@@ -105,6 +122,12 @@ def register():
 
 
 @auth_bp.post("/login")
+@limiter.limit(
+    lambda: current_app.config.get(
+        "AUTH_LOGIN_RATE_LIMIT",
+        "5 per minute",
+    )
+)
 def login():
     payload = request.get_json(
         silent=True
@@ -119,7 +142,9 @@ def login():
             {
                 "success": False,
                 "error": "Validation failed",
-"details": _safe_validation_errors(exc),
+                "details": _safe_validation_errors(
+                    exc
+                ),
             }
         ), 400
 
@@ -204,7 +229,9 @@ def google_callback():
             {
                 "success": False,
                 "error": "Validation failed",
-"details": _safe_validation_errors(exc),
+                "details": _safe_validation_errors(
+                    exc
+                ),
             }
         ), 400
 
@@ -235,6 +262,12 @@ def google_callback():
 
 
 @auth_bp.post("/refresh")
+@limiter.limit(
+    lambda: current_app.config.get(
+        "AUTH_REFRESH_RATE_LIMIT",
+        "20 per minute",
+    )
+)
 @jwt_required(refresh=True)
 def refresh():
     identity = get_jwt_identity()
@@ -314,6 +347,12 @@ def refresh():
 
 
 @auth_bp.post("/logout")
+@limiter.limit(
+    lambda: current_app.config.get(
+        "AUTH_LOGOUT_RATE_LIMIT",
+        "20 per minute",
+    )
+)
 @jwt_required()
 def logout():
     payload = request.get_json(
@@ -356,6 +395,7 @@ def logout():
         ), 401
 
     current_user_id = get_jwt_identity()
+
     refresh_user_id = refresh_payload.get(
         "sub"
     )

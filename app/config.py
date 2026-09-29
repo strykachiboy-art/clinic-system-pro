@@ -67,8 +67,6 @@ class Config:
         "redis://localhost:6379/0",
     )
 
-    # Celery
-
     CELERY_BROKER_URL = REDIS_URL
 
     CELERY_RESULT_BACKEND = REDIS_URL
@@ -97,9 +95,8 @@ class Config:
     MAX_PROFILE_IMAGE_SIZE_BYTES = (
         5 * 1024 * 1024
     )
-    
-    
-        # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
     # Backup & Disaster Recovery
     # ------------------------------------------------------------------
 
@@ -120,7 +117,6 @@ class Config:
             "1",
         )
     )
-    
 
     # ------------------------------------------------------------------
     # Flask-Limiter
@@ -128,13 +124,52 @@ class Config:
 
     RATELIMIT_STORAGE_URI = REDIS_URL
 
+    RATELIMIT_HEADERS_ENABLED = True
+
+    # ------------------------------------------------------------------
+    # HTTP Security
+    # ------------------------------------------------------------------
+
+    CORS_ALLOWED_ORIGINS = os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "*",
+    )
+
+    SECURITY_HEADERS_ENABLED = True
+
+    SECURITY_HSTS_ENABLED = False
+
+    # ------------------------------------------------------------------
+    # Authentication Abuse Protection
+    # ------------------------------------------------------------------
+
+    AUTH_REGISTER_RATE_LIMIT = (
+        "10 per minute"
+    )
+
+    AUTH_LOGIN_RATE_LIMIT = (
+        "5 per minute"
+    )
+
+    AUTH_GOOGLE_RATE_LIMIT = (
+        "10 per minute"
+    )
+
+    AUTH_REFRESH_RATE_LIMIT = (
+        "20 per minute"
+    )
+
+    AUTH_LOGOUT_RATE_LIMIT = (
+        "20 per minute"
+    )
+
     # ------------------------------------------------------------------
     # AI
     # ------------------------------------------------------------------
 
-    OPENAI_API_KEY = (
+    OPENAI_API_KEY = os.environ.get(
         "OPENAI_API_KEY"
-        )
+    )
 
     OPENAI_MODEL = "gpt-4o-mini"
 
@@ -168,7 +203,31 @@ class ProductionConfig(Config):
         "JWT_SECRET_KEY"
     )
 
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL"
+    )
+
+    REDIS_URL = os.environ.get(
+        "REDIS_URL"
+    )
+
+    CELERY_BROKER_URL = REDIS_URL
+
+    CELERY_RESULT_BACKEND = REDIS_URL
+
+    RATELIMIT_STORAGE_URI = REDIS_URL
+
+    CORS_ALLOWED_ORIGINS = os.environ.get(
+        "CORS_ALLOWED_ORIGINS"
+    )
+
+    SECURITY_HEADERS_ENABLED = True
+
+    SECURITY_HSTS_ENABLED = True
+
     DEBUG = False
+
+
 class TestingConfig(Config):
     TESTING = True
 
@@ -184,6 +243,7 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = (
         "sqlite:///:memory:"
     )
+
     # ------------------------------------------------------------------
     # Isolated Test Redis
     # ------------------------------------------------------------------
@@ -198,6 +258,8 @@ class TestingConfig(Config):
     CELERY_RESULT_BACKEND = REDIS_URL
 
     RATELIMIT_STORAGE_URI = REDIS_URL
+
+    RATELIMIT_ENABLED = False
 
     # ------------------------------------------------------------------
     # Test Encryption Key
