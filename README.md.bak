@@ -2,7 +2,7 @@
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, the targeted Phase 3 security/compliance hardening scope is GREEN, the pre-full-suite security gate is GREEN with 115 focused security tests passing, and the full-project regression gate is next.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, the targeted Phase 3 security/compliance hardening scope is GREEN, and the full regression gate is in progress.**
 
 **Status date: September 29, 2026**
 
@@ -1490,8 +1490,6 @@ Core Backend Architecture
 
 Authentication
 
-Authentication Rate Limiting
-
 Authorization
 
 RBAC
@@ -1538,8 +1536,6 @@ Consent Guard
 
 Backup / Recovery
 
-Backup / Restore Drill Implementation
-
 Current-cycle Load Testing
 
 Feedback
@@ -1548,17 +1544,7 @@ Resilience Engineering
 
 Targeted Final Security / Compliance Hardening
 
-Pre-Full-Suite Security Verification
-
-The targeted Phase 3 hardening scope is GREEN.
-
-Current immediate gate:
-
-PHASE 3 FULL REGRESSION + EXIT REVIEW
-
-The full regression suite remains the final integration gate before formally closing Phase 3.
-
-The controlled operational Backup / Restore Drill remains a separate verification activity after the software regression gate.
+The Phase 3 targeted security scope is GREEN. Full-project regression and the formal Phase 3 exit review remain the final gates before moving to Observability / Operations.
 
 # 55. Authoritative Master Roadmap
 
@@ -1664,9 +1650,9 @@ Flutter offline synchronization remains part of the later Flutter/offline roadma
 
 # 58. Phase 3 — Final Security / Compliance
 
-Status: TARGETED HARDENING GREEN / FULL REGRESSION PENDING
+Status: TARGETED HARDENING GREEN / FULL REGRESSION IN PROGRESS
 
-The targeted Phase 3 security hardening pass has been completed across the current backend security boundaries.
+The targeted Phase 3 hardening pass has been completed across the current backend security boundaries.
 
 Verified areas include:
 
@@ -1681,89 +1667,23 @@ Verified areas include:
 - security behavior during failure and recovery
 - validation/input-abuse resistance at security boundaries
 - audit tamper-resistance and actor integrity
-- authentication rate limiting
-- CORS origin hardening
-- Socket.IO origin enforcement
-- Redis-backed Flask-Limiter configuration
-- security headers
-- production security configuration
 
-## Current Phase 3 Verification Gate
-
-The pre-full-suite security verification gate is GREEN.
-
-Focused security verification:
-
-115 passed
-0 failed
-0 errors
-
-The verified gate includes:
-
-- configuration security
-- audit tamper-resistance
-- background-job tenant context
-- realtime authorization
-- HIE access boundaries
-- production security controls
-- security failure/recovery behavior
-- validation/input-abuse resistance
-- authentication rate-limit implementation
-- application factory startup
-- authentication route registration
-- import integrity
-- Alembic/Flask-Migrate verification
-
-Authentication routes currently resolve cleanly to their intended endpoints:
-
-/api/v1/auth/register
-/api/v1/auth/login
-/api/v1/auth/google
-/api/v1/auth/google/callback
-/api/v1/auth/refresh
-/api/v1/auth/logout
-
-The hardened extension layer verifies:
-
-- configured CORS origins
-- no unconditional Socket.IO wildcard
-- credentialed CORS disabled
-- Redis-backed Flask-Limiter
-- Redis-backed Socket.IO message queue
-- existing Celery scheduling
-- scheduled backup execution
-- scheduled backup-retention execution
-
-The backup/restore implementation has also passed static safety verification, including:
-
-- dedicated source/target database validation
-- dedicated source/target filesystem validation
-- restore confirmation requirement
-- PostgreSQL-only restore targets
-- `pg_restore` / `psql` availability checks
-- authentication invalidation
-- chat outbox recovery
-- post-restore verification
-- processing-outbox detection
-- restore-target collision protection
-
-The actual operational backup/restore exercise remains a separate controlled drill and is not considered complete until it has been executed against a genuinely separate restore target.
-
-## Existing Verification Evidence
+Current targeted verification evidence includes:
 
 Audit tamper-resistance: 11 passed
-
 Audit test suite: 223 passed
-
+Core security suite: 108 passed
 Phase 2 resilience final suite: 66 passed, 0 failed, 0 skipped
 
-Focused Phase 3 security verification: 115 passed
+The audit hardening specifically verifies server-authoritative actor attribution, tenant-consistent audit records, sensitive-value redaction, transactional behavior, historical audit persistence, absence of public audit mutation endpoints, and rejection of client-controlled actor scope.
 
-The full `pytest -q` regression suite is now the remaining integration gate for the Phase 3 exit review.
+The full `pytest -q` regression suite is the remaining integration gate for the Phase 3 exit review.
 
 Compliance claims must be based on actual legal, organizational, and operational requirements.
 
 The project must not claim certifications it has not obtained.
+
+---
 
 # 59. Phase 4 — Observability / Operations
 
@@ -2113,41 +2033,19 @@ Perform final security verification including:
 
 # 82. Phase 27 — Backup / Restore Drill
 
-Status: IMPLEMENTATION VERIFIED / OPERATIONAL DRILL PENDING
+Perform a production-like drill that validates:
 
-The controlled backup/restore drill implementation is present and has passed static safety verification.
-
-Verified controls include:
-
-- backup restoration into a dedicated PostgreSQL target
-- dedicated filesystem restore target
-- source/target database separation
-- source/target storage separation
-- restore confirmation
-- `pg_restore` validation
-- `psql` validation
+- backup creation
+- restore
+- schema integrity
+- data integrity
 - authentication invalidation
-- chat outbox recovery
-- post-restore database verification
-- migration revision verification
-- restored user/clinic/audit counts
-- processing-outbox verification
-- restore-target collision protection
-- JSON recovery evidence
+- background-job recovery
+- outbox recovery
+- application restart
+- post-restore validation
 
-The operational drill itself must be executed against a genuinely separate PostgreSQL database and filesystem target.
-
-A restore drill is not considered complete merely because the implementation and tests exist.
-
-The operational closure criteria are:
-
-```text
-success: true
-authentication_invalidated: true
-outbox_recovery_completed: true
-post_restore_verification_completed: true
-processing_outbox_count: 0
-```
+---
 
 # 83. Phase 28 — Release Candidate Freeze
 
