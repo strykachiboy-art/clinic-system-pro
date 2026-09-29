@@ -373,6 +373,7 @@ def change_user_role(
             "reason": normalized_reason,
         },
         user_id=actor.id,
+        clinic_id=target.clinic_id,
     )
 
     return AccessControlRoleChangeResponseSchema(
@@ -449,6 +450,7 @@ def change_user_status(
             "reason": normalized_reason,
         },
         user_id=actor.id,
+        clinic_id=target.clinic_id,
     )
 
     return AccessControlStatusChangeResponseSchema(
@@ -534,6 +536,7 @@ def transfer_user_clinic(
             "reason": normalized_reason,
         },
         user_id=actor.id,
+        clinic_id=target.clinic_id,
     )
 
     return AccessControlClinicTransferResponseSchema(
