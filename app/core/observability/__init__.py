@@ -13,6 +13,9 @@ from app.core.observability.metrics import (
 from app.core.observability.request_metrics import (
     init_request_metrics,
 )
+from app.core.observability.operational_metrics import (
+    collect_operational_snapshot,
+)
 from app.core.observability.redis_metrics import (
     collect_redis_metrics,
 )
@@ -28,5 +31,6 @@ __all__ = [
     "init_celery_metrics",
     "init_db_metrics",
     "init_request_metrics",
+    "collect_operational_snapshot",
     "collect_system_metrics",
 ]
