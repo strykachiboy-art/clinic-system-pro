@@ -10,6 +10,7 @@ from app.modules.chat.models.conversation_participant_model import (
     ConversationParticipant,
 )
 from app.modules.chat.models.message_model import Message
+from app.core.enums.chat_enums import ParticipantStatus
 
 
 class ChatSecurityService:
@@ -252,6 +253,53 @@ class ChatSecurityService:
         )
 
         return conversation
+    
+    @classmethod
+    def get_active_conversation_recipient_user_ids(
+      cls,
+      clinic_id: int,
+      conversation_id: int,
+    ) -> list[int]:
+      clinic_id = cls._validate_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
+      conversation_id = cls._validate_id(
+        conversation_id,
+        "Conversation ID",
+    )
+
+      statement = (
+         db.select(
+            ConversationParticipant.user_id,
+         )
+         .join(
+            User,
+            User.id
+            == ConversationParticipant.user_id,
+         )
+         .where(
+            ConversationParticipant.clinic_id
+            == clinic_id,
+            ConversationParticipant.conversation_id
+            == conversation_id,
+            ConversationParticipant.status
+            == ParticipantStatus.ACCEPTED,
+            User.clinic_id
+            == clinic_id,
+            User.is_active.is_(True),
+        )
+         .order_by(
+            ConversationParticipant.user_id.asc(),
+        )
+     )
+
+      return list(
+        db.session.execute(
+            statement,
+        ).scalars()
+    )
 
     @classmethod
     def get_message(

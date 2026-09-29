@@ -16,7 +16,7 @@ from app.modules.chat.tasks.chat_outbox_task import (
     recover_stale_chat_outbox,
 )
 from app.modules.chat.realtime.chat_socket import (
-    conversation_room,
+    user_room,
 )
 
 
@@ -60,6 +60,20 @@ def _create_event(
     )
 
 
+@pytest.fixture(autouse=True)
+def authorized_outbox_recipient(
+    monkeypatch,
+    user,
+):
+    monkeypatch.setattr(
+        chat_outbox_task.ChatSecurityService,
+        "get_active_conversation_recipient_user_ids",
+        lambda clinic_id, conversation_id: [
+            user.id,
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     (
         "event_type",
@@ -83,6 +97,7 @@ def _create_event(
 def test_process_chat_outbox_emits_and_processes_event(
     clinic,
     monkeypatch,
+    user,
     event_type,
     expected_socket_event,
 ):
@@ -141,9 +156,9 @@ def test_process_chat_outbox_emits_and_processes_event(
 
     assert emission["event_name"] == expected_socket_event
     assert emission["namespace"] == "/chat"
-    assert emission["room"] == conversation_room(
+    assert emission["room"] == user_room(
         clinic.id,
-        123,
+        user.id,
     )
 
     assert emission["payload"] == {

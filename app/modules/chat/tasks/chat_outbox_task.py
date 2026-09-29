@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 from app.extensions import celery, socketio
 from app.modules.chat.realtime.chat_socket import (
-    conversation_room,
+    user_room,
+)
+from app.modules.chat.services.chat_security_service import (
+    ChatSecurityService,
 )
 from app.modules.chat.workers.chat_outbox_worker import (
     claim_pending_events,
@@ -55,15 +58,24 @@ def _emit_outbox_event(event) -> None:
             "conversation_id"
         )
 
-    socketio.emit(
-        event_name,
-        payload,
-        room=conversation_room(
+    recipient_user_ids = (
+        ChatSecurityService
+        .get_active_conversation_recipient_user_ids(
             event.clinic_id,
             conversation_id,
-        ),
-        namespace="/chat",
+        )
     )
+
+    for user_id in recipient_user_ids:
+        socketio.emit(
+            event_name,
+            payload,
+            room=user_room(
+                event.clinic_id,
+                user_id,
+            ),
+            namespace="/chat",
+        )
 
 
 @celery.task(
