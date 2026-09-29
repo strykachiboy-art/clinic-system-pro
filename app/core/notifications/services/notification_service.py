@@ -268,6 +268,11 @@ def _validate_notification_target(
         )
 
     return clinic, user
+# ============================================================================
+# NOTIFICATION HELPERS
+# ============================================================================
+
+
 
 
 def _get_notification(
