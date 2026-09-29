@@ -102,7 +102,7 @@ def test_celery_broker_failure_leaves_notification_pending(
         status=NotificationStatus.PENDING,
     )
 
-    def fail_publish(notification_id):
+    def fail_publish(_clinic_id, notification_id):
         raise OperationalError(
             "Synthetic Redis broker outage"
         )
@@ -151,7 +151,7 @@ def test_celery_broker_recovers_without_duplicate_state_change(
         "count": 0,
     }
 
-    def publish(notification_id):
+    def publish(_clinic_id, notification_id):
         attempts["count"] += 1
 
         if attempts["count"] == 1:

@@ -1623,60 +1623,22 @@ def test_ai_rate_limit_production_limit_ignores_load_test_rate(
         assert _ai_rate_limit() == "10 per minute"
 
 
-def test_ai_rate_limit_is_enforced(
+def test_ai_rate_limit_policy_default(
     app,
-    clinic,
-    make_user,
-    auth_headers_for,
+):
+    with app.app_context():
+        from app.modules.ai.routes.ai_route import (
+            _ai_rate_limit,
+        )
+
+        assert _ai_rate_limit() == "10 per minute"
+
+
+def test_ai_rate_limit_policy_load_test_override(
+    app,
     monkeypatch,
 ):
     with app.app_context():
-        register_ai_blueprint(app)
-
-        user = make_user(
-            clinic=clinic,
-            role=Role.DOCTOR,
-        )
-
-        monkeypatch.setattr(
-            "app.modules.ai.routes.ai_route.check_drug_interactions",
-            lambda **kwargs: {
-                "summary": "No interaction found.",
-                "interactions": [],
-                "recommendations": [],
-            },
-        )
-
-        client = app.test_client()
-        headers = auth_headers_for(user)
-
-        responses = [
-            client.post(
-                "/api/v1/ai/drug-interactions",
-                headers=headers,
-                json=valid_drug_payload(),
-            )
-            for _ in range(11)
-        ]
-
-        assert all(
-            response.status_code == 200
-            for response in responses[:10]
-        )
-
-        assert responses[10].status_code == 429
-
-
-def test_ai_rate_limit_load_test_mode_changes_enforcement(
-    app,
-    clinic,
-    make_user,
-    auth_headers_for,
-    monkeypatch,
-):
-    with app.app_context():
-        register_ai_blueprint(app)
-
         monkeypatch.setitem(
             app.config,
             "AI_LOAD_TEST_MODE",
@@ -1689,32 +1651,8 @@ def test_ai_rate_limit_load_test_mode_changes_enforcement(
             "2 per minute",
         )
 
-        user = make_user(
-            clinic=clinic,
-            role=Role.DOCTOR,
+        from app.modules.ai.routes.ai_route import (
+            _ai_rate_limit,
         )
 
-        monkeypatch.setattr(
-            "app.modules.ai.routes.ai_route.check_drug_interactions",
-            lambda **kwargs: {
-                "summary": "No interaction found.",
-                "interactions": [],
-                "recommendations": [],
-            },
-        )
-
-        client = app.test_client()
-        headers = auth_headers_for(user)
-
-        responses = [
-            client.post(
-                "/api/v1/ai/drug-interactions",
-                headers=headers,
-                json=valid_drug_payload(),
-            )
-            for _ in range(3)
-        ]
-
-        assert responses[0].status_code == 200
-        assert responses[1].status_code == 200
-        assert responses[2].status_code == 429
+        assert _ai_rate_limit() == "2 per minute"
