@@ -270,11 +270,6 @@ def _validate_notification_target(
     return clinic, user
 
 
-# ============================================================================
-# NOTIFICATION HELPERS
-# ============================================================================
-
-
 def _get_notification(
     notification_id,
     *,
@@ -655,6 +650,7 @@ def queue_notification_delivery(
         )
 
     deliver_notification.delay(
+        notification.clinic_id,
         notification.id,
     )
 
@@ -670,6 +666,7 @@ def queue_notification_delivery(
     name="deliver_notification",
 )
 def deliver_notification(
+    clinic_id,
     notification_id,
 ):
     """
@@ -686,6 +683,11 @@ def deliver_notification(
 
     try:
         _validate_positive_id(
+            clinic_id,
+            "Clinic ID",
+        )
+
+        _validate_positive_id(
             notification_id,
             "Notification ID",
         )
@@ -695,6 +697,7 @@ def deliver_notification(
     try:
         notification = _get_notification(
             notification_id,
+            clinic_id=clinic_id,
             lock=True,
         )
     except NotFoundError:

@@ -897,8 +897,14 @@ def get_appointments_for_staff(
     name="send_appointment_reminder"
 )
 def send_appointment_reminder(
+    clinic_id: int,
     appointment_id: int,
 ):
+    _validate_positive_id(
+        clinic_id,
+        "Clinic ID",
+    )
+
     _validate_positive_id(
         appointment_id,
         "Appointment ID",
@@ -912,14 +918,15 @@ def send_appointment_reminder(
     if appointment is None:
         return
 
+    if appointment.clinic_id != clinic_id:
+        return
+
     if appointment.reminder_sent:
         return
 
     appointment.reminder_sent = True
 
     db.session.commit()
-
-
 @celery.task(
     name="check_upcoming_appointments"
 )
@@ -958,5 +965,6 @@ def check_upcoming_appointments():
 
     for appointment in upcoming:
         send_appointment_reminder.delay(
-            appointment.id
+            appointment.clinic_id,
+            appointment.id,
         )

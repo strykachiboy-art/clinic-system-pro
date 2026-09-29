@@ -1,4 +1,4 @@
-﻿# app/tests/modules/appointment/test_appointment_service.py
+# app/tests/modules/appointment/test_appointment_service.py
 
 from datetime import date, datetime, timedelta
 
@@ -2382,6 +2382,7 @@ def test_send_appointment_reminder_ignores_missing_appointment(
     )
 
     result = appointment_service.send_appointment_reminder(
+        10,
         999,
     )
 
@@ -2404,6 +2405,7 @@ def test_send_appointment_reminder_ignores_already_sent_reminder(
     )
 
     result = appointment_service.send_appointment_reminder(
+        10,
         12,
     )
 
@@ -2439,6 +2441,7 @@ def test_send_appointment_reminder_marks_reminder_sent(
     )
 
     result = appointment_service.send_appointment_reminder(
+        10,
         13,
     )
 
@@ -2454,7 +2457,7 @@ def test_send_appointment_reminder_rejects_invalid_id(
         ValidationError,
         match="Appointment ID must be a positive integer",
     ):
-        appointment_service.send_appointment_reminder(0)
+        appointment_service.send_appointment_reminder(10, 0)
 
 
 # ============================================================================
@@ -2502,8 +2505,8 @@ def test_check_upcoming_appointments_queues_reminders(
     queued = []
 
     class FakeReminderTask:
-        def delay(self, appointment_id):
-            queued.append(appointment_id)
+        def delay(self, clinic_id, appointment_id):
+            queued.append((clinic_id, appointment_id))
 
     monkeypatch.setattr(
         appointment_service,
@@ -2513,7 +2516,10 @@ def test_check_upcoming_appointments_queues_reminders(
 
     appointment_service.check_upcoming_appointments()
 
-    assert queued == [20, 21]
+    assert queued == [
+        (10, 20),
+        (10, 21),
+    ]
 
 
 def test_check_upcoming_appointments_handles_no_upcoming_appointments(
@@ -2539,8 +2545,8 @@ def test_check_upcoming_appointments_handles_no_upcoming_appointments(
     queued = []
 
     class FakeReminderTask:
-        def delay(self, appointment_id):
-            queued.append(appointment_id)
+        def delay(self, clinic_id, appointment_id):
+            queued.append((clinic_id, appointment_id))
 
     monkeypatch.setattr(
         appointment_service,

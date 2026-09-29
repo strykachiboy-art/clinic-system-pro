@@ -303,8 +303,8 @@ def test_queue_external_notification(
 
         queued_ids = []
 
-        def fake_delay(notification_id):
-            queued_ids.append(notification_id)
+        def fake_delay(clinic_id, notification_id):
+            queued_ids.append((clinic_id, notification_id))
 
         monkeypatch.setattr(
             notification_service.deliver_notification,
@@ -317,7 +317,7 @@ def test_queue_external_notification(
         )
 
         assert result.id == notification_id
-        assert queued_ids == [notification_id]
+        assert queued_ids == [(clinic.id, notification_id)]
 
 
 @pytest.mark.parametrize(
@@ -371,7 +371,7 @@ def test_queue_allows_failed_notification(
         monkeypatch.setattr(
             notification_service.deliver_notification,
             "delay",
-            lambda notification_id: queued_ids.append(notification_id),
+            lambda clinic_id, notification_id: queued_ids.append((clinic_id, notification_id)),
         )
 
         result = notification_service.queue_notification_delivery(
@@ -379,7 +379,7 @@ def test_queue_allows_failed_notification(
         )
 
         assert result.id == notification_id
-        assert queued_ids == [notification_id]
+        assert queued_ids == [(clinic.id, notification_id)]
 
 
 # ============================================================================
@@ -391,8 +391,8 @@ def test_deliver_notification_invalid_id_returns_false(
     app,
 ):
     with app.app_context():
-        assert notification_service.deliver_notification(0) is False
-        assert notification_service.deliver_notification(-1) is False
+        assert notification_service.deliver_notification(1, 0) is False
+        assert notification_service.deliver_notification(1, -1) is False
 
 
 def test_deliver_notification_missing_notification_returns_false(
@@ -400,7 +400,7 @@ def test_deliver_notification_missing_notification_returns_false(
 ):
     with app.app_context():
         assert (
-            notification_service.deliver_notification(999999)
+            notification_service.deliver_notification(1, 999999)
             is False
         )
 
@@ -442,9 +442,7 @@ def test_deliver_notification_is_idempotent(
             fake_provider,
         )
 
-        result = notification_service.deliver_notification(
-            notification_id
-        )
+        result = notification_service.deliver_notification(clinic.id, notification_id)
 
         assert result is True
         assert called is False
@@ -459,7 +457,8 @@ def test_deliver_in_app_notification_returns_false(
 
         assert (
             notification_service.deliver_notification(
-                notification_id
+                notification.clinic_id,
+                notification_id,
             )
             is False
         )
@@ -1205,9 +1204,7 @@ def test_deliver_notification_push_uses_provider(
             factory,
         )
 
-        result = notification_service.deliver_notification(
-            notification_id
-        )
+        result = notification_service.deliver_notification(notification.clinic_id, notification_id)
 
         notification = db_session.get(
             Notification,
@@ -1264,7 +1261,8 @@ def test_deliver_notification_push_provider_rejection_marks_failed(
 
         with pytest.raises(RuntimeError):
             notification_service.deliver_notification(
-                notification_id
+                clinic.id,
+                notification_id,
             )
 
         notification = db_session.get(
@@ -1329,7 +1327,8 @@ def test_deliver_notification_push_provider_exception_marks_failed(
             match="Push provider timeout",
         ):
             notification_service.deliver_notification(
-                notification_id
+                clinic.id,
+                notification_id,
             )
 
         notification = db_session.get(
@@ -1378,9 +1377,7 @@ def test_deliver_notification_success(
             lambda _notification: True,
         )
 
-        result = notification_service.deliver_notification(
-            notification_id
-        )
+        result = notification_service.deliver_notification(clinic.id, notification_id)
 
         notification = db_session.get(
             Notification,
@@ -1421,7 +1418,8 @@ def test_deliver_notification_provider_rejection_marks_failed(
 
         with pytest.raises(RuntimeError):
             notification_service.deliver_notification(
-                notification_id
+                clinic.id,
+                notification_id,
             )
 
         notification = db_session.get(
@@ -1471,7 +1469,8 @@ def test_deliver_notification_provider_exception_marks_failed(
             match="Provider timeout",
         ):
             notification_service.deliver_notification(
-                notification_id
+                clinic.id,
+                notification_id,
             )
 
         notification = db_session.get(
@@ -1517,7 +1516,8 @@ def test_deliver_notification_truncates_provider_error(
 
         with pytest.raises(RuntimeError):
             notification_service.deliver_notification(
-                notification_id
+                clinic.id,
+                notification_id,
             )
 
         notification = db_session.get(
