@@ -117,6 +117,7 @@ def register_error_handlers(app: Flask) -> None:
                 component="api",
                 severity="error",
                 request_id=request_id,
+                trace_id=get_trace_id(),
                 method=method,
                 route=route,
                 status=500,

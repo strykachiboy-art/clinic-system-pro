@@ -53,6 +53,7 @@ def test_record_failure_event_stores_safe_operational_fields():
         severity="error",
         timestamp="2026-09-29T10:00:00+00:00",
         request_id="request-1\r\n",
+        trace_id="trace-1\r\n",
         route="/api/v1/test",
         method="GET",
         status=500,
@@ -61,6 +62,7 @@ def test_record_failure_event_stores_safe_operational_fields():
 
     assert event is not None
     assert event["request_id"] == "request-1"
+    assert event["trace_id"] == "trace-1"
     assert event["error_type"] == "RuntimeError"
     assert "message" not in event
     assert "traceback" not in event

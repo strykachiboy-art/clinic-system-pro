@@ -73,6 +73,7 @@ def record_failure_event(
     severity: str = "error",
     timestamp: str | None = None,
     request_id: str | None = None,
+    trace_id: str | None = None,
     method: str | None = None,
     route: str | None = None,
     status: int | None = None,
@@ -110,6 +111,9 @@ def record_failure_event(
         "severity": severity,
         "request_id": _safe_text(
             request_id
+        ),
+        "trace_id": _safe_text(
+            trace_id
         ),
         "method": _safe_text(method),
         "route": _safe_text(route),

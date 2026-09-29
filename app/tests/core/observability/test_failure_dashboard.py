@@ -33,6 +33,7 @@ def _event(
             "component": component,
             "severity": severity,
             "request_id": "request-123",
+            "trace_id": "trace-123",
             "method": "GET",
             "route": "/api/v1/test",
             "status": 500,
@@ -77,6 +78,10 @@ def test_failure_dashboard_returns_curated_failures(
         ]
         == 2
     )
+
+    assert result[
+        "recent_failures"
+    ][0]["trace_id"] == "trace-123"
 
     serialized = str(result)
 

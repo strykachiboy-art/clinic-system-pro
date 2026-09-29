@@ -174,6 +174,7 @@ def init_request_metrics(app: Flask) -> None:
                         "request_id",
                         None,
                     ),
+                    trace_id=get_trace_id(),
                     method=request.method,
                     route=route,
                     status=response.status_code,

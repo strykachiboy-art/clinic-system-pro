@@ -87,6 +87,9 @@ def _safe_event(
         "request_id": event.get(
             "request_id"
         ),
+        "trace_id": event.get(
+            "trace_id"
+        ),
         "method": event.get(
             "method"
         ),
