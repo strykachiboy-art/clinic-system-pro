@@ -53,7 +53,14 @@ GOOGLE_OAUTH_STATE_PREFIX = (
 
 GOOGLE_OAUTH_STATE_TTL = 600
 
-
+GOOGLE_OAUTH_STATE_CONSUME_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if not value then
+    return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+"""
 # ============================================================================
 # OAUTH STATE
 # ============================================================================
@@ -118,16 +125,16 @@ def validate_google_oauth_state(
     key = _google_state_key(state)
 
     try:
-        if not extensions.redis_client.exists(
-            key
-        ):
+        consumed = extensions.redis_client.eval(
+            GOOGLE_OAUTH_STATE_CONSUME_SCRIPT,
+            1,
+            key,
+        )
+
+        if int(consumed or 0) != 1:
             raise ValidationError(
                 "Invalid or expired Google OAuth state"
             )
-
-        extensions.redis_client.delete(
-            key
-        )
 
     except (
         ConnectionError,

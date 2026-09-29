@@ -177,7 +177,7 @@ def test_validate_google_oauth_state_raises_when_redis_unavailable():
 def test_validate_google_oauth_state_rejects_invalid_state():
     redis_mock = MagicMock()
 
-    redis_mock.exists.return_value = 0
+    redis_mock.eval.return_value = 0
 
     with patch.object(
         google_auth_service.extensions,
@@ -200,17 +200,16 @@ def test_validate_google_oauth_state_rejects_invalid_state():
         "bad-state"
     )
 
-    redis_mock.exists.assert_called_once_with(
-        key
+    redis_mock.eval.assert_called_once_with(
+        google_auth_service.GOOGLE_OAUTH_STATE_CONSUME_SCRIPT,
+        1,
+        key,
     )
 
-    redis_mock.delete.assert_not_called()
-
-
-def test_validate_google_oauth_state_accepts_and_deletes_valid_state():
+def test_validate_google_oauth_state_accepts_and_consumes_valid_state():
     redis_mock = MagicMock()
 
-    redis_mock.exists.return_value = 1
+    redis_mock.eval.return_value = 1
 
     with patch.object(
         google_auth_service.extensions,
@@ -230,19 +229,16 @@ def test_validate_google_oauth_state_accepts_and_deletes_valid_state():
         "valid-state"
     )
 
-    redis_mock.exists.assert_called_once_with(
-        key
+    redis_mock.eval.assert_called_once_with(
+        google_auth_service.GOOGLE_OAUTH_STATE_CONSUME_SCRIPT,
+        1,
+        key,
     )
-
-    redis_mock.delete.assert_called_once_with(
-        key
-    )
-
 
 def test_validate_google_oauth_state_handles_redis_connection_error():
     redis_mock = MagicMock()
 
-    redis_mock.exists.side_effect = ConnectionError(
+    redis_mock.eval.side_effect = ConnectionError(
         "Redis connection failed"
     )
 
@@ -266,7 +262,7 @@ def test_validate_google_oauth_state_handles_redis_connection_error():
 def test_validate_google_oauth_state_handles_redis_timeout_error():
     redis_mock = MagicMock()
 
-    redis_mock.exists.side_effect = TimeoutError(
+    redis_mock.eval.side_effect = TimeoutError(
         "Redis timeout"
     )
 
@@ -290,7 +286,7 @@ def test_validate_google_oauth_state_handles_redis_timeout_error():
 def test_validate_google_oauth_state_does_not_swallow_unexpected_errors():
     redis_mock = MagicMock()
 
-    redis_mock.exists.side_effect = RuntimeError(
+    redis_mock.eval.side_effect = RuntimeError(
         "Unexpected Redis error"
     )
 
