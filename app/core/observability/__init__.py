@@ -17,6 +17,11 @@ from app.core.observability.alerts import (
     DEFAULT_THRESHOLDS,
     evaluate_operational_alerts,
 )
+from app.core.observability.alert_delivery import (
+    AlertDeliverySink,
+    build_alert_delivery_events,
+    deliver_alert_events,
+)
 from app.core.observability.alert_state import (
     ALERT_ACTIVE_SET_KEY,
     ALERT_STATE_PREFIX,
@@ -35,6 +40,9 @@ from app.core.observability.system_metrics import (
 
 __all__ = [
     "aggregate_performance_metrics",
+    "AlertDeliverySink",
+    "build_alert_delivery_events",
+    "deliver_alert_events",
     "DEFAULT_THRESHOLDS",
     "record_operational_alerts",
     "ALERT_STATE_PREFIX",
