@@ -17,6 +17,11 @@ from app.core.observability.alerts import (
     DEFAULT_THRESHOLDS,
     evaluate_operational_alerts,
 )
+from app.core.observability.alert_state import (
+    ALERT_ACTIVE_SET_KEY,
+    ALERT_STATE_PREFIX,
+    record_operational_alerts,
+)
 from app.core.observability.operational_metrics import (
     collect_operational_snapshot,
 )
@@ -31,6 +36,9 @@ from app.core.observability.system_metrics import (
 __all__ = [
     "aggregate_performance_metrics",
     "DEFAULT_THRESHOLDS",
+    "record_operational_alerts",
+    "ALERT_STATE_PREFIX",
+    "ALERT_ACTIVE_SET_KEY",
     "collect_celery_metrics",
     "collect_redis_metrics",
     "init_celery_metrics",

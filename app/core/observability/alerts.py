@@ -22,8 +22,9 @@ def _alert(
     message: str,
     observed_value: Any = None,
     threshold: Any = None,
+    resource: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "code": code,
         "severity": severity,
         "component": component,
@@ -31,6 +32,11 @@ def _alert(
         "observed_value": observed_value,
         "threshold": threshold,
     }
+
+    if resource is not None:
+        result["resource"] = resource
+
+    return result
 
 
 def _get_thresholds(
@@ -180,6 +186,7 @@ def evaluate_operational_alerts(
                         threshold=resolved[
                             "queue_depth_critical"
                         ],
+                        resource=str(queue_name),
                     )
                 )
 
@@ -198,6 +205,7 @@ def evaluate_operational_alerts(
                         threshold=resolved[
                             "queue_depth_warning"
                         ],
+                        resource=str(queue_name),
                     )
                 )
 
