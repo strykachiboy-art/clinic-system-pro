@@ -9,8 +9,22 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN apt-get -o Acquire::Retries=5 update && \
-    apt-get -o Acquire::Retries=5 install -y --no-install-recommends postgresql-client && \
+RUN apt-get -o Acquire::Retries=10 update && \
+    apt-get -o Acquire::Retries=10 install -y --no-install-recommends ca-certificates curl && \
+    mkdir -p /usr/share/postgresql-common/pgdg && \
+    curl --retry 10 --fail --silent --show-error \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    printf '%s\n' \
+        'Types: deb' \
+        'URIs: https://apt.postgresql.org/pub/repos/apt' \
+        'Suites: trixie-pgdg' \
+        'Architectures: amd64' \
+        'Components: main' \
+        'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+        > /etc/apt/sources.list.d/pgdg.sources && \
+    apt-get -o Acquire::Retries=10 update && \
+    apt-get -o Acquire::Retries=10 install -y --no-install-recommends postgresql-client-18 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip && \
