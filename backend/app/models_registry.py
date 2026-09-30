@@ -154,6 +154,9 @@ from app.modules.feedback.models.feedback_model import Feedback
 from app.modules.feedback.models.feedback_comment_model import FeedbackComment
 from app.modules.feedback.models.feedback_reaction_model import FeedbackReaction
 
+# Department
+from app.modules.department.models.department_model import Department
+
 __all__ = [
     # Core
     "User",
@@ -272,4 +275,7 @@ __all__ = [
     "Feedback",
     "FeedbackComment",
     "FeedbackReaction",
+    
+    # Department
+    "Department",
 ]

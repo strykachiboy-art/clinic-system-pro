@@ -192,6 +192,11 @@ class Clinic(db.Model):
         "Staff",
         back_populates="clinic",
     )
+    
+    departments = db.relationship(
+        "Department",
+        back_populates="clinic",
+    )
 
     ai_logs = db.relationship(
         "AILog",
@@ -286,7 +291,7 @@ class Clinic(db.Model):
         "Feedback",
         back_populates="clinic",
     )
-
+    
     def __repr__(self):
         return (
             f"<Clinic {self.name} "
