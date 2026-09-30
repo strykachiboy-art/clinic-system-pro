@@ -85,6 +85,11 @@ class Department(db.Model):
         back_populates="departments",
     )
 
+    staff = db.relationship(
+        "Staff",
+        back_populates="department",
+    )
+
     def __repr__(self) -> str:
         return (
             f"<Department {self.name} "

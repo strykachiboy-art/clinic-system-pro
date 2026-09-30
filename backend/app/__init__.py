@@ -331,6 +331,7 @@ def register_blueprints(app):
         billing_bp,
         clinic_bp,
         consultation_bp,
+        department_bp,
         inventory_bp,
         lab_bp,
         patient_bp,

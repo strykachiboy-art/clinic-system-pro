@@ -13,7 +13,10 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import (
+    get_current_clinic_id,
+    role_required,
+)
 
 from app.modules.staff.schemas.staff_schema import (
     LeaveListQuerySchema,
@@ -27,6 +30,10 @@ from app.modules.staff.schemas.staff_schema import (
     StaffListQuerySchema,
     StaffStatusUpdateSchema,
     StaffUpdateSchema,
+)
+
+from app.modules.staff.schemas.staff_department_schema import (
+    StaffDepartmentUpdateSchema,
 )
 
 from app.modules.staff.schemas.excuse_schema import (
@@ -55,6 +62,11 @@ from app.modules.staff.services.staff_service import (
     update_staff,
 )
 
+from app.modules.staff.services.staff_department_service import (
+    get_staff_department,
+    set_staff_department,
+)
+
 from app.modules.staff.services.excuse_service import (
     approve_excuse,
     create_excuse,
@@ -73,10 +85,12 @@ staff_bp = Blueprint(
 
 
 MANAGEMENT_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
 )
 
 STAFF_VIEW_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
     Role.DOCTOR,
     Role.NURSE,
@@ -93,15 +107,18 @@ STAFF_VIEW_ROLES = (
 )
 
 LEAVE_MANAGEMENT_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
 )
 
 PAYROLL_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
     Role.ACCOUNTANT,
 )
 
 EXCUSE_REVIEW_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
 )
 
@@ -143,37 +160,9 @@ def _current_user() -> User:
 def _current_clinic_id(
     user: User | None = None,
 ) -> int:
-    user = user or _current_user()
-
-    clinic_id = getattr(
-        user,
-        "clinic_id",
-        None,
+    return get_current_clinic_id(
+        required=True
     )
-
-    if clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
-        )
-
-    if isinstance(clinic_id, bool):
-        raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
-        )
-
-    try:
-        clinic_id = int(clinic_id)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
-        ) from exc
-
-    if clinic_id <= 0:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
-        )
-
-    return clinic_id
 
 
 def _current_staff_id(
@@ -346,6 +335,7 @@ def _serialize_staff(
         "id": staff.id,
         "clinic_id": staff.clinic_id,
         "user_id": staff.user_id,
+        "department_id": staff.department_id,
         "first_name": staff.first_name,
         "last_name": staff.last_name,
         "specialty": staff.specialty,
@@ -710,6 +700,45 @@ def update_staff_route(
                 {
                     "message": (
                         "Staff updated successfully"
+                    ),
+                    "data": _serialize_staff(
+                        staff
+                    ),
+                }
+            ),
+            200,
+        )
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
+
+
+@staff_bp.patch("/<int:staff_id>/department")
+@role_required(*MANAGEMENT_ROLES)
+def update_staff_department_route(
+    staff_id: int,
+):
+    payload, error = _validate_json(
+        StaffDepartmentUpdateSchema
+    )
+
+    if error:
+        return error
+
+    try:
+        clinic_id = _current_clinic_id()
+
+        staff = set_staff_department(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
+            department_id=payload.department_id,
+        )
+
+        return (
+            jsonify(
+                {
+                    "message": (
+                        "Staff department updated successfully"
                     ),
                     "data": _serialize_staff(
                         staff

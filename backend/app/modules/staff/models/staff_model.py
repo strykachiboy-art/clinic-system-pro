@@ -56,6 +56,13 @@ class Staff(db.Model):
         index=True,
     )
 
+    department_id = db.Column(
+        db.Integer,
+        db.ForeignKey("departments.id"),
+        nullable=True,
+        index=True,
+    )
+
     first_name = db.Column(
         db.String(80),
         nullable=False,
@@ -114,6 +121,11 @@ class Staff(db.Model):
 
     user = db.relationship(
         "User",
+        back_populates="staff",
+    )
+
+    department = db.relationship(
+        "Department",
         back_populates="staff",
     )
 
