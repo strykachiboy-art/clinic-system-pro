@@ -71,6 +71,55 @@ Confirm:
 - critical alerts are resolved or understood
 - normal request processing resumes
 
+## 5. Load Shedding / Resource Pressure
+
+Use when sustained queue pressure, CPU pressure, memory pressure, or repeated
+rate-limit events indicate that the service is approaching resource limits.
+
+Existing application protections include:
+
+- endpoint-specific rate limits for authentication and AI operations
+- request-size protection through MAX_CONTENT_LENGTH
+- Celery queue-depth monitoring
+- CPU and memory utilization monitoring
+- worker utilization and concurrency monitoring
+
+Operational response:
+
+1. Preserve health endpoints and core clinical request processing.
+2. Investigate queue growth and worker health before repeatedly restarting
+   workers.
+3. At the configured queue-depth warning threshold, begin containment and
+   capacity investigation.
+4. At the configured queue-depth critical threshold, initiate the approved
+   scaling or containment procedure and reduce non-essential workload where
+   operationally appropriate.
+5. Sustained CPU or memory utilization at the configured warning threshold
+   requires capacity or worker-health investigation.
+6. Endpoint rate limits remain authoritative for protected operations and
+   should return normal rate-limit responses rather than allowing uncontrolled
+   retry amplification.
+7. Production reverse-proxy infrastructure must enforce connection/request
+   limits and provide controlled overload responses where application
+   capacity is exhausted.
+8. Do not shed authentication, authorization, tenant-isolation, audit, or
+   critical clinical persistence merely to preserve non-critical workload.
+9. Do not perform destructive database actions as a load-shedding response.
+
+Production load-shedding controls that depend on the reverse proxy, process
+manager, container runtime, or infrastructure capacity must be validated in
+the production-like backend environment.
+
+Recovery requires:
+
+- dependency health restored
+- readiness healthy
+- queue pressure stable or falling
+- CPU and memory pressure returned to acceptable levels
+- normal request processing confirmed
+
+Document the trigger, containment action, affected workload, recovery action,
+and verification evidence.
 ## 6. Close
 
 Record:
@@ -83,3 +132,4 @@ Record:
 - follow-up work
 
 Unknown root cause is acceptable. Unsupported assumptions are not.
+
