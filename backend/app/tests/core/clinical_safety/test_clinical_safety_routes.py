@@ -615,4 +615,5 @@ class TestClinicalSafetyAlertRoutes:
             "/api/v1/clinical-safety/rules"
         )
 
-        assert response.status_code == 401
+        assert response.status_code == 401. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   [     0 % ]  
+ 
