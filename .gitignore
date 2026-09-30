@@ -39,3 +39,5 @@ artifacts/
 
 # Generated logs
 logs/
+
+deployment/nginx/certs/
