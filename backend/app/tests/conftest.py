@@ -76,7 +76,7 @@ def client(app):
 
 @pytest.fixture()
 def auth_headers_for(app):
-    def _make(user, role=None):
+    def _make(user, role=None, clinic_context_id=None):
         claim_role = (
             role
             if role is not None
@@ -86,13 +86,18 @@ def auth_headers_for(app):
         if hasattr(claim_role, "value"):
             claim_role = claim_role.value
 
+        claims = {
+            "role": claim_role,
+            "token_version": user.token_version,
+        }
+
+        if clinic_context_id is not None:
+            claims["clinic_context_id"] = clinic_context_id
+
         with app.test_request_context():
             token = create_access_token(
                 identity=str(user.id),
-                additional_claims={
-                    "role": claim_role,
-                    "token_version": user.token_version,
-                },
+                additional_claims=claims,
             )
 
         return {

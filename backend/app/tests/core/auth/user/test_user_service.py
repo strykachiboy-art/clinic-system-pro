@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from flask_jwt_extended import decode_token
 
@@ -908,3 +908,127 @@ def test_authenticate_user_does_not_change_token_version(
     )
 
     assert user.token_version == 3
+# ============================================================================
+# ISSUE AUTH TOKENS
+# ============================================================================
+
+
+def test_issue_auth_tokens_returns_tokens_without_context_for_normal_user(
+    app,
+    user,
+):
+    result = user_service.issue_auth_tokens(
+        user,
+    )
+
+    assert result["user_id"] == user.id
+    assert result["role"] == user.role.value
+    assert result["clinic_context_id"] is None
+
+    access_payload = decode_token(
+        result["access_token"],
+    )
+    refresh_payload = decode_token(
+        result["refresh_token"],
+    )
+
+    assert access_payload["role"] == user.role.value
+    assert access_payload["token_version"] == user.token_version
+    assert "clinic_context_id" not in access_payload
+
+    assert refresh_payload["token_version"] == user.token_version
+    assert "clinic_context_id" not in refresh_payload
+
+
+def test_issue_auth_tokens_adds_context_to_super_admin_tokens(
+    app,
+    make_user,
+    make_clinic,
+):
+    user = make_user(
+        role=Role.SUPER_ADMIN,
+    )
+    clinic = make_clinic()
+
+    result = user_service.issue_auth_tokens(
+        user,
+        clinic_context_id=clinic.id,
+    )
+
+    assert result["user_id"] == user.id
+    assert result["role"] == Role.SUPER_ADMIN.value
+    assert result["clinic_context_id"] == clinic.id
+
+    access_payload = decode_token(
+        result["access_token"],
+    )
+    refresh_payload = decode_token(
+        result["refresh_token"],
+    )
+
+    assert access_payload["clinic_context_id"] == clinic.id
+    assert refresh_payload["clinic_context_id"] == clinic.id
+
+
+def test_issue_auth_tokens_rejects_context_for_normal_user(
+    user,
+    clinic,
+):
+    with pytest.raises(
+        ValidationError,
+        match="Only a super administrator can use a clinic context",
+    ):
+        user_service.issue_auth_tokens(
+            user,
+            clinic_context_id=clinic.id,
+        )
+
+
+def test_issue_auth_tokens_rejects_inactive_clinic_context(
+    make_user,
+    make_clinic,
+):
+    from app.core.enums.clinic_enums import ClinicStatus
+
+    user = make_user(
+        role=Role.SUPER_ADMIN,
+    )
+    clinic = make_clinic(
+        status=ClinicStatus.INACTIVE,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Selected clinic is not active",
+    ):
+        user_service.issue_auth_tokens(
+            user,
+            clinic_context_id=clinic.id,
+        )
+
+
+def test_issue_auth_tokens_rejects_inactive_user(
+    make_user,
+):
+    user = make_user(
+        is_active=False,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="This account has been deactivated",
+    ):
+        user_service.issue_auth_tokens(
+            user,
+        )
+
+
+def test_issue_auth_tokens_rejects_invalid_user(
+):
+    with pytest.raises(
+        ValidationError,
+        match="Invalid user",
+    ):
+        user_service.issue_auth_tokens(
+            object(),
+        )

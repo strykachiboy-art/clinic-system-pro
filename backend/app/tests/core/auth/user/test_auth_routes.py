@@ -52,17 +52,23 @@ def token_from_headers(headers):
 def make_refresh_token(
     app,
     user,
+    clinic_context_id=None,
 ):
     """
     Create a refresh token compatible with the current
     fail-closed token validation flow.
     """
+    claims = {
+        "token_version": user.token_version,
+    }
+
+    if clinic_context_id is not None:
+        claims["clinic_context_id"] = clinic_context_id
+
     with app.app_context():
         return create_refresh_token(
             identity=str(user.id),
-            additional_claims={
-                "token_version": user.token_version,
-            },
+            additional_claims=claims,
         )
 
 
@@ -1752,3 +1758,4 @@ def test_google_callback_validation_does_not_echo_oauth_code(
 
     validate_state.assert_not_called()
     authenticate.assert_not_called()
+
