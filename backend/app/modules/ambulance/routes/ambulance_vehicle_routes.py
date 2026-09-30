@@ -20,7 +20,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.ambulance.schemas.ambulance_vehicle_schema import (
     AmbulanceVehicleCreateSchema,
@@ -126,21 +126,7 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    # Resolve authenticated clinic.
-    user = _current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not associated "
-            "with a clinic"
-        )
-
-    if user.clinic_id <= 0:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _get_int_query_param(

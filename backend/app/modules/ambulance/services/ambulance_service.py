@@ -11,7 +11,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 
-from app.core.utils.decorators import transactional
+from app.core.utils.decorators import get_current_clinic_id, transactional
 
 from app.core.audit.services.audit_service import create_audit_log
 
@@ -132,6 +132,9 @@ def _current_user() -> User:
 
 def _current_clinic_id() -> int:
     user = _current_user()
+
+    if has_request_context():
+        return get_current_clinic_id(required=True)
 
     if user.clinic_id is None:
         raise ValidationError(

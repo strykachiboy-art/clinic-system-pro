@@ -401,7 +401,7 @@ def test_current_clinic_requires_user_clinic(
 
         assert body["success"] is False
         assert body["error"] == (
-            "Authenticated user is not associated with a clinic"
+            "Clinic context is required"
         )
 
 
@@ -435,7 +435,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
 
         assert body["success"] is False
         assert body["error"] == (
-            "Authenticated user has an invalid clinic"
+            "Clinic ID must be a positive integer"
         )
 
 

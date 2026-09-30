@@ -6,7 +6,7 @@ from flask_jwt_extended import get_jwt_identity
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 from app.extensions import db
 from app.modules.prescription.schemas.prescription_schema import (
     DrugInteractionCheckSchema,
@@ -105,20 +105,7 @@ def _get_current_user() -> User:
 
 
 def _get_current_clinic_id() -> int:
-    """
-    Resolve the authenticated user's clinic.
-
-    Prescription operations are tenant-scoped and must never trust
-    a client-supplied clinic_id.
-    """
-    user = _get_current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not associated with a clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _get_current_staff() -> Staff:
@@ -128,17 +115,13 @@ def _get_current_staff() -> Staff:
     The authenticated doctor is always used as the prescriber.
     """
     user = _get_current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not associated with a clinic"
-        )
+    clinic_id = _get_current_clinic_id()
 
     staff = (
         Staff.query
         .filter(
             Staff.user_id == user.id,
-            Staff.clinic_id == user.clinic_id,
+            Staff.clinic_id == clinic_id,
         )
         .first()
     )

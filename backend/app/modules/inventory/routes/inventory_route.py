@@ -16,7 +16,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.inventory.schemas.inventory_schema import (
     ExpiringInventoryBatchQuerySchema,
@@ -281,34 +281,18 @@ def _get_current_user():
 
 
 def _get_current_clinic_id() -> int:
-    """
-    Resolve the authoritative clinic from JWT user context.
-    """
-    user = _get_current_user()
-
-    if (
-        user.clinic_id is None
-        or user.clinic_id <= 0
-    ):
-        raise ValidationError(
-            "Authenticated user is not associated "
-            "with a clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _get_current_staff() -> Staff:
-    """
-    Resolve the active Staff record for the authenticated user.
-    """
     user = _get_current_user()
+    clinic_id = _get_current_clinic_id()
 
     statement = (
         select(Staff)
         .where(
             Staff.user_id == user.id,
-            Staff.clinic_id == user.clinic_id,
+            Staff.clinic_id == clinic_id,
         )
     )
 

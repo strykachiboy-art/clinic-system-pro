@@ -10,7 +10,7 @@ from app.core.exceptions import (
     DomainError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.billing.schemas.billing_schema import (
     CreateInvoiceRequest,
@@ -75,24 +75,7 @@ def _current_user():
 
 
 def _current_clinic_id():
-    user = _current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned "
-            "to a clinic"
-        )
-
-    if (
-        isinstance(user.clinic_id, bool)
-        or not isinstance(user.clinic_id, int)
-        or user.clinic_id <= 0
-    ):
-        raise ValidationError(
-            "Invalid clinic identity"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 # ============================================================================

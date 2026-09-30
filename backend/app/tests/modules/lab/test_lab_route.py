@@ -279,61 +279,19 @@ def test_get_current_user_rejects_inactive_user(
         lab_routes._get_current_user()
 
 
-def test_get_current_clinic_id_uses_authenticated_user(
+def test_get_current_clinic_id_uses_central_resolver(
     lab_routes,
-    lab_admin_staff,
     monkeypatch,
 ):
+    resolver = Mock(return_value=7)
     monkeypatch.setattr(
         lab_routes,
-        "_get_current_user",
-        Mock(return_value=lab_admin_staff.user),
+        "get_current_clinic_id",
+        resolver,
     )
 
-    assert (
-        lab_routes._get_current_clinic_id()
-        == lab_admin_staff.clinic_id
-    )
-
-
-def test_get_current_clinic_id_rejects_missing_clinic(
-    lab_routes,
-    user,
-    monkeypatch,
-):
-    user.clinic_id = None
-
-    monkeypatch.setattr(
-        lab_routes,
-        "_get_current_user",
-        Mock(return_value=user),
-    )
-
-    with pytest.raises(
-        DomainError,
-        match="not associated with a clinic",
-    ):
-        lab_routes._get_current_clinic_id()
-
-
-def test_get_current_clinic_id_rejects_invalid_clinic(
-    lab_routes,
-    user,
-    monkeypatch,
-):
-    user.clinic_id = 0
-
-    monkeypatch.setattr(
-        lab_routes,
-        "_get_current_user",
-        Mock(return_value=user),
-    )
-
-    with pytest.raises(
-        DomainError,
-        match="invalid clinic",
-    ):
-        lab_routes._get_current_clinic_id()
+    assert lab_routes._get_current_clinic_id() == 7
+    resolver.assert_called_once_with(required=True)
 
 
 def test_get_current_staff_uses_modern_select(

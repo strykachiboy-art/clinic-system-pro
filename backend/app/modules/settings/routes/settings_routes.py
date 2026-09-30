@@ -7,7 +7,7 @@ from pydantic import ValidationError as PydanticValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 from app.extensions import db
 
 from app.modules.settings.schemas.clinic_settings import (
@@ -97,37 +97,7 @@ def _get_current_user() -> User:
 def _get_current_clinic_id(
     user: User | None = None,
 ) -> int:
-    user = user or _get_current_user()
-
-    clinic_id = getattr(
-        user,
-        "clinic_id",
-        None,
-    )
-
-    if clinic_id is None:
-        raise DomainError(
-            "Authenticated user is not assigned to a clinic"
-        )
-
-    if isinstance(clinic_id, bool):
-        raise DomainError(
-            "Authenticated user has an invalid clinic assignment"
-        )
-
-    try:
-        clinic_id = int(clinic_id)
-    except (TypeError, ValueError) as exc:
-        raise DomainError(
-            "Authenticated user has an invalid clinic assignment"
-        ) from exc
-
-    if clinic_id <= 0:
-        raise DomainError(
-            "Authenticated user has an invalid clinic assignment"
-        )
-
-    return clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _handle_route_error(exc: Exception):

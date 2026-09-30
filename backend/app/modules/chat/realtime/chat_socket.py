@@ -4,6 +4,8 @@ from flask import request, session
 from flask_jwt_extended import decode_token
 from flask_socketio import emit, join_room, leave_room
 
+from app.core.auth.user.services.clinic_context_service import resolve_effective_clinic_id
+from app.core.enums.role_enums import Role
 from app.core.auth.user.services.token_service import (
     is_token_revoked,
 )
@@ -85,17 +87,21 @@ def _authenticate_socket(
         user
     )
 
-    clinic_id = user.clinic_id
+    clinic_id = resolve_effective_clinic_id(
+        user_id=user.id,
+        jwt_payload=claims,
+    )
 
     if clinic_id is None:
         raise ValueError(
             "User is not associated with a clinic"
         )
 
-    ChatSecurityService.ensure_same_clinic(
-        user,
-        clinic_id,
-    )
+    if user.role is not Role.SUPER_ADMIN:
+        ChatSecurityService.ensure_same_clinic(
+            user,
+            clinic_id,
+        )
 
     return user.id, clinic_id
 

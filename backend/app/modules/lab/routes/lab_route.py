@@ -9,7 +9,7 @@ from app.extensions import db
 from app.core.exceptions import DomainError, ValidationError
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.lab.schemas.lab_schema import (
     LabEquipmentLinkSchema,
@@ -120,36 +120,7 @@ def _get_current_user() -> User:
 
 
 def _get_current_clinic_id() -> int:
-    """
-    Return the clinic associated with the authenticated user.
-
-    The clinic is never accepted from a request payload or query
-    parameter.
-    """
-    user = _get_current_user()
-
-    clinic_id = getattr(
-        user,
-        "clinic_id",
-        None,
-    )
-
-    if clinic_id is None:
-        raise DomainError(
-            "Authenticated user is not associated "
-            "with a clinic"
-        )
-
-    if (
-        isinstance(clinic_id, bool)
-        or not isinstance(clinic_id, int)
-        or clinic_id <= 0
-    ):
-        raise DomainError(
-            "Authenticated user has an invalid clinic"
-        )
-
-    return clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _get_current_staff() -> Staff:

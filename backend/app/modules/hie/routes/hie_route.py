@@ -6,7 +6,7 @@ from flask_jwt_extended import get_jwt_identity
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 from app.extensions import db
 
 from app.modules.hie.schemas.hie_schema import (
@@ -95,25 +95,7 @@ def _get_current_user() -> User:
 
 
 def _get_current_clinic_id() -> int:
-    user = _get_current_user()
-
-    clinic_id = getattr(
-        user,
-        "clinic_id",
-        None,
-    )
-
-    if (
-        clinic_id is None
-        or isinstance(clinic_id, bool)
-        or not isinstance(clinic_id, int)
-        or clinic_id <= 0
-    ):
-        raise ValidationError(
-            "Authenticated user is not associated with a clinic"
-        )
-
-    return clinic_id
+    return get_current_clinic_id(required=True)
 
 
 @hie_bp.post("/integrations")

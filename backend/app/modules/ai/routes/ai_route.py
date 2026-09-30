@@ -15,7 +15,7 @@ from app.extensions import db, limiter
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import DomainError, ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.ai.schemas.ai_schema import (
     DrugInteractionCheckSchema,
@@ -153,25 +153,7 @@ def _current_user():
 
 
 def _current_clinic_id() -> int:
-    """
-    Return the authenticated user's clinic ID.
-
-    AI routes must never trust a client-supplied clinic_id.
-    """
-
-    user = _current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not associated with a clinic"
-        )
-
-    if user.clinic_id <= 0:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _client_ip_address() -> str | None:

@@ -13,7 +13,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.patient.models.patient_model import Patient
 from app.modules.staff.models.staff_model import Staff
@@ -100,19 +100,7 @@ def _get_current_user() -> User:
 
 
 def _get_current_clinic_id() -> int:
-    user = _get_current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
-        )
-
-    if user.clinic_id <= 0:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic assignment"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _validate_positive_id(
@@ -161,17 +149,13 @@ def _get_patient_in_current_clinic(
 
 def _get_current_staff() -> Staff:
     user = _get_current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
-        )
+    clinic_id = _get_current_clinic_id()
 
     staff = db.session.execute(
         select(Staff)
         .where(
             Staff.user_id == user.id,
-            Staff.clinic_id == user.clinic_id,
+            Staff.clinic_id == clinic_id,
         )
         .limit(1)
     ).scalar_one_or_none()
@@ -338,13 +322,8 @@ def create_patient_route():
 
         user = _get_current_user()
 
-        if user.clinic_id is None:
-            raise ValidationError(
-                "Authenticated user is not assigned to a clinic"
-            )
-
         patient = create_patient(
-            clinic_id=user.clinic_id,
+            clinic_id=_get_current_clinic_id(),
             data=data.model_dump(
                 exclude_unset=True
             ),

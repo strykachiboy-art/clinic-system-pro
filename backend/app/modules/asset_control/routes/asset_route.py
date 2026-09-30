@@ -15,7 +15,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.asset_control.schemas.asset_assignment_schema import (
     AssetAssignmentCreateSchema,
@@ -123,19 +123,7 @@ def _current_user() -> User:
 
 
 def _current_clinic_id(user: User) -> int:
-    clinic_id = user.clinic_id
-
-    if (
-        isinstance(clinic_id, bool)
-        or not isinstance(clinic_id, int)
-        or clinic_id <= 0
-    ):
-        raise ValidationError(
-            "Authenticated user is not associated "
-            "with a valid clinic"
-        )
-
-    return clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _json_body(

@@ -17,7 +17,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import login_required
+from app.core.utils.decorators import get_current_clinic_id, login_required
 
 from app.modules.chat.models.conversation_participant_model import (
     ConversationParticipant,
@@ -119,19 +119,7 @@ def _current_user_id() -> int:
 
 
 def _current_clinic_id() -> int:
-    user = _current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
-        )
-
-    if user.clinic_id <= 0:
-        raise ValidationError(
-            "Authenticated user has an invalid clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _sanitize_pydantic_errors(

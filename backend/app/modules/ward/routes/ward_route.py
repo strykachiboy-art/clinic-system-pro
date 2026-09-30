@@ -7,7 +7,7 @@ from app.extensions import db
 from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.ward.schemas.admission_schema import (
     AdmissionCreateSchema,
@@ -125,14 +125,7 @@ def _current_user() -> User:
 
 
 def _current_clinic_id() -> int:
-    user = _current_user()
-
-    if user.clinic_id is None:
-        raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
-        )
-
-    return user.clinic_id
+    return get_current_clinic_id(required=True)
 
 
 def _current_staff_id() -> int:
