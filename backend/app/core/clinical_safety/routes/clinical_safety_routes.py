@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
@@ -34,7 +34,7 @@ from app.core.clinical_safety.services.clinical_rule_service import (
 from app.core.enums.clinical_safety_enums import ClinicalAlertStatus
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 from app.extensions import db
 
 
@@ -109,7 +109,7 @@ def _current_user() -> User:
 def _current_clinic_id(
     user: User,
 ) -> int | None:
-    return user.clinic_id
+    return get_current_clinic_id()
 
 
 def _request_json() -> dict:

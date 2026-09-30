@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
@@ -28,7 +28,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.core.utils.decorators import role_required
+from app.core.utils.decorators import get_current_clinic_id, role_required
 from app.extensions import db
 
 
@@ -161,9 +161,11 @@ def _serialize(
 
 def _current_clinic_id(
     user: User,
-) -> int | None:
+) -> int:
+    clinic_id = get_current_clinic_id(required=True)
+
     if user.role == Role.SUPER_ADMIN:
-        return user.clinic_id
+        return clinic_id
 
     staff = getattr(
         user,
@@ -180,9 +182,12 @@ def _current_clinic_id(
                 "User clinic does not match staff clinic"
             )
 
-        return staff.clinic_id
+        if staff.clinic_id != clinic_id:
+            raise ValidationError(
+                "Staff clinic does not match current clinic context"
+            )
 
-    return user.clinic_id
+    return clinic_id
 
 
 def _get_visible_grant(
