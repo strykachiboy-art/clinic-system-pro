@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: clinic_system
+      POSTGRES_USER: clinic
+      POSTGRES_PASSWORD: clinic_phase6
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinic -d clinic_system"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      FLASK_ENV: production
+      PORT: 5000
+      SECRET_KEY: phase6-development-secret
+      JWT_SECRET_KEY: phase6-development-jwt-secret
+      DATABASE_URL: postgresql://clinic:clinic_phase6@postgres:5432/clinic_system
+      REDIS_URL: redis://redis:6379/0
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health/live')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -33,3 +33,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Generated artifacts
+artifacts/
+
+# Generated logs
+logs/

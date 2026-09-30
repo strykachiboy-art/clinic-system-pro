@@ -21,3 +21,6 @@ pytest>=9,<10
 pytest-xdist>=3.6,<4
 locust>=2.32,<3
 psutil>=5.9,<8
+psycopg[binary]>=3.2,<4
+
+gunicorn>=23,<24
