@@ -29,10 +29,10 @@ from app.modules.staff.models.staff_model import Staff
 from app.modules.ward.models.ward_model import Bed, Ward
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = (
     PROJECT_ROOT
-    / "load_tests"
+    / "testing" / "load_tests"
     / "benchmark_dataset.json"
 )
 

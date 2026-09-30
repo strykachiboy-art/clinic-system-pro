@@ -560,7 +560,7 @@ Latency should therefore never be evaluated independently of response size.
 Benchmark data is controlled through:
 
 ```text
-load_tests/benchmark_dataset.json
+testing/load_tests/benchmark_dataset.json
 ```
 
 Data seeding:
@@ -1274,7 +1274,7 @@ load_tests/common/benchmark.py
 
 load_tests/seed_load_test_data.py
 load_tests/provision_ai_load_users.py
-load_tests/verify_benchmark_dataset.py
+scripts/verify_benchmark_dataset.py
 ```
 
 Profiling and investigation utilities include:

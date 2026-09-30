@@ -1033,7 +1033,7 @@ Resilience Engineering has been completed and verified for the current backend P
 
 The verified resilience framework includes:
 
-load_tests/resilience/
+testing/load_tests/resilience/
 ??? README.md
 ??? __init__.py
 ??? checks/
@@ -1056,11 +1056,11 @@ Unused empty fault/check scaffolding was removed after verification.
 
 The active synthetic fault-injection engine is:
 
-load_tests/resilience/common/faults.py
+testing/load_tests/resilience/common/faults.py
 
 The active integrity verification layer is:
 
-load_tests/resilience/checks/integrity.py
+testing/load_tests/resilience/checks/integrity.py
 
 ## Phase 2 Final Resilience Evidence
 
@@ -1080,7 +1080,7 @@ resilience-phase2-final-20260928
 
 Result artifact:
 
-load_tests/resilience/results/resilience-phase2-final-20260928.json
+testing/load_tests/resilience/results/resilience-phase2-final-20260928.json
 
 Verified resilience areas include:
 
@@ -1333,11 +1333,11 @@ Offline mode does not grant additional privileges.
 
 Development entry point:
 
-run.py
+backend/run.py
 
 Production WSGI entry point:
 
-wsgi.py
+backend/wsgi.py
 
 The Flask application uses the application factory pattern.
 
@@ -1398,10 +1398,10 @@ clinic-system-pro/
 â”‚   â”‚   â””â”€â”€ ...
 â”‚   â”œâ”€â”€ tests/
 â”‚   â””â”€â”€ ...
-â”œâ”€â”€ load_tests/
+â”œâ”€â”€ testing/load_tests/
 â”œâ”€â”€ migrations/
-â”œâ”€â”€ run.py
-â”œâ”€â”€ wsgi.py
+â”œâ”€â”€ backend/run.py
+â”œâ”€â”€ backend/wsgi.py
 â”œâ”€â”€ README.md
 â””â”€â”€ ...
 
@@ -2340,7 +2340,7 @@ Pytest
 
 Application development entry point:
 
-python run.py
+python backend/run.py
 
 Typical test command:
 
@@ -2348,11 +2348,11 @@ pytest -q
 
 Feedback module:
 
-pytest app/tests/modules/feedback -q
+pytest backend/app/tests/modules/feedback -q
 
 Load testing:
 
-python -m load_tests.baseline
+python -m testing.load_tests.baseline
 
 ---
 
@@ -2360,7 +2360,7 @@ python -m load_tests.baseline
 
 The currently verified Feedback suite can be executed with:
 
-pytest app/tests/modules/feedback -q
+pytest backend/app/tests/modules/feedback -q
 
 Recorded result:
 
