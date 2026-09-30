@@ -1712,10 +1712,19 @@ def disable_clinical_rule(
     actor_user_id: int,
     rule_id: int,
 ) -> ClinicalRule:
+    current = _get_rule(
+        rule_id,
+        for_update=False,
+    )
+
     return update_clinical_rule(
         actor_user_id=actor_user_id,
         rule_id=rule_id,
         data=ClinicalRuleUpdateSchema(
             enabled=False,
+            effective_from=(
+                current.effective_from
+                + timedelta(seconds=1)
+            ),
         ),
     )
