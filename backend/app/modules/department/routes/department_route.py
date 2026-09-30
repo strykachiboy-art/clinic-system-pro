@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
+from flask import Blueprint, g, jsonify, request
 from pydantic import ValidationError as PydanticValidationError
 
-from app.extensions import db
-
-from app.core.auth.user.models.user_model import User
 from app.core.enums.role_enums import Role
 from app.core.exceptions import (
     ConflictError,
@@ -40,10 +36,12 @@ department_bp = Blueprint(
 
 
 DEPARTMENT_MANAGEMENT_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
 )
 
 DEPARTMENT_VIEW_ROLES = (
+    Role.SUPER_ADMIN,
     Role.ADMIN,
     Role.DOCTOR,
     Role.NURSE,
@@ -60,47 +58,8 @@ DEPARTMENT_VIEW_ROLES = (
 )
 
 
-def _current_user() -> User:
-    identity = get_jwt_identity()
-
-    try:
-        user_id = int(identity)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(
-            "Invalid authentication identity"
-        ) from exc
-
-    if user_id <= 0:
-        raise ValidationError(
-            "Invalid authentication identity"
-        )
-
-    user = db.session.get(
-        User,
-        user_id,
-    )
-
-    if user is None:
-        raise ValidationError(
-            "Authenticated user could not be resolved"
-        )
-
-    if not user.is_active:
-        raise ValidationError(
-            "User account is inactive"
-        )
-
-    return user
-
-
 def _current_clinic_id() -> int:
-    user = _current_user()
-
-    clinic_id = getattr(
-        user,
-        "clinic_id",
-        None,
-    )
+    clinic_id = getattr(g, "current_clinic_id", None)
 
     if (
         isinstance(clinic_id, bool)
@@ -108,7 +67,7 @@ def _current_clinic_id() -> int:
         or clinic_id <= 0
     ):
         raise ValidationError(
-            "Authenticated user is not assigned to a clinic"
+            "Clinic context is required"
         )
 
     return clinic_id

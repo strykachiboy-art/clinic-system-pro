@@ -974,12 +974,14 @@ class TestRefreshRoute:
 
         revoke = Mock()
 
-        create_access = Mock(
-            return_value="new-access-token",
-        )
-
-        create_refresh = Mock(
-            return_value="new-refresh-token",
+        issue_tokens = Mock(
+            return_value={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "user_id": user.id,
+                "role": user.role.value,
+                "clinic_context_id": None,
+            },
         )
 
         monkeypatch.setattr(
@@ -990,14 +992,8 @@ class TestRefreshRoute:
 
         monkeypatch.setattr(
             auth_routes,
-            "create_access_token",
-            create_access,
-        )
-
-        monkeypatch.setattr(
-            auth_routes,
-            "create_refresh_token",
-            create_refresh,
+            "issue_auth_tokens",
+            issue_tokens,
         )
 
         response = client.post(
@@ -1020,23 +1016,14 @@ class TestRefreshRoute:
             "refresh_token": "new-refresh-token",
             "user_id": user.id,
             "role": user.role.value,
+            "clinic_context_id": None,
         }
 
         revoke.assert_called_once_with()
 
-        create_access.assert_called_once_with(
-            identity=str(user.id),
-            additional_claims={
-                "role": user.role.value,
-                "token_version": user.token_version,
-            },
-        )
-
-        create_refresh.assert_called_once_with(
-            identity=str(user.id),
-            additional_claims={
-                "token_version": user.token_version,
-            },
+        issue_tokens.assert_called_once_with(
+            user,
+            clinic_context_id=None,
         )
 
     def test_refresh_user_not_found(
@@ -1259,8 +1246,7 @@ class TestRefreshRoute:
             ),
         )
 
-        create_access = Mock()
-        create_refresh = Mock()
+        issue_tokens = Mock()
 
         monkeypatch.setattr(
             auth_routes,
@@ -1270,14 +1256,8 @@ class TestRefreshRoute:
 
         monkeypatch.setattr(
             auth_routes,
-            "create_access_token",
-            create_access,
-        )
-
-        monkeypatch.setattr(
-            auth_routes,
-            "create_refresh_token",
-            create_refresh,
+            "issue_auth_tokens",
+            issue_tokens,
         )
 
         response = client.post(
@@ -1291,8 +1271,7 @@ class TestRefreshRoute:
 
         assert response.status_code == 500
 
-        create_access.assert_not_called()
-        create_refresh.assert_not_called()
+        issue_tokens.assert_not_called()
 
 
 # ============================================================================

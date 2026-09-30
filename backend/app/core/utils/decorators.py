@@ -1,3 +1,4 @@
+from app.core.exceptions import ValidationError
 from functools import wraps
 
 from flask import g, jsonify
@@ -50,7 +51,32 @@ def _load_auth_context():
         g.current_user_id = None
 
     g.current_user_role = claims.get("role")
+    g.current_clinic_id = None
+
+    if g.current_user_id is not None:
+        from app.core.auth.user.services.clinic_context_service import (
+            resolve_effective_clinic_id,
+        )
+
+        g.current_clinic_id = resolve_effective_clinic_id(
+            user_id=g.current_user_id,
+            jwt_payload=claims,
+        )
+
     g._auth_context_loaded = True
+
+
+def get_current_clinic_id(*, required: bool = False) -> int | None:
+    _load_auth_context()
+
+    clinic_id = getattr(g, "current_clinic_id", None)
+
+    if required and clinic_id is None:
+        raise ValidationError(
+            "Clinic context is required"
+        )
+
+    return clinic_id
 
 
 def login_required(fn):

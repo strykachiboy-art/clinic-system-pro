@@ -54,6 +54,8 @@ class AuthTokenResponseSchema(BaseModel):
     refresh_token: str
     user_id: int
     role: str
+    clinic_context_id: int | None = None
+
 
 
 class AuthResponseSchema(BaseModel):

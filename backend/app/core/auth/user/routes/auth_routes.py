@@ -6,9 +6,8 @@ from flask import (
 )
 
 from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,
     decode_token,
+    get_jwt,
     get_jwt_identity,
     jwt_required,
 )
@@ -23,6 +22,9 @@ from app.core.auth.user.schema.user_schema import (
     UserLoginSchema,
     UserRegisterSchema,
 )
+from app.core.auth.user.schema.clinic_context_schema import (
+    ClinicContextSelectSchema,
+)
 from app.core.auth.user.services.google_auth_service import (
     authenticate_google_code,
     get_google_authorization_url,
@@ -32,8 +34,15 @@ from app.core.auth.user.services.token_service import (
     revoke_current_token,
     revoke_token,
 )
+from app.core.auth.user.services.clinic_context_service import (
+    clear_clinic_context,
+    get_current_clinic_context,
+    resolve_effective_clinic_id,
+    select_clinic_context,
+)
 from app.core.auth.user.services.user_service import (
     authenticate_user,
+    issue_auth_tokens,
     register_user,
 )
 from app.core.enums.role_enums import Role
@@ -261,6 +270,188 @@ def google_callback():
     ), 200
 
 
+@auth_bp.get("/clinic-context")
+@jwt_required()
+def get_clinic_context():
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid authentication identity",
+            }
+        ), 401
+
+    try:
+        payload = get_jwt()
+        result = get_current_clinic_context(
+            user_id=user_id,
+            jwt_payload=payload,
+        )
+    except DomainError as exc:
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
+
+    return jsonify(
+        {
+            "success": True,
+            "data": result,
+        }
+    ), 200
+
+
+@auth_bp.post("/clinic-context")
+@jwt_required()
+def select_clinic_context_route():
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid authentication identity",
+            }
+        ), 401
+
+    user = db.session.get(User, user_id)
+
+    if user is None:
+        return jsonify(
+            {
+                "success": False,
+                "error": "User not found",
+            }
+        ), 401
+
+    if user.role is not Role.SUPER_ADMIN:
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    "Only a super administrator can select "
+                    "a clinic context"
+                ),
+            }
+        ), 403
+
+    payload = request.get_json(
+        silent=True
+    ) or {}
+
+    try:
+        data = ClinicContextSelectSchema.model_validate(
+            payload
+        )
+    except PydanticValidationError as exc:
+        return jsonify(
+            {
+                "success": False,
+                "error": "Validation failed",
+                "details": _safe_validation_errors(
+                    exc
+                ),
+            }
+        ), 400
+
+    try:
+        select_clinic_context(
+            user_id=user.id,
+            clinic_id=data.clinic_id,
+        )
+
+        tokens = issue_auth_tokens(
+            user,
+            clinic_context_id=data.clinic_id,
+        )
+    except DomainError as exc:
+        db.session.rollback()
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
+
+    return jsonify(
+        {
+            "success": True,
+            "data": tokens,
+        }
+    ), 200
+
+
+@auth_bp.delete("/clinic-context")
+@jwt_required()
+def clear_clinic_context_route():
+    identity = get_jwt_identity()
+
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid authentication identity",
+            }
+        ), 401
+
+    user = db.session.get(User, user_id)
+
+    if user is None:
+        return jsonify(
+            {
+                "success": False,
+                "error": "User not found",
+            }
+        ), 401
+
+    if user.role is not Role.SUPER_ADMIN:
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    "Only a super administrator can clear "
+                    "a clinic context"
+                ),
+            }
+        ), 403
+
+    try:
+        clear_clinic_context(
+            user_id=user.id
+        )
+
+        tokens = issue_auth_tokens(
+            user
+        )
+    except DomainError as exc:
+        db.session.rollback()
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), exc.status_code
+
+    return jsonify(
+        {
+            "success": True,
+            "data": tokens,
+        }
+    ), 200
+
+
 @auth_bp.post("/refresh")
 @limiter.limit(
     lambda: current_app.config.get(
@@ -306,21 +497,21 @@ def refresh():
         ), 401
 
     try:
+        jwt_payload = get_jwt()
+
+        clinic_context_id = None
+
+        if user.role is Role.SUPER_ADMIN:
+            clinic_context_id = resolve_effective_clinic_id(
+                user_id=user.id,
+                jwt_payload=jwt_payload,
+            )
+
         revoke_current_token()
 
-        access_token = create_access_token(
-            identity=str(user.id),
-            additional_claims={
-                "role": user.role.value,
-                "token_version": user.token_version,
-            },
-        )
-
-        refresh_token = create_refresh_token(
-            identity=str(user.id),
-            additional_claims={
-                "token_version": user.token_version,
-            },
+        tokens = issue_auth_tokens(
+            user,
+            clinic_context_id=clinic_context_id,
         )
 
     except DomainError as exc:
@@ -336,12 +527,7 @@ def refresh():
     return jsonify(
         {
             "success": True,
-            "data": {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "user_id": user.id,
-                "role": user.role.value,
-            },
+            "data": tokens,
         }
     ), 200
 

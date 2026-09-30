@@ -5,10 +5,6 @@ from urllib.parse import urlencode
 
 import requests
 from flask import current_app
-from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,
-)
 from redis.exceptions import ConnectionError, TimeoutError
 from sqlalchemy import select
 
@@ -22,6 +18,9 @@ from app.core.auth.user.models.user_auth_identity_model import (
     UserAuthIdentity,
 )
 from app.core.auth.user.models.user_model import User
+from app.core.auth.user.services.user_service import (
+    issue_auth_tokens,
+)
 from app.core.auth.user.schema.user_schema import (
     GoogleUserInfoSchema,
 )
@@ -602,19 +601,8 @@ def authenticate_google_user(
             "This account has been deactivated"
         )
 
-    access_token = create_access_token(
-        identity=str(user.id),
-        additional_claims={
-            "role": user.role.value,
-            "token_version": user.token_version,
-        },
-    )
-
-    refresh_token = create_refresh_token(
-        identity=str(user.id),
-        additional_claims={
-            "token_version": user.token_version,
-        },
+    tokens = issue_auth_tokens(
+        user
     )
 
     user.last_login_at = db.func.now()
@@ -632,12 +620,7 @@ def authenticate_google_user(
 
     db.session.commit()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user_id": user.id,
-        "role": user.role.value,
-    }
+    return tokens
 
 
 # ============================================================================

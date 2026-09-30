@@ -118,6 +118,66 @@ def register_user(
     return user
 
 
+def issue_auth_tokens(
+    user: User,
+    clinic_context_id: int | None = None,
+) -> dict:
+    if not isinstance(user, User):
+        raise ValidationError(
+            "Invalid user"
+        )
+
+    if not user.is_active:
+        raise ValidationError(
+            "This account has been deactivated"
+        )
+
+    if clinic_context_id is not None:
+        if user.role is not Role.SUPER_ADMIN:
+            raise ValidationError(
+                "Only a super administrator can use a clinic context"
+            )
+
+        from app.core.auth.user.services.clinic_context_service import (
+            _get_active_clinic,
+        )
+
+        clinic_context_id = _get_active_clinic(
+            clinic_context_id
+        ).id
+
+    access_claims = {
+        "role": user.role.value,
+        "token_version": user.token_version,
+    }
+
+    refresh_claims = {
+        "token_version": user.token_version,
+    }
+
+    if clinic_context_id is not None:
+        access_claims["clinic_context_id"] = clinic_context_id
+        refresh_claims["clinic_context_id"] = clinic_context_id
+
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims=access_claims,
+    )
+
+    refresh_token = create_refresh_token(
+        identity=str(user.id),
+        additional_claims=refresh_claims,
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user_id": user.id,
+        "role": user.role.value,
+        "clinic_context_id": clinic_context_id,
+    }
+
+
 def authenticate_user(
     email: str,
     password: str,
@@ -141,21 +201,8 @@ def authenticate_user(
             "This account has been deactivated"
         )
 
-    additional_claims = {
-        "role": user.role.value,
-        "token_version": user.token_version,
-    }
-
-    access_token = create_access_token(
-        identity=str(user.id),
-        additional_claims=additional_claims,
-    )
-
-    refresh_token = create_refresh_token(
-        identity=str(user.id),
-        additional_claims={
-            "token_version": user.token_version,
-        },
+    tokens = issue_auth_tokens(
+        user
     )
 
     user.last_login_at = db.func.now()
@@ -170,9 +217,4 @@ def authenticate_user(
 
     db.session.commit()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user_id": user.id,
-        "role": user.role.value,
-    }
+    return tokens

@@ -223,6 +223,10 @@ def register_blueprints(app):
         consultation_bp,
     )
 
+    from app.modules.department.routes.department_route import (
+        department_bp,
+    )
+
     from app.modules.hie.routes.hie_route import (
         hie_bp,
     )
