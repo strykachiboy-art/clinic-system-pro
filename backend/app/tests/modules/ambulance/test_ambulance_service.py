@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -38,6 +38,7 @@ def make_user(
         clinic_id=clinic_id,
         role=role,
         is_active=is_active,
+        token_version=1,
     )
 
 
@@ -234,6 +235,7 @@ def request_context(app, user):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
         yield
 
 
@@ -388,6 +390,7 @@ def test_current_user_rejects_inactive_user(
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         monkeypatch.setattr(
             ambulance_service.db.session,
@@ -412,6 +415,7 @@ def test_current_user_returns_active_user(
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         monkeypatch.setattr(
             ambulance_service.db.session,
@@ -445,14 +449,15 @@ def test_authenticated_clinic_rejects_wrong_clinic(
     user = make_user(clinic_id=1)
 
     with app.test_request_context():
-        from flask import g
-
-        g.current_user_id = user.id
-
         monkeypatch.setattr(
             ambulance_service,
             "_current_user",
             Mock(return_value=user),
+        )
+        monkeypatch.setattr(
+            ambulance_service,
+            "_current_clinic_id",
+            Mock(return_value=1),
         )
 
         with pytest.raises(
@@ -473,6 +478,11 @@ def test_authenticated_clinic_allows_same_clinic(
             ambulance_service,
             "_current_user",
             Mock(return_value=user),
+        )
+        monkeypatch.setattr(
+            ambulance_service,
+            "_current_clinic_id",
+            Mock(return_value=1),
         )
 
         ambulance_service._assert_authenticated_clinic(1)
@@ -617,11 +627,13 @@ def test_create_vehicle_creates_with_equipment_level(
     monkeypatch,
     audit_mock,
     clinic_active_mock,
+    auth_headers_for,
 ):
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         query = Mock()
         query.filter_by.return_value = query
@@ -717,11 +729,13 @@ def test_create_vehicle_rejects_invalid_plate(
     plate_number,
     monkeypatch,
     clinic_active_mock,
+    auth_headers_for,
 ):
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
@@ -735,11 +749,13 @@ def test_create_vehicle_rejects_long_plate(
     app,
     user,
     clinic_active_mock,
+    auth_headers_for,
 ):
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
@@ -758,11 +774,13 @@ def test_create_vehicle_rejects_invalid_capacity(
     user,
     capacity,
     clinic_active_mock,
+    auth_headers_for,
 ):
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(ValidationError):
             ambulance_service.create_vehicle(
@@ -777,11 +795,13 @@ def test_create_vehicle_rejects_non_available_status(
     app,
     user,
     clinic_active_mock,
+    auth_headers_for,
 ):
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(
             ValidationError,
@@ -800,6 +820,7 @@ def test_create_vehicle_rejects_duplicate_plate(
     user,
     monkeypatch,
     clinic_active_mock,
+    auth_headers_for,
 ):
     existing = make_vehicle(
         clinic_id=user.clinic_id,
@@ -815,10 +836,11 @@ def test_create_vehicle_rejects_duplicate_plate(
         query,
     )
 
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(ConflictError):
             ambulance_service.create_vehicle(
@@ -1290,6 +1312,7 @@ def test_request_trip_creates_emergency_trip(
     monkeypatch,
     audit_mock,
     clinic_active_mock,
+    auth_headers_for,
 ):
     patient = make_patient(clinic)
 
@@ -1299,10 +1322,11 @@ def test_request_trip_creates_emergency_trip(
         Mock(return_value=patient),
     )
 
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         install_fake_trip_model(monkeypatch)
 
@@ -1335,6 +1359,7 @@ def test_request_trip_requires_admission(
     trip_type,
     monkeypatch,
     clinic_active_mock,
+    auth_headers_for,
 ):
     patient = make_patient(clinic)
 
@@ -1344,10 +1369,11 @@ def test_request_trip_requires_admission(
         Mock(return_value=patient),
     )
 
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(
             ValidationError,
@@ -1365,6 +1391,7 @@ def test_request_trip_rejects_mismatched_admission(
     user,
     monkeypatch,
     clinic_active_mock,
+    auth_headers_for,
 ):
     patient = make_patient(
         patient_id=1,
@@ -1389,10 +1416,11 @@ def test_request_trip_rejects_mismatched_admission(
         Mock(return_value=admission),
     )
 
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         with pytest.raises(ValidationError):
             ambulance_service.request_trip(
@@ -1412,6 +1440,7 @@ def test_request_trip_uses_admission_patient(
     monkeypatch,
     audit_mock,
     clinic_active_mock,
+    auth_headers_for,
 ):
     (
         _,
@@ -1431,10 +1460,11 @@ def test_request_trip_uses_admission_patient(
         Mock(return_value=admission),
     )
 
-    with app.test_request_context():
+    with app.test_request_context(headers=auth_headers_for(user)):
         from flask import g
 
         g.current_user_id = user.id
+        g.current_clinic_id = user.clinic_id
 
         trip = ambulance_service.request_trip(
             clinic_id=user.clinic_id,
@@ -2209,3 +2239,4 @@ def test_cancel_trip_does_not_change_available_vehicle(
             "Transport no longer required",
         )
     assert vehicle.status == VehicleStatus.AVAILABLE
+
