@@ -10,6 +10,10 @@ from app.core.enums.ai_enums import (
     AIRiskLevel,
 )
 
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    ManagementDepartmentDashboardSchema,
+)
+
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
@@ -200,6 +204,8 @@ class ManagementDashboardSchema(BaseModel):
     context: DashboardContextSchema
 
     overview: ManagementDashboardOverviewSchema
+
+    departments: ManagementDepartmentDashboardSchema
 
     ai: ManagementAIDashboardSchema
 

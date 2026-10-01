@@ -10,7 +10,9 @@ from app.core.enums.ambulance_enums import (
 from app.core.enums.appointment_enums import (
     AppointmentStatus,
 )
+from app.core.enums.department_enums import DepartmentStatus
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_department_enums import StaffDepartmentStatus
 from app.core.enums.staff_enums import (
     StaffStatus,
 )
@@ -22,6 +24,12 @@ from app.modules.ambulance.models.ambulance_model import (
 )
 from app.modules.appointment.models.appointment_model import (
     Appointment,
+)
+from app.modules.department.models.department_model import (
+    Department,
+)
+from app.modules.staff.models.staff_department_model import (
+    StaffDepartment,
 )
 from app.modules.staff.models.staff_model import (
     Staff,
@@ -199,6 +207,49 @@ def get_operations_dashboard(
         or 0
     )
 
+    active_departments = (
+        db.session.execute(
+            db.select(
+                db.func.count(
+                    Department.id,
+                )
+            ).where(
+                Department.clinic_id == clinic_id,
+                Department.status
+                == DepartmentStatus.ACTIVE,
+            )
+        ).scalar_one()
+        or 0
+    )
+
+    active_membership_exists = (
+        db.select(
+            StaffDepartment.id,
+        )
+        .where(
+            StaffDepartment.staff_id == Staff.id,
+            StaffDepartment.clinic_id == clinic_id,
+            StaffDepartment.status
+            == StaffDepartmentStatus.ACTIVE,
+        )
+        .exists()
+    )
+
+    unassigned_active_staff = (
+        db.session.execute(
+            db.select(
+                db.func.count(
+                    Staff.id,
+                )
+            ).where(
+                Staff.clinic_id == clinic_id,
+                Staff.status == StaffStatus.ACTIVE,
+                ~active_membership_exists,
+            )
+        ).scalar_one()
+        or 0
+    )
+
     active_staff = (
         db.session.execute(
             db.select(
@@ -267,6 +318,12 @@ def get_operations_dashboard(
         ),
         active_staff=int(
             active_staff
+        ),
+        active_departments=int(
+            active_departments
+        ),
+        unassigned_active_staff=int(
+            unassigned_active_staff
         ),
     )
 

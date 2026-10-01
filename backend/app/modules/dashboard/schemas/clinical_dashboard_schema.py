@@ -8,6 +8,10 @@ from app.core.enums.ai_enums import (
     AIRiskLevel,
 )
 
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    ClinicalDepartmentSchema,
+)
+
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
@@ -158,6 +162,12 @@ class ClinicalDashboardSchema(BaseModel):
     context: DashboardContextSchema
 
     overview: ClinicalDashboardOverviewSchema
+
+    my_departments: list[
+        ClinicalDepartmentSchema
+    ] = Field(
+        default_factory=list,
+    )
 
     ai: ClinicalAIDashboardSchema
 

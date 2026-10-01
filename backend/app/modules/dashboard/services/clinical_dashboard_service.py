@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy import and_
+
 from app.extensions import db
 
 from app.modules.patient.models.patient_model import (
@@ -20,6 +22,7 @@ from app.core.enums.prescription_enums import (
     PrescriptionStatus,
 )
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_department_enums import StaffDepartmentStatus
 from app.core.enums.staff_enums import (
     StaffStatus,
 )
@@ -40,11 +43,21 @@ from app.modules.lab.models.lab_model import (
 from app.modules.prescription.models.prescription_model import (
     Prescription,
 )
+from app.modules.department.models.department_model import (
+    Department,
+)
+from app.modules.staff.models.staff_department_model import (
+    StaffDepartment,
+)
 from app.modules.staff.models.staff_model import (
     Staff,
 )
 from app.modules.ward.models.ward_model import (
     Admission,
+)
+
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    ClinicalDepartmentSchema,
 )
 
 from app.modules.dashboard.schemas.dashboard_schema import (
@@ -81,6 +94,59 @@ CLINICAL_ROLES = {
     Role.PARAMEDIC,
     Role.EMT,
 }
+
+
+def _get_my_departments(
+    staff_id: int,
+    clinic_id: int,
+) -> list[ClinicalDepartmentSchema]:
+    rows = db.session.execute(
+        db.select(
+            Department.id,
+            Department.code,
+            Department.name,
+            StaffDepartment.status,
+            StaffDepartment.is_primary,
+        )
+        .join(
+            StaffDepartment,
+            and_(
+                StaffDepartment.department_id
+                == Department.id,
+                StaffDepartment.clinic_id
+                == Department.clinic_id,
+            ),
+        )
+        .where(
+            Department.clinic_id == clinic_id,
+            StaffDepartment.staff_id == staff_id,
+            StaffDepartment.status
+            != StaffDepartmentStatus.ENDED,
+        )
+        .order_by(
+            StaffDepartment.is_primary.desc(),
+            StaffDepartment.status.asc(),
+            StaffDepartment.assigned_at.asc(),
+            StaffDepartment.id.asc(),
+        )
+    ).all()
+
+    return [
+        ClinicalDepartmentSchema(
+            department_id=department_id,
+            code=code,
+            name=name,
+            status=status,
+            is_primary=is_primary,
+        )
+        for (
+            department_id,
+            code,
+            name,
+            status,
+            is_primary,
+        ) in rows
+    ]
 
 
 def get_clinical_dashboard(
@@ -126,6 +192,11 @@ def get_clinical_dashboard(
 
     start, end = period_bounds(
         period,
+    )
+
+    my_departments = _get_my_departments(
+        staff_id=staff.id,
+        clinic_id=clinic_id,
     )
 
     appointments_today = (
@@ -445,6 +516,7 @@ def get_clinical_dashboard(
             clinic_id=clinic_id,
         ),
         overview=overview,
+        my_departments=my_departments,
         ai=ai,
         chat=chat,
         metrics=metrics,

@@ -1,3 +1,11 @@
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    ClinicalDepartmentSchema,
+    ManagementDepartmentDashboardSchema,
+    ManagementDepartmentSummarySchema,
+    SuperAdminDepartmentClinicSummarySchema,
+    SuperAdminDepartmentDashboardSchema,
+)
+
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
@@ -65,6 +73,12 @@ __all__ = [
     "DashboardPeriodSchema",
     "DashboardQuerySchema",
     "DashboardTrendSchema",
+
+    "ManagementDepartmentSummarySchema",
+    "ManagementDepartmentDashboardSchema",
+    "ClinicalDepartmentSchema",
+    "SuperAdminDepartmentClinicSummarySchema",
+    "SuperAdminDepartmentDashboardSchema",
 
     "SuperAdminAccessControlOverviewSchema",
     "SuperAdminAIDashboardSchema",

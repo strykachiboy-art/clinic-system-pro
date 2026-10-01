@@ -4,12 +4,19 @@ from app.extensions import db
 
 from app.core.auth.user.models.user_model import User
 from app.core.enums.clinic_enums import ClinicStatus
+from app.core.enums.department_enums import DepartmentStatus
 from app.core.enums.role_enums import Role
 from app.core.exceptions import ValidationError
 
 from app.modules.clinic.models.clinic_model import Clinic
+from app.modules.department.models.department_model import Department
 from app.modules.patient.models.patient_model import Patient
 from app.modules.staff.models.staff_model import Staff
+
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    SuperAdminDepartmentClinicSummarySchema,
+    SuperAdminDepartmentDashboardSchema,
+)
 
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardAlertSchema,
@@ -139,6 +146,79 @@ def get_super_admin_dashboard(
             )
         ).scalar_one()
         or 0
+    )
+
+    department_rows = db.session.execute(
+        db.select(
+            Clinic.id,
+            Clinic.name,
+            db.func.count(
+                Department.id,
+            ).label(
+                "total_departments",
+            ),
+            db.func.count(
+                Department.id,
+            ).filter(
+                Department.status
+                == DepartmentStatus.ACTIVE,
+            ).label(
+                "active_departments",
+            ),
+        )
+        .outerjoin(
+            Department,
+            Department.clinic_id == Clinic.id,
+        )
+        .group_by(
+            Clinic.id,
+            Clinic.name,
+        )
+        .order_by(
+            Clinic.name.asc(),
+            Clinic.id.asc(),
+        )
+    ).all()
+
+    department_dashboard = (
+        SuperAdminDepartmentDashboardSchema(
+            total_departments=sum(
+                int(total or 0)
+                for (
+                    _clinic_id,
+                    _clinic_name,
+                    total,
+                    _active,
+                ) in department_rows
+            ),
+            active_departments=sum(
+                int(active or 0)
+                for (
+                    _clinic_id,
+                    _clinic_name,
+                    _total,
+                    active,
+                ) in department_rows
+            ),
+            by_clinic=[
+                SuperAdminDepartmentClinicSummarySchema(
+                    clinic_id=clinic_id,
+                    clinic_name=clinic_name,
+                    total_departments=int(
+                        total or 0
+                    ),
+                    active_departments=int(
+                        active or 0
+                    ),
+                )
+                for (
+                    clinic_id,
+                    clinic_name,
+                    total,
+                    active,
+                ) in department_rows
+            ],
+        )
     )
 
     overview = SuperAdminDashboardOverviewSchema(
@@ -398,6 +478,7 @@ def get_super_admin_dashboard(
             clinic_id=None,
         ),
         overview=overview,
+        departments=department_dashboard,
         access_control=access_control,
         ai=ai,
         metrics=metrics,

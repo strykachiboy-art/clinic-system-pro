@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy import and_
+
 from app.extensions import db
 
 from app.core.auth.user.models.user_model import User
@@ -9,10 +11,12 @@ from app.core.enums.appointment_enums import (
 from app.core.enums.billing_enums import (
     InvoiceStatus,
 )
+from app.core.enums.department_enums import DepartmentStatus
 from app.core.enums.lab_enums import (
     LabOrderStatus,
 )
 from app.core.enums.role_enums import Role
+from app.core.enums.staff_department_enums import StaffDepartmentStatus
 from app.core.enums.staff_enums import (
     StaffStatus,
 )
@@ -34,8 +38,14 @@ from app.modules.inventory.models.inventory_model import (
 from app.modules.lab.models.lab_model import (
     LabOrder,
 )
+from app.modules.department.models.department_model import (
+    Department,
+)
 from app.modules.patient.models.patient_model import (
     Patient,
+)
+from app.modules.staff.models.staff_department_model import (
+    StaffDepartment,
 )
 from app.modules.staff.models.staff_model import (
     Staff,
@@ -44,6 +54,11 @@ from app.modules.ward.models.ward_model import (
     Admission,
     Bed,
     Ward,
+)
+
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    ManagementDepartmentDashboardSchema,
+    ManagementDepartmentSummarySchema,
 )
 
 from app.modules.dashboard.schemas.dashboard_schema import (
@@ -70,6 +85,104 @@ from app.modules.dashboard.services.dashboard_widget_service import (
     period_bounds,
     resolve_dashboard_period,
 )
+
+
+def _build_department_dashboard(
+    clinic_id: int,
+) -> ManagementDepartmentDashboardSchema:
+    rows = db.session.execute(
+        db.select(
+            Department.id,
+            Department.code,
+            Department.name,
+            Department.status,
+            db.func.count(
+                Staff.id,
+            ).label(
+                "active_staff_count",
+            ),
+            db.func.count(
+                Staff.id,
+            ).filter(
+                StaffDepartment.is_primary.is_(True),
+            ).label(
+                "primary_staff_count",
+            ),
+        )
+        .outerjoin(
+            StaffDepartment,
+            and_(
+                StaffDepartment.department_id
+                == Department.id,
+                StaffDepartment.clinic_id
+                == Department.clinic_id,
+                StaffDepartment.status
+                == StaffDepartmentStatus.ACTIVE,
+            ),
+        )
+        .outerjoin(
+            Staff,
+            and_(
+                Staff.id == StaffDepartment.staff_id,
+                Staff.clinic_id
+                == StaffDepartment.clinic_id,
+                Staff.status == StaffStatus.ACTIVE,
+            ),
+        )
+        .where(
+            Department.clinic_id == clinic_id,
+        )
+        .group_by(
+            Department.id,
+            Department.code,
+            Department.name,
+            Department.status,
+        )
+        .order_by(
+            Department.name.asc(),
+            Department.id.asc(),
+        )
+    ).all()
+
+    departments = [
+        ManagementDepartmentSummarySchema(
+            id=department_id,
+            code=code,
+            name=name,
+            status=status,
+            active_staff_count=int(
+                active_staff_count or 0
+            ),
+            primary_staff_count=int(
+                primary_staff_count or 0
+            ),
+        )
+        for (
+            department_id,
+            code,
+            name,
+            status,
+            active_staff_count,
+            primary_staff_count,
+        ) in rows
+    ]
+
+    return ManagementDepartmentDashboardSchema(
+        total_departments=len(departments),
+        active_departments=sum(
+            item.status == DepartmentStatus.ACTIVE
+            for item in departments
+        ),
+        inactive_departments=sum(
+            item.status == DepartmentStatus.INACTIVE
+            for item in departments
+        ),
+        suspended_departments=sum(
+            item.status == DepartmentStatus.SUSPENDED
+            for item in departments
+        ),
+        departments=departments,
+    )
 
 
 def get_management_dashboard(
@@ -256,6 +369,10 @@ def get_management_dashboard(
             )
         ).scalar_one()
         or 0
+    )
+
+    department_dashboard = _build_department_dashboard(
+        clinic_id,
     )
 
     overview = ManagementDashboardOverviewSchema(
@@ -525,6 +642,7 @@ def get_management_dashboard(
             clinic_id=clinic_id,
         ),
         overview=overview,
+        departments=department_dashboard,
         ai=ai,
         chat=chat,
         metrics=metrics,

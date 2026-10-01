@@ -47,6 +47,16 @@ class OperationsDashboardOverviewSchema(BaseModel):
         ge=0,
     )
 
+    active_departments: int = Field(
+        ...,
+        ge=0,
+    )
+
+    unassigned_active_staff: int = Field(
+        ...,
+        ge=0,
+    )
+
     model_config = ConfigDict(
         extra="forbid",
     )

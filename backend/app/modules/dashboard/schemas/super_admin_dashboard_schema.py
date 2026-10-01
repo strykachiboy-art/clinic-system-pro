@@ -10,6 +10,10 @@ from app.core.enums.ai_enums import (
     AIRiskLevel,
 )
 
+from app.modules.dashboard.schemas.department_dashboard_schema import (
+    SuperAdminDepartmentDashboardSchema,
+)
+
 from app.modules.dashboard.schemas.dashboard_schema import (
     DashboardActivitySchema,
     DashboardAlertSchema,
@@ -249,6 +253,8 @@ class SuperAdminDashboardSchema(BaseModel):
     context: DashboardContextSchema
 
     overview: SuperAdminDashboardOverviewSchema
+
+    departments: SuperAdminDepartmentDashboardSchema
 
     access_control: SuperAdminAccessControlOverviewSchema
 
