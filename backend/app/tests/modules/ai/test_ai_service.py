@@ -394,7 +394,7 @@ def test_get_lab_order_returns_order(
     app,
     clinic,
     patient,
-    user,
+    staff,
     make_lab_order,
     make_lab_test,
 ):
@@ -406,7 +406,7 @@ def test_get_lab_order_returns_order(
         lab_order = make_lab_order(
             clinic,
             patient,
-            user,
+            staff,
             [lab_test],
         )
 
@@ -440,7 +440,7 @@ def test_get_lab_order_rejects_cross_clinic_order(
     make_patient,
     make_lab_order,
     make_lab_test,
-    user,
+    make_staff,
 ):
     with app.app_context():
         other_clinic = make_clinic(
@@ -455,10 +455,14 @@ def test_get_lab_order_rejects_cross_clinic_order(
             clinic=other_clinic,
         )
 
+        other_staff = make_staff(
+            other_clinic,
+        )
+
         other_lab_order = make_lab_order(
             other_clinic,
             other_patient,
-            user,
+            other_staff,
             [other_lab_test],
         )
 
@@ -1451,7 +1455,7 @@ def test_interpret_lab_results_uses_lab_order_patient(
     app,
     clinic,
     patient,
-    user,
+    staff,
     make_lab_order,
     make_lab_test,
 ):
@@ -1469,7 +1473,7 @@ def test_interpret_lab_results_uses_lab_order_patient(
         lab_order = make_lab_order(
             clinic,
             patient,
-            user,
+            staff,
             [lab_test],
         )
 
@@ -1494,7 +1498,7 @@ def test_interpret_lab_results_rejects_patient_mismatch(
     make_patient,
     make_lab_order,
     make_lab_test,
-    user,
+    staff,
 ):
     with app.app_context():
         lab_patient = make_patient(
@@ -1508,7 +1512,7 @@ def test_interpret_lab_results_rejects_patient_mismatch(
         lab_order = make_lab_order(
             clinic,
             lab_patient,
-            user,
+            staff,
             [lab_test],
         )
 
@@ -1536,7 +1540,7 @@ def test_interpret_lab_results_rejects_cross_clinic_lab_order(
     make_patient,
     make_lab_order,
     make_lab_test,
-    user,
+    make_staff,
 ):
     with app.app_context():
         other_clinic = make_clinic(
@@ -1551,10 +1555,14 @@ def test_interpret_lab_results_rejects_cross_clinic_lab_order(
             clinic=other_clinic,
         )
 
+        other_staff = make_staff(
+            other_clinic,
+        )
+
         other_lab_order = make_lab_order(
             other_clinic,
             other_patient,
-            user,
+            other_staff,
             [other_lab_test],
         )
 
@@ -2125,7 +2133,7 @@ def test_cross_clinic_lab_order_failure_creates_no_ai_log(
     make_patient,
     make_lab_order,
     make_lab_test,
-    user,
+    make_staff,
 ):
     with app.app_context():
         other_clinic = make_clinic(
@@ -2140,10 +2148,14 @@ def test_cross_clinic_lab_order_failure_creates_no_ai_log(
             clinic=other_clinic,
         )
 
+        other_staff = make_staff(
+            other_clinic,
+        )
+
         other_lab_order = make_lab_order(
             other_clinic,
             other_patient,
-            user,
+            other_staff,
             [other_lab_test],
         )
 

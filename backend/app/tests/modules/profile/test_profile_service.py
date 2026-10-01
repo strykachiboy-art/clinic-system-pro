@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from types import SimpleNamespace
 
 from app.core.exceptions import (
     ConflictError,
@@ -222,10 +223,10 @@ def test_get_clinic_for_user_rejects_invalid_clinic_id(
         )
 
 
-def test_get_clinic_for_user_rejects_missing_clinic(
-    user,
-):
-    user.clinic_id = 999999
+def test_get_clinic_for_user_rejects_missing_clinic():
+    user = SimpleNamespace(
+        clinic_id=999999,
+    )
 
     with pytest.raises(
         NotFoundError,
@@ -380,7 +381,7 @@ def test_get_profile_rejects_missing_user():
 
 
 # ============================================================================
-# UPDATE PROFILE — VALIDATION
+# UPDATE PROFILE â€” VALIDATION
 # ============================================================================
 
 
@@ -458,7 +459,7 @@ def test_update_profile_rejects_duplicate_email(
 
 
 # ============================================================================
-# UPDATE PROFILE — USER FIELDS
+# UPDATE PROFILE â€” USER FIELDS
 # ============================================================================
 
 
@@ -520,7 +521,7 @@ def test_update_profile_does_not_audit_unchanged_email(
 
 
 # ============================================================================
-# UPDATE PROFILE — STAFF FIELDS
+# UPDATE PROFILE â€” STAFF FIELDS
 # ============================================================================
 
 
@@ -657,7 +658,7 @@ def test_update_profile_does_not_audit_unchanged_staff_fields(
 
 
 # ============================================================================
-# UPDATE PROFILE — DATA INTEGRITY
+# UPDATE PROFILE â€” DATA INTEGRITY
 # ============================================================================
 
 
@@ -699,7 +700,7 @@ def test_update_profile_preserves_existing_clinic(
 
 
 # ============================================================================
-# UPDATE PROFILE — TRANSACTION / FAILURE SAFETY
+# UPDATE PROFILE â€” TRANSACTION / FAILURE SAFETY
 # ============================================================================
 
 
@@ -977,4 +978,5 @@ def test_remove_profile_image_clears_actor_image(
     assert call_kwargs["new_value"] == {
         "profile_image_storage_key": None,
     }
+
 

@@ -2397,8 +2397,12 @@ def test_create_prescription_rejects_patient_from_other_clinic(
     patient,
     make_authenticated_staff,
     make_drug,
+    make_clinic,
 ):
-    patient.clinic_id = active_clinic.id + 999
+    other_clinic = make_clinic(
+        name="Prescription Other Clinic",
+    )
+    patient.clinic_id = other_clinic.id
     patient.is_active = True
 
     staff, _ = _make_doctor(

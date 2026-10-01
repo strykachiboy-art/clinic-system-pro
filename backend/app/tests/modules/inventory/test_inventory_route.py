@@ -222,8 +222,10 @@ def test_endpoints_require_auth(client):
 
 
 def test_current_staff_uses_authenticated_user(
+    app,
     inventory_routes,
     staff,
+    auth_headers_for,
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -232,10 +234,14 @@ def test_current_staff_uses_authenticated_user(
         Mock(return_value=staff.user),
     )
 
-    assert (
-        inventory_routes._get_current_staff_id()
-        == staff.id
-    )
+    with app.test_request_context(
+        "/api/v1/inventory/items",
+        headers=auth_headers_for(staff.user),
+    ):
+        assert (
+            inventory_routes._get_current_staff_id()
+            == staff.id
+        )
 
 
 # ============================================================================

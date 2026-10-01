@@ -419,7 +419,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
             role=Role.DOCTOR,
         )
 
-        user.clinic_id = -1
+        user.clinic_id = None
         db.session.flush()
 
         response = post_json(
@@ -435,7 +435,7 @@ def test_current_clinic_rejects_invalid_clinic_id(
 
         assert body["success"] is False
         assert body["error"] == (
-            "Clinic ID must be a positive integer"
+            "Clinic context is required"
         )
 
 

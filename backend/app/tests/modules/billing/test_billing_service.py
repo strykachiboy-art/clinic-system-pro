@@ -1,4 +1,4 @@
-﻿from datetime import date
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -1238,27 +1238,49 @@ def test_create_invoice_with_appointment(
     app,
     make_clinic,
     make_patient,
+    make_staff,
+    make_appointment,
     monkeypatch,
 ):
     clinic = make_clinic()
     patient = make_patient(
         clinic=clinic,
     )
+    staff = make_staff(
+        clinic=clinic,
+    )
 
-    appointment = SimpleNamespace(
+    appointment = make_appointment(
+        clinic=clinic,
+        patient=patient,
+        staff=staff,
         id=30,
-        clinic_id=clinic.id,
-        patient_id=patient.id,
+    )
+
+    appointment_stub = SimpleNamespace(
+        id=appointment.id,
+        clinic_id=appointment.clinic_id,
+        patient_id=appointment.patient_id,
     )
 
     patch_common_create_dependencies(
         monkeypatch
     )
 
+    original_get = billing_service.db.session.get
+
     monkeypatch.setattr(
         billing_service.db.session,
         "get",
-        lambda model, object_id: appointment,
+        lambda model, object_id: (
+            appointment_stub
+            if getattr(model, "__tablename__", None)
+            == "appointments"
+            else original_get(
+                model,
+                object_id,
+            )
+        ),
     )
 
     with app.app_context():
@@ -1663,10 +1685,43 @@ def _make_payment_invoice(
     paid=Decimal("0.00"),
     status=InvoiceStatus.ISSUED,
 ):
-    return Invoice(
+    from app.extensions import db
+    from app.modules.clinic.models.clinic_model import Clinic
+    from app.modules.patient.models.patient_model import Patient
+
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
+
+    if clinic is None:
+        clinic = Clinic(
+            id=clinic_id,
+            name=f"Billing Test Clinic {clinic_id}",
+        )
+        db.session.add(clinic)
+        db.session.flush()
+
+    patient = db.session.get(
+        Patient,
+        20,
+    )
+
+    if patient is None:
+        patient = Patient(
+            id=20,
+            clinic_id=clinic_id,
+            first_name="Billing",
+            last_name="Patient",
+            patient_number="BILLING-MRN-20",
+        )
+        db.session.add(patient)
+        db.session.flush()
+
+    invoice = Invoice(
         id=invoice_id,
         clinic_id=clinic_id,
-        patient_id=20,
+        patient_id=patient.id,
         invoice_number=(
             "INV-10-20260907-ABC12345"
         ),
@@ -1674,6 +1729,11 @@ def _make_payment_invoice(
         amount_paid=paid,
         status=status,
     )
+
+    db.session.add(invoice)
+    db.session.flush()
+
+    return invoice
 
 
 def patch_payment_invoice(

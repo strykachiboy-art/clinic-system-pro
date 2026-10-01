@@ -28,6 +28,7 @@ class TestRecordAssetHistory:
         clinic,
         user,
         asset,
+        staff,
     ):
         event_at = datetime(
             2026,
@@ -49,7 +50,7 @@ class TestRecordAssetHistory:
                 previous_condition=AssetCondition.GOOD,
                 new_condition=AssetCondition.GOOD,
                 previous_assigned_to_id=None,
-                new_assigned_to_id=11,
+                new_assigned_to_id=staff.id,
                 previous_location="Ward",
                 new_location="ICU",
                 reason="Moved",
@@ -91,7 +92,7 @@ class TestRecordAssetHistory:
         )
         assert (
             history.new_assigned_to_id
-            == 11
+            == staff.id
         )
         assert (
             history.previous_location
