@@ -59,6 +59,9 @@ class StaffDepartment(db.Model):
             postgresql_where=db.text(
                 "status = 'ACTIVE'"
             ),
+            sqlite_where=db.text(
+                "status = 'ACTIVE'"
+            ),
         ),
         db.Index(
             "uq_staff_departments_active_primary",
@@ -66,6 +69,9 @@ class StaffDepartment(db.Model):
             "staff_id",
             unique=True,
             postgresql_where=db.text(
+                "status = 'ACTIVE' AND is_primary = TRUE"
+            ),
+            sqlite_where=db.text(
                 "status = 'ACTIVE' AND is_primary = TRUE"
             ),
         ),

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from cryptography.fernet import Fernet
 from flask_jwt_extended import create_access_token
+from sqlalchemy import event
 
 from app import create_app
 from app.extensions import db as _db
@@ -44,6 +45,19 @@ def app():
     )
 
     with flask_app.app_context():
+        if _db.engine.dialect.name == "sqlite":
+            @event.listens_for(
+                _db.engine,
+                "connect",
+            )
+            def _enable_sqlite_foreign_keys(
+                connection,
+                connection_record,
+            ):
+                connection.execute(
+                    "PRAGMA foreign_keys=ON"
+                )
+
         _db.create_all()
 
         try:
