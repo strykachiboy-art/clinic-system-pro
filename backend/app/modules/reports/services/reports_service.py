@@ -1911,6 +1911,23 @@ def _writer_value(
     return value
 
 
+def _csv_safe_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    formula_candidate = value.lstrip(
+        " \t\r\n"
+    )
+
+    if (
+        value.startswith(("\t", "\r", "\n"))
+        or formula_candidate.startswith(("=", "+", "-", "@"))
+    ):
+        return "'" + value
+
+    return value
+
+
 def _write_csv(
     rows: list[dict[str, Any]],
 ) -> bytes:
@@ -1938,8 +1955,8 @@ def _write_csv(
     for row in rows:
         writer.writerow(
             {
-                key: _writer_value(
-                    value
+                key: _csv_safe_value(
+                    _writer_value(value)
                 )
                 for key, value in row.items()
             }

@@ -88,6 +88,41 @@ def test_update_staff_department_assigns_department(
     assert body["data"]["department_id"] == department.id
 
 
+def test_update_staff_department_switches_primary_membership(
+    client,
+    admin_headers,
+    admin_staff,
+    clinic,
+):
+    first = make_department(
+        clinic,
+        name="Cardiology",
+        code="CARD",
+    )
+    second = make_department(
+        clinic,
+        name="Emergency",
+        code="ER",
+    )
+
+    first_response = client.patch(
+        f"/api/v1/staff/{admin_staff.id}/department",
+        headers=admin_headers,
+        json={"department_id": first.id},
+    )
+    assert first_response.status_code == 200
+
+    response = client.patch(
+        f"/api/v1/staff/{admin_staff.id}/department",
+        headers=admin_headers,
+        json={"department_id": second.id},
+    )
+
+    body = response.get_json()
+    assert response.status_code == 200, body
+    assert body["data"]["department_id"] == second.id
+
+
 def test_update_staff_department_rejects_invalid_department(
     client,
     admin_headers,

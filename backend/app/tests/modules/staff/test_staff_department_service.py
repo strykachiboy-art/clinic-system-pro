@@ -125,6 +125,42 @@ def test_assign_staff_to_multiple_departments(
     ]
 
 
+def test_assigning_primary_department_switches_primary(
+    clinic,
+    make_staff,
+    db,
+):
+    staff = make_staff(clinic=clinic)
+    first_department = make_department(
+        db,
+        clinic,
+        code="FIRST",
+    )
+    second_department = make_department(
+        db,
+        clinic,
+        name="Emergency",
+        code="SECOND",
+    )
+
+    first = staff_department_service.assign_staff_to_department(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        department_id=first_department.id,
+    )
+    second = staff_department_service.assign_staff_to_department(
+        staff_id=staff.id,
+        clinic_id=clinic.id,
+        department_id=second_department.id,
+        is_primary=True,
+    )
+
+    db.session.expire_all()
+
+    assert db.session.get(StaffDepartment, first.id).is_primary is False
+    assert db.session.get(StaffDepartment, second.id).is_primary is True
+
+
 def test_assign_staff_to_department_rejects_duplicate_active_membership(
     clinic,
     make_staff,

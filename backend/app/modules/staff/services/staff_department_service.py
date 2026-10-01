@@ -278,14 +278,23 @@ def assign_staff_to_department(
             "to this department"
         )
 
+    make_primary = (
+        is_primary
+        or not active_memberships
+    )
+
+    if is_primary:
+        for active_membership in active_memberships:
+            active_membership.is_primary = False
+
+        if active_memberships:
+            db.session.flush()
+
     membership = StaffDepartment(
         clinic_id=clinic.id,
         staff_id=staff.id,
         department_id=department.id,
-        is_primary=(
-            is_primary
-            or not active_memberships
-        ),
+        is_primary=make_primary,
         status=StaffDepartmentStatus.ACTIVE,
         assigned_at=_utcnow(),
     )

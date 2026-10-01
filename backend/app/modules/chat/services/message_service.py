@@ -763,6 +763,7 @@ def delete_message(
         message.created_at,
     )
 
+    previous_status = message.status
     message.status = MessageStatus.DELETED
     message.deleted_at = _utcnow()
     message.updated_at = _utcnow()
@@ -788,11 +789,7 @@ def delete_message(
             f"Message {message.id} deleted"
         ),
         old_value={
-            "status": (
-                MessageStatus.EDITED.value
-                if message.edited_at is not None
-                else MessageStatus.SENT.value
-            ),
+            "status": previous_status.value,
         },
         new_value={
             "status": MessageStatus.DELETED.value,

@@ -742,6 +742,48 @@ class TestCSVWriter:
         assert len(reader) == 1
         assert reader[0]["name"] == "Alice"
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "=1+1",
+            "+SUM(A1:A2)",
+            "-1+1",
+            "@SUM(A1:A2)",
+            "  =1+1",
+            "\t=1+1",
+            "\r=1+1",
+            "\n=1+1",
+        ],
+    )
+    def test_formula_like_text_is_escaped(
+        self,
+        value,
+    ):
+        output = service._write_csv(
+            [{"name": value}]
+        )
+
+        reader = csv.DictReader(
+            io.StringIO(
+                output.decode("utf-8")
+            )
+        )
+
+        assert next(reader)["name"] == "'" + value
+
+    def test_negative_numeric_value_is_not_escaped(self):
+        output = service._write_csv(
+            [{"amount": -12}]
+        )
+
+        reader = csv.DictReader(
+            io.StringIO(
+                output.decode("utf-8")
+            )
+        )
+
+        assert next(reader)["amount"] == "-12"
+
 
 class TestXLSXWriter:
     def test_writes_xlsx_bytes(self):

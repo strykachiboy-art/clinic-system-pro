@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
 
 import pytest
 
@@ -34,6 +35,7 @@ from app.modules.chat.services.message_service import (
     get_message,
     list_messages,
 )
+from app.modules.chat.services import message_service
 from app.modules.settings.models.clinic_settings import (
     ClinicSettings,
 )
@@ -1391,6 +1393,46 @@ def test_delete_message(
     assert deleted.id == message.id
     assert deleted.status == MessageStatus.DELETED
     assert deleted.deleted_at is not None
+
+
+def test_delete_message_audit_records_actual_previous_status(
+    clinic,
+    user,
+    make_user,
+    no_audit,
+    monkeypatch,
+):
+    conversation, _ = _create_group_conversation(
+        clinic,
+        user,
+        make_user,
+        no_audit,
+    )
+    message = create_message(
+        clinic_id=clinic.id,
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content="Pending message",
+    )
+    audit = Mock()
+    monkeypatch.setattr(
+        message_service,
+        "create_audit_log",
+        audit,
+    )
+
+    delete_message(
+        message_id=message.id,
+        clinic_id=clinic.id,
+        user_id=user.id,
+    )
+
+    assert audit.call_args.kwargs["old_value"] == {
+        "status": MessageStatus.PENDING.value,
+    }
+    assert audit.call_args.kwargs["new_value"]["status"] == (
+        MessageStatus.DELETED.value
+    )
 
 
 def test_delete_message_creates_outbox_event(

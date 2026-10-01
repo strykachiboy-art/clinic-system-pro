@@ -335,11 +335,7 @@ def _serialize_staff(
 ) -> dict:
     primary_department_id = None
 
-    for membership in getattr(
-        staff,
-        "department_memberships",
-        (),
-    ) or ():
+    for membership in staff.department_memberships:
         status = getattr(
             membership.status,
             "value",
