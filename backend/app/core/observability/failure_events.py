@@ -162,8 +162,20 @@ def collect_failure_events(
     redis_client,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
+    events, _ = collect_failure_events_with_status(
+        redis_client=redis_client,
+        limit=limit,
+    )
+    return events
+
+
+def collect_failure_events_with_status(
+    *,
+    redis_client,
+    limit: int = 50,
+) -> tuple[list[dict[str, Any]], bool]:
     if redis_client is None:
-        return []
+        return [], False
 
     if (
         isinstance(limit, bool)
@@ -186,7 +198,7 @@ def collect_failure_events(
             limit - 1,
         )
     except Exception:
-        return []
+        return [], False
 
     events = []
 
@@ -218,7 +230,7 @@ def collect_failure_events(
 
         events.append(event)
 
-    return events
+    return events, True
 
 
 def summarize_failure_events(

@@ -11,7 +11,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.observability.failure_events import (
-    collect_failure_events,
+    collect_failure_events_with_status,
     summarize_failure_events,
 )
 from app.extensions import db
@@ -126,7 +126,7 @@ def get_failure_dashboard(
             extensions.redis_client
         )
 
-    events = collect_failure_events(
+    events, state_store_available = collect_failure_events_with_status(
         redis_client=redis_client,
         limit=limit,
     )
@@ -150,7 +150,5 @@ def get_failure_dashboard(
         "timestamp": _utcnow(),
         "recent_failures": safe_events,
         "summary": summary,
-        "state_store_available": (
-            redis_client is not None
-        ),
+        "state_store_available": state_store_available,
     }

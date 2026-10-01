@@ -289,6 +289,10 @@ def test_register_device_rejects_short_token(
 
     assert response.status_code == 422
 
+    body = response.get_json()
+    assert body["details"]
+    assert all("input" not in error for error in body["details"])
+
 
 # ============================================================================
 # LIST

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import Mock
 
 import pytest
 
 import app.modules.asset_control.services.asset_assignment_service as assignment_service
+import app.modules.asset_control.services.asset_maintenance_service as maintenance_service
 from app.core.enums.asset_enums import (
     AssetHistoryEventType,
     AssetStatus,
+    MaintenanceStatus,
 )
 from app.core.enums.staff_enums import StaffStatus
 from app.core.exceptions import (
@@ -706,6 +709,66 @@ class TestReturnAsset:
             history.new_status
             == AssetStatus.ACTIVE
         )
+
+    def test_return_during_maintenance_preserves_unavailable_state(
+        self,
+        db,
+        asset,
+        clinic,
+        user,
+        staff,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            assignment_service,
+            "create_audit_log",
+            Mock(),
+        )
+        monkeypatch.setattr(
+            maintenance_service,
+            "create_audit_log",
+            Mock(),
+        )
+
+        assignment_service.assign_asset(
+            asset_id=asset.id,
+            clinic_id=clinic.id,
+            actor_user_id=user.id,
+            data={"staff_id": staff.id},
+        )
+        maintenance = maintenance_service.schedule_maintenance(
+            asset_id=asset.id,
+            clinic_id=clinic.id,
+            actor_user_id=user.id,
+            data={
+                "scheduled_date": date(2026, 10, 1),
+                "description": "Inspection",
+            },
+        )
+        maintenance_service.start_maintenance(
+            maintenance_id=maintenance.id,
+            clinic_id=clinic.id,
+            actor_user_id=user.id,
+        )
+
+        assignment_service.return_asset(
+            asset_id=asset.id,
+            clinic_id=clinic.id,
+            actor_user_id=user.id,
+        )
+
+        db.session.refresh(asset)
+        assert asset.assigned_to_id is None
+        assert asset.status == AssetStatus.UNDER_MAINTENANCE
+        assert asset.maintenance_status == MaintenanceStatus.IN_PROGRESS
+
+        with pytest.raises(ConflictError):
+            assignment_service.assign_asset(
+                asset_id=asset.id,
+                clinic_id=clinic.id,
+                actor_user_id=user.id,
+                data={"staff_id": staff.id},
+            )
 
     def test_keeps_existing_notes_when_return_notes_missing(
         self,

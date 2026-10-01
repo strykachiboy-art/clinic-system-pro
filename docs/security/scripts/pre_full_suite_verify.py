@@ -9,9 +9,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+BACKEND = ROOT / "backend"
 
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 
 
 CHECKS: list[tuple[str, bool, str]] = []
@@ -51,17 +52,25 @@ def run_command(
     args: list[str],
     *,
     timeout: int = 120,
+    cwd: Path = ROOT,
 ) -> tuple[int, str]:
     try:
+        environment = os.environ.copy()
+        python_path = [str(BACKEND), str(ROOT / "testing")]
+        if environment.get("PYTHONPATH"):
+            python_path.append(environment["PYTHONPATH"])
+        environment["PYTHONPATH"] = os.pathsep.join(python_path)
+
         result = subprocess.run(
             args,
-            cwd=ROOT,
+            cwd=cwd,
             check=False,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=environment,
         )
     except (
         OSError,
@@ -86,11 +95,11 @@ def run_command(
 
 def check_required_files() -> None:
     required_files = [
-        "app/extensions.py",
-        "app/config.py",
-        "app/core/backup/restore_drill.py",
-        "app/core/backup/restore_service.py",
-        "app/tests/core/test_config_security.py",
+        "backend/app/extensions.py",
+        "backend/app/config.py",
+        "backend/app/core/backup/restore_drill.py",
+        "backend/app/core/backup/restore_service.py",
+        "backend/app/tests/core/test_config_security.py",
     ]
 
     for relative_path in required_files:
@@ -229,10 +238,10 @@ def check_runbook() -> None:
 
 def check_python_syntax() -> None:
     python_files = [
-        "app/extensions.py",
-        "app/config.py",
-        "app/core/backup/restore_drill.py",
-        "app/core/backup/restore_service.py",
+        "backend/app/extensions.py",
+        "backend/app/config.py",
+        "backend/app/core/backup/restore_drill.py",
+        "backend/app/core/backup/restore_service.py",
     ]
 
     for relative_path in python_files:
@@ -269,7 +278,7 @@ def check_python_syntax() -> None:
 
 def check_extensions() -> None:
     source = read_text(
-        "app/extensions.py"
+        "backend/app/extensions.py"
     )
 
     if source is None:
@@ -361,7 +370,7 @@ def check_extensions() -> None:
 
 def check_config() -> None:
     source = read_text(
-        "app/config.py"
+        "backend/app/config.py"
     )
 
     if source is None:
@@ -436,7 +445,7 @@ def check_config() -> None:
 
 def check_restore_drill_source() -> None:
     source = read_text(
-        "app/core/backup/restore_drill.py"
+        "backend/app/core/backup/restore_drill.py"
     )
 
     if source is None:
@@ -551,9 +560,9 @@ def check_auth_rate_limits() -> None:
     candidates: list[Path] = []
 
     for root_name in (
-        "app/api",
-        "app/core",
-        "app/routes",
+        "backend/app/api",
+        "backend/app/core",
+        "backend/app/routes",
     ):
         root = ROOT / root_name
 
@@ -640,7 +649,7 @@ def check_auth_rate_limits() -> None:
 
 def check_backup_scheduling() -> None:
     source = read_text(
-        "app/extensions.py"
+        "backend/app/extensions.py"
     )
 
     if source is None:
@@ -677,10 +686,10 @@ def check_backup_scheduling() -> None:
 
 
 def check_imports() -> None:
-    if str(ROOT) not in sys.path:
+    if str(BACKEND) not in sys.path:
         sys.path.insert(
             0,
-            str(ROOT),
+            str(BACKEND),
         )
 
     modules = [
@@ -717,6 +726,7 @@ def check_imports() -> None:
 def check_targeted_tests_exist() -> None:
     security_test_dir = (
         ROOT
+        / "backend"
         / "app"
         / "tests"
         / "core"
@@ -737,6 +747,7 @@ def check_targeted_tests_exist() -> None:
 
     config_test = (
         ROOT
+        / "backend"
         / "app"
         / "tests"
         / "core"
@@ -754,8 +765,8 @@ def check_targeted_tests_exist() -> None:
 
 def run_targeted_tests() -> None:
     targets = [
-        "app/tests/core/test_config_security.py",
-        "app/tests/core/security",
+        "backend/app/tests/core/test_config_security.py",
+        "backend/app/tests/core/security",
     ]
 
     existing_targets = []
@@ -855,6 +866,7 @@ def check_migrations() -> None:
             "current",
         ],
         timeout=120,
+        cwd=BACKEND,
     )
 
     add_check(

@@ -39,6 +39,7 @@ def _sanitize_pydantic_errors(errors):
 
     for error in errors:
         item = dict(error)
+        item.pop("input", None)
 
         if "ctx" in item and isinstance(item["ctx"], dict):
             item["ctx"] = {

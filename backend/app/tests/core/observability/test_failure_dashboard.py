@@ -15,6 +15,11 @@ class FakeRedis:
         ]
 
 
+class UnavailableRedis:
+    def lrange(self, key, start, end):
+        raise ConnectionError("Redis unavailable")
+
+
 def _event(
     event_id,
     component,
@@ -149,3 +154,15 @@ def test_failure_dashboard_respects_limit(
     assert len(
         result["recent_failures"]
     ) == 2
+
+
+def test_failure_dashboard_reports_unavailable_redis(
+    user,
+):
+    result = get_failure_dashboard(
+        actor_id=user.id,
+        redis_client=UnavailableRedis(),
+    )
+
+    assert result["state_store_available"] is False
+    assert result["recent_failures"] == []

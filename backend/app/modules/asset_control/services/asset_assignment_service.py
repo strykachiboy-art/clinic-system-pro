@@ -253,7 +253,8 @@ def return_asset(
         assignment.notes = data.notes
 
     asset.assigned_to_id = None
-    asset.status = AssetStatus.ACTIVE
+    if old_status == AssetStatus.ASSIGNED:
+        asset.status = AssetStatus.ACTIVE
     asset.updated_at = returned_at
 
     db.session.flush()

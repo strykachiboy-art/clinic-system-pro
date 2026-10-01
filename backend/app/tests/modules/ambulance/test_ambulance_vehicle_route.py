@@ -1524,10 +1524,7 @@ def test_create_ambulance_vehicle_rejects_user_without_clinic(
     body = response.get_json()
 
     assert body["success"] is False
-    assert body["error"] == (
-        "Authenticated user is not associated "
-        "with a clinic"
-    )
+    assert body["error"] == "Clinic context is required"
 
 
 # ============================================================

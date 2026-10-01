@@ -1251,13 +1251,14 @@ def test_authenticate_google_user_success(
         return_value=(user, False),
     ), patch.object(
         google_auth_service,
-        "create_access_token",
-        return_value="access-token",
-    ) as access_mock, patch.object(
-        google_auth_service,
-        "create_refresh_token",
-        return_value="refresh-token",
-    ) as refresh_mock, patch.object(
+        "issue_auth_tokens",
+        return_value={
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "user_id": user.id,
+            "role": user.role.value,
+        },
+    ) as tokens_mock, patch.object(
         google_auth_service,
         "create_audit_log",
     ) as audit_mock:
@@ -1275,20 +1276,7 @@ def test_authenticate_google_user_success(
         "role": user.role.value,
     }
 
-    access_mock.assert_called_once_with(
-        identity=str(user.id),
-        additional_claims={
-            "role": user.role.value,
-            "token_version": 7,
-        },
-    )
-
-    refresh_mock.assert_called_once_with(
-        identity=str(user.id),
-        additional_claims={
-            "token_version": 7,
-        },
-    )
+    tokens_mock.assert_called_once_with(user)
 
     audit_mock.assert_called_once()
 
@@ -1327,12 +1315,13 @@ def test_authenticate_google_user_updates_last_login(
         return_value=(user, False),
     ), patch.object(
         google_auth_service,
-        "create_access_token",
-        return_value="access-token",
-    ), patch.object(
-        google_auth_service,
-        "create_refresh_token",
-        return_value="refresh-token",
+        "issue_auth_tokens",
+        return_value={
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "user_id": user.id,
+            "role": user.role.value,
+        },
     ), patch.object(
         google_auth_service,
         "create_audit_log",

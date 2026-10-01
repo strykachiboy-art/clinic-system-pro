@@ -197,13 +197,15 @@ The test environment is designed to prevent:
 Where the database isolation harness is used, the lifecycle is:
 
 ```text
-CREATE DATABASE
+CREATE APP CONTEXT
+    ↓
+CREATE TABLES IN SQLITE :memory:
     ↓
 RUN TEST
     ↓
-ROLLBACK / CLEANUP
-    ↓
-DROP DATABASE
+ROLLBACK / REMOVE SESSION
+      ↓
+DROP TABLES
 ```
 
 The exact fixture implementation may evolve, but the invariant remains:
@@ -584,13 +586,15 @@ These values represent recorded verification runs and should not be interpreted 
 ### Run the full application suite
 
 ```powershell
+$env:PYTHONPATH="$PWD\backend;$PWD\testing"
 pytest -q
 ```
 
 ### Run the observability suite
 
 ```powershell
-pytest -q app/tests/core/observability/
+$env:PYTHONPATH="$PWD\backend;$PWD\testing"
+pytest -q backend/app/tests/core/observability/
 ```
 
 ### Run the Phase 4 exit review
@@ -608,6 +612,7 @@ python docs/security/scripts/pre_full_suite_verify.py
 ### Run resilience verification
 
 ```powershell
+$env:PYTHONPATH="$PWD\backend;$PWD\testing"
 python -m load_tests.resilience.runners.resilience --scenario all
 ```
 

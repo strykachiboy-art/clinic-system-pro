@@ -526,7 +526,7 @@ The Feedback module is fully implemented and verified for the current backend cy
 
 Module structure:
 
-app/modules/feedback/
+backend/app/modules/feedback/
 â”œâ”€â”€ __init__.py
 â”œâ”€â”€ models/
 â”‚   â”œâ”€â”€ __init__.py
@@ -1366,44 +1366,66 @@ Existing migrations should not be rewritten merely to make history appear cleane
 
 # 51. Repository Structure
 
-At a high level:
+The backend application and migrations live under `backend/`. The top-level
+`testing/` package contains load and resilience tooling, separate from the
+backend's pytest suite.
 
-clinic-system-pro/
-â”œâ”€â”€ app/
-â”‚   â”œâ”€â”€ core/
-â”‚   â”‚   â”œâ”€â”€ emergency_access/
-â”‚   â”‚   â”œâ”€â”€ clinical_safety/
-â”‚   â”‚   â”œâ”€â”€ auth/
-â”‚   â”‚   â”œâ”€â”€ errors/
-â”‚   â”‚   â”œâ”€â”€ audit/
-â”‚   â”‚   â””â”€â”€ ...
-â”‚   â”œâ”€â”€ modules/
-â”‚   â”‚   â”œâ”€â”€ feedback/
-â”‚   â”‚   â”œâ”€â”€ patient/
-â”‚   â”‚   â”œâ”€â”€ appointment/
-â”‚   â”‚   â”œâ”€â”€ consultation/
-â”‚   â”‚   â”œâ”€â”€ lab/
-â”‚   â”‚   â”œâ”€â”€ pharmacy/
-â”‚   â”‚   â”œâ”€â”€ prescription/
-â”‚   â”‚   â”œâ”€â”€ inventory/
-â”‚   â”‚   â”œâ”€â”€ billing/
-â”‚   â”‚   â”œâ”€â”€ ward/
-â”‚   â”‚   â”œâ”€â”€ ambulance/
-â”‚   â”‚   â”œâ”€â”€ hie/
-â”‚   â”‚   â”œâ”€â”€ reports/
-â”‚   â”‚   â”œâ”€â”€ notifications/
-â”‚   â”‚   â”œâ”€â”€ settings/
-â”‚   â”‚   â”œâ”€â”€ asset_control/
-â”‚   â”‚   â”œâ”€â”€ chat/
-â”‚   â”‚   â””â”€â”€ ...
-â”‚   â”œâ”€â”€ tests/
-â”‚   â””â”€â”€ ...
-â”œâ”€â”€ testing/load_tests/
-â”œâ”€â”€ migrations/
-â”œâ”€â”€ backend/run.py
-â”œâ”€â”€ backend/wsgi.py
-â”œâ”€â”€ README.md
-â””â”€â”€ ...
+```text
+clinic-system/
+|-- backend/
+|   |-- app/
+|   |   |-- core/
+|   |   |   |-- api/
+|   |   |   |-- audit/
+|   |   |   |-- auth/
+|   |   |   |-- backup/
+|   |   |   |-- clinical_safety/
+|   |   |   |-- emergency_access/
+|   |   |   |-- observability/
+|   |   |   `-- ...
+|   |   |-- modules/
+|   |   |   |-- ambulance/
+|   |   |   |-- asset_control/
+|   |   |   |-- chat/
+|   |   |   |-- feedback/
+|   |   |   |-- patient/
+|   |   |   `-- ...
+|   |   `-- tests/
+|   |       |-- core/
+|   |       `-- modules/
+|   |-- migrations/
+|   |   `-- versions/
+|   |-- requirements.txt
+|   |-- run.py
+|   `-- wsgi.py
+|-- deployment/
+|   `-- nginx/
+|-- docs/
+|   |-- production/
+|   |-- runbooks/
+|   |-- security/
+|   `-- testing/
+|-- frontend/                 (placeholder)
+|-- mobile/                   (placeholder)
+|-- rust_services/
+|   `-- white_glove_migrations/
+|-- scripts/
+|-- testing/
+|   `-- load_tests/
+|       |-- common/
+|       |-- resilience/
+|       `-- scenarios/
+|-- training/
+|-- compose.yaml
+`-- README.md
+```
+
+`frontend/` and `mobile/` currently contain placeholders; Flutter remains
+planned. `backend/app/modules/` contains the business domains, while
+`backend/app/core/` contains shared application and infrastructure services.
+The backend tests are organized under `backend/app/tests/core/` and
+`backend/app/tests/modules/`. Local runtime data and backups are not part of
+the source tree shown above.
 
 ---
 
