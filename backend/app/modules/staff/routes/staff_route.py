@@ -63,8 +63,10 @@ from app.modules.staff.services.staff_service import (
 )
 
 from app.modules.staff.services.staff_department_service import (
-    get_staff_department,
-    set_staff_department,
+    assign_staff_to_department,
+    get_staff_departments,
+    remove_staff_from_department,
+    set_primary_department,
 )
 
 from app.modules.staff.services.excuse_service import (
@@ -331,11 +333,29 @@ def _domain_error_response(
 def _serialize_staff(
     staff,
 ) -> dict:
+    primary_department_id = None
+
+    for membership in staff.department_memberships:
+        status = getattr(
+            membership.status,
+            "value",
+            membership.status,
+        )
+
+        if (
+            status == "active"
+            and membership.is_primary
+        ):
+            primary_department_id = (
+                membership.department_id
+            )
+            break
+
     return {
         "id": staff.id,
         "clinic_id": staff.clinic_id,
         "user_id": staff.user_id,
-        "department_id": staff.department_id,
+        "department_id": primary_department_id,
         "first_name": staff.first_name,
         "last_name": staff.last_name,
         "specialty": staff.specialty,
@@ -728,10 +748,61 @@ def update_staff_department_route(
     try:
         clinic_id = _current_clinic_id()
 
-        staff = set_staff_department(
+        memberships = get_staff_departments(
             staff_id=staff_id,
             clinic_id=clinic_id,
-            department_id=payload.department_id,
+            include_ended=False,
+        )
+
+        if payload.department_id is None:
+            primary_membership = next(
+                (
+                    membership
+                    for membership in memberships
+                    if membership.is_primary
+                ),
+                None,
+            )
+
+            if primary_membership is not None:
+                remove_staff_from_department(
+                    staff_id=staff_id,
+                    clinic_id=clinic_id,
+                    department_id=(
+                        primary_membership.department_id
+                    ),
+                )
+
+        else:
+            existing = next(
+                (
+                    membership
+                    for membership in memberships
+                    if (
+                        membership.department_id
+                        == payload.department_id
+                    )
+                ),
+                None,
+            )
+
+            if existing is None:
+                assign_staff_to_department(
+                    staff_id=staff_id,
+                    clinic_id=clinic_id,
+                    department_id=payload.department_id,
+                    is_primary=True,
+                )
+            elif not existing.is_primary:
+                set_primary_department(
+                    staff_id=staff_id,
+                    clinic_id=clinic_id,
+                    department_id=payload.department_id,
+                )
+
+        staff = get_staff(
+            staff_id=staff_id,
+            clinic_id=clinic_id,
         )
 
         return (
