@@ -22,6 +22,10 @@ from app.modules.staff.models.staff_model import (
 
 from app.modules.staff.models.excuse_model import Excuse
 
+from app.modules.staff.models.staff_department_model import (
+    StaffDepartment,
+)
+
 # Appointment
 from app.modules.appointment.models.appointment_model import Appointment
 
@@ -173,6 +177,7 @@ __all__ = [
 
     # Staff
     "Staff",
+    "StaffDepartment",
     "PayrollRecord",
     "LeaveRequest",
     "Excuse",

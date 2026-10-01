@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.extensions import db
 from app.core.enums.department_enums import DepartmentStatus
+from app.modules.staff.models.staff_department_model import StaffDepartment
 
 
 def _utcnow() -> datetime:
@@ -14,6 +15,11 @@ class Department(db.Model):
     __tablename__ = "departments"
 
     __table_args__ = (
+        db.UniqueConstraint(
+            "id",
+            "clinic_id",
+            name="uq_departments_id_clinic",
+        ),
         db.UniqueConstraint(
             "clinic_id",
             "code",
@@ -85,9 +91,32 @@ class Department(db.Model):
         back_populates="departments",
     )
 
+    staff_memberships = db.relationship(
+        "StaffDepartment",
+        back_populates="department",
+        foreign_keys=lambda: [
+            StaffDepartment.department_id,
+            StaffDepartment.clinic_id,
+        ],
+        overlaps="staff,clinic,department_memberships",
+    )
+
     staff = db.relationship(
         "Staff",
-        back_populates="department",
+        secondary="staff_departments",
+        primaryjoin=(
+            "and_("
+            "Department.id == StaffDepartment.department_id, "
+            "Department.clinic_id == StaffDepartment.clinic_id"
+            ")"
+        ),
+        secondaryjoin=(
+            "and_("
+            "Staff.id == StaffDepartment.staff_id, "
+            "Staff.clinic_id == StaffDepartment.clinic_id"
+            ")"
+        ),
+        viewonly=True,
     )
 
     def __repr__(self) -> str:

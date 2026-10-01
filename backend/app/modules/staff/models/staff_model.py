@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.extensions import db
+from app.modules.staff.models.staff_department_model import StaffDepartment
 
 from app.core.enums.staff_enums import (
     LeaveStatus,
@@ -21,6 +22,11 @@ class Staff(db.Model):
     __tablename__ = "staff"
 
     __table_args__ = (
+        db.UniqueConstraint(
+            "id",
+            "clinic_id",
+            name="uq_staff_id_clinic",
+        ),
         db.Index(
             "ix_staff_clinic_status_name",
             "clinic_id",
@@ -124,9 +130,38 @@ class Staff(db.Model):
         back_populates="staff",
     )
 
+    department_memberships = db.relationship(
+        "StaffDepartment",
+        back_populates="staff",
+        foreign_keys=lambda: [
+            StaffDepartment.staff_id,
+            StaffDepartment.clinic_id,
+        ],
+        overlaps="department,clinic,staff_memberships",
+    )
+
+    departments = db.relationship(
+        "Department",
+        secondary="staff_departments",
+        primaryjoin=(
+            "and_("
+            "Staff.id == StaffDepartment.staff_id, "
+            "Staff.clinic_id == StaffDepartment.clinic_id"
+            ")"
+        ),
+        secondaryjoin=(
+            "and_("
+            "Department.id == StaffDepartment.department_id, "
+            "Department.clinic_id == StaffDepartment.clinic_id"
+            ")"
+        ),
+        viewonly=True,
+    )
+
     department = db.relationship(
         "Department",
-        back_populates="staff",
+        foreign_keys=[department_id],
+        viewonly=True,
     )
 
     appointments = db.relationship(
