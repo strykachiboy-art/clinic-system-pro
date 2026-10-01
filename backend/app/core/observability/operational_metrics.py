@@ -44,6 +44,12 @@ def _collect_component(
             True,
         )
 
+        if "ready" in result:
+            result.setdefault(
+                "healthy",
+                bool(result["ready"]),
+            )
+
         result.setdefault(
             "healthy",
             True,

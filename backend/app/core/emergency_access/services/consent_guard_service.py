@@ -291,9 +291,6 @@ def evaluate_consent_guard(
         ):
             decision = ConsentGuardDecision.ALLOW
 
-        elif consent_reference:
-            decision = ConsentGuardDecision.ALLOW
-
     evaluation = ConsentGuardEvaluation(
         emergency_access_id=emergency_access_id,
         clinic_id=clinic_id,

@@ -48,7 +48,7 @@ class TestEvaluateConsentGuard:
         )
         assert result.emergency_exception is False
 
-    def test_consent_reference_allows_access(
+    def test_unverified_consent_reference_does_not_allow_access(
         self,
         clinic,
         emergency_patient,
@@ -68,7 +68,7 @@ class TestEvaluateConsentGuard:
 
         assert (
             result.decision
-            == ConsentGuardDecision.ALLOW
+            == ConsentGuardDecision.DENY
         )
         assert (
             result.consent_reference

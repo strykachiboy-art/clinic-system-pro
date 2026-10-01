@@ -3,6 +3,9 @@ from __future__ import annotations
 from app.core.observability.operational_metrics import (
     collect_operational_snapshot,
 )
+from app.core.observability.alerts import (
+    evaluate_operational_alerts,
+)
 
 
 def _healthy_component(name):
@@ -82,6 +85,36 @@ def test_operational_snapshot_is_unhealthy_when_component_fails():
     assert snapshot["components"]["redis"][
         "available"
     ] is True
+
+
+def test_unready_probe_marks_snapshot_unhealthy_and_alerts():
+    snapshot = collect_operational_snapshot(
+        system_collector=lambda: _healthy_component(
+            "system"
+        ),
+        redis_collector=lambda: _healthy_component(
+            "redis"
+        ),
+        celery_collector=lambda: _healthy_component(
+            "celery"
+        ),
+        socketio_collector=lambda: _healthy_component(
+            "socketio"
+        ),
+        readiness_collector=lambda: {
+            "ready": False,
+            "database": {"healthy": False},
+            "redis": {"healthy": True},
+        },
+    )
+
+    assert snapshot["healthy"] is False
+    assert snapshot["components"]["readiness"]["healthy"] is False
+    alert_codes = {
+        alert["code"]
+        for alert in evaluate_operational_alerts(snapshot)
+    }
+    assert "readiness_failed" in alert_codes
 
 
 def test_operational_snapshot_contains_only_safe_error_metadata():
