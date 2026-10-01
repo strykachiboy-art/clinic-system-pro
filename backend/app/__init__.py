@@ -263,6 +263,10 @@ def register_blueprints(app):
         staff_bp,
     )
 
+    from app.modules.staff.routes.staff_department_routes import (
+        staff_department_bp,
+    )
+
     from app.modules.ward.routes.ward_route import (
         ward_bp,
     )
@@ -338,6 +342,7 @@ def register_blueprints(app):
         prescription_bp,
         reports_bp,
         staff_bp,
+        staff_department_bp,
         ward_bp,
         notification_bp,
         settings_bp,
