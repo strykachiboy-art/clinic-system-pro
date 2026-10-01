@@ -1,4 +1,4 @@
-# Migration Readiness
+﻿# Migration Readiness
 
 ## Purpose
 
@@ -9,17 +9,21 @@ Clinic System Pro v5.
 
 The current Git revision is:
 
-`645c23a`
+`bec0b92d429d42d4d59aa8346cb03ba2175fa675`
 
 The current database migration revision is:
 
-`d2cd1de5ab15`
+`4d205e66d288`
 
 The repository currently reports a single migration head:
 
-`d2cd1de5ab15`
+`4d205e66d288`
 
 Migration management uses Flask-Migrate and Alembic.
+
+The latest verified migration state also reports:
+
+`flask db check` → `No new upgrade operations detected`
 
 ## Production Requirements
 

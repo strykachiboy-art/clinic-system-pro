@@ -144,7 +144,7 @@ def init_extensions(app):
                 "task": "check_upcoming_appointments",
                 "schedule": 3600.0,
             },
-            "mark-overdue-invoices-daily": {
+            "mark-overdue-invoices-hourly": {
                 "task": "mark_overdue_invoices",
                 "schedule": 3600.0,
             },
