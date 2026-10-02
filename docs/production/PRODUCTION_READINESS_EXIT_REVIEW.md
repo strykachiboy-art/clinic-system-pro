@@ -2,15 +2,16 @@
 
 ## Phase
 
-Clinic System Pro v5 — Phase 5 Production Readiness
+Clinic System Pro v5 - Phase 6 Production-like Backend Environment
 
 ## Status
 
-CURRENT / ACTIVE
+GREEN / CLOSED
 
-This document is the formal Phase 5 exit-review record.
+This document is the formal Phase 6 exit-review record.
 
-Phase 5 must not be declared GREEN merely because application tests pass.
+Phase 6 production-like backend environment validation has been executed
+and the documented exit gates are GREEN.
 
 ## Evidence Classification
 
@@ -51,13 +52,14 @@ Only completed and evidenced checks may be treated as verified.
 - restore verification is implemented
 - authentication invalidation is implemented
 - chat outbox recovery is implemented
-- isolated restore drill implementation and controlled verification evidence exist
-- current-head staging restore remains an environment-dependent gate
-- restore drill evidence must be retained with the release evidence pack
+- isolated database restore drill executed successfully
+- isolated filesystem restore drill executed successfully
+- post-restore verification completed successfully
+- restore drill evidence is retained with the Phase 6 evidence pack
 
-The controlled restore workflow verifies recovery mechanisms. It does not
-establish current-head staging restore compatibility or production deployment
-readiness.
+The executed restore drill validates the documented recovery workflow in an
+isolated target environment. It does not establish production deployment
+readiness or production rollback compatibility.
 
 ### Database
 
@@ -97,25 +99,47 @@ The latest verified backend milestone includes:
 
 Dashboard integration verification completed with 4 passed tests.
 
-## Remaining Phase 5 / Environment-Dependent Gates
+## Phase 6 Executed Operational Gates
 
-The following are not claimed as completed:
+The following Phase 6 gates were executed and passed:
 
-- production-like deployment
-- Linux production serving
-- reverse proxy validation
-- TLS execution validation
-- current-head staging restore
-- rollback execution
+- immutable backend/worker/Beat image alignment
+- migration bootstrap from zero to `4d205e66d288`
+- 75 public database tables verified
+- legacy `messages` table absent
+- Redis connectivity verified
+- Celery worker connectivity verified
+- Socket.IO handlers registered under `/chat`
+- HTTPS reverse proxy and TLS validation
+- graceful backend restart
+- graceful worker restart
+- graceful Beat restart
+- Celery shutdown under a 10,000-task backlog
+- backup creation and checksum verification
+- isolated database restore
+- isolated filesystem restore
+- restore authentication invalidation hook
+- restore outbox recovery hook
+- post-restore verification
+- live-state isolation throughout disposable drills
+
+## Remaining Release and Hardening Gates
+
+The following remain outside the completed Phase 6 environment gate:
+
+- crash-safe Celery redelivery validation
+- notification/provider idempotency under crash recovery
+- rollback execution using two approved identifiable release states
 - image signing and release-signature verification
-- production startup execution
-- production shutdown execution
-- post-deployment smoke testing
+- fully hash-pinned dependency artifact reproducibility
+- review and disposition of open dependency-update pull requests
 - measured production resource/cost baseline
 - independent external security testing
+- final release-candidate freeze
+- actual production deployment and post-deployment validation
 
-These require the applicable Phase 5 work and/or Phase 6 production-like
-backend environment.
+These remain separate release and hardening gates and must not be represented
+as completed merely because Phase 6 is GREEN.
 
 ## Evidence Reconciliation
 
@@ -136,16 +160,14 @@ vulnerabilities. The direct `cryptography` constraint and lock were updated
 to `50.0.2` following the identified vulnerabilities in the previous
 `46.0.7` lock entry.
 
-The container supply-chain workflow has executed successfully from
-`0ee5756ccb39ef18fe41dca3052de0727f5a7192`. The GHCR image root digest is
-`sha256:bf3061cefed2ac377d5e8959678b3626c16f6d48e57e5ec497bd0650c580f348`.
-The registry contains a linux/amd64 runnable manifest
-`sha256:081b2f048010d088bfe5eecd8714bffa012423c54b0ccbf65294e292004f7cc3`
-and an attestation manifest
-`sha256:29e8251d766f37227e8f89f2f097b9f0a2e6eb6507359e69cedc8c6133ed4a77`.
-The attestation is linked to the runnable manifest and contains both an SPDX
-SBOM predicate and SLSA provenance v1 predicate. Image signing is not yet
-claimed.
+The Phase 6 production-like environment is aligned to the immutable GHCR
+image:
+
+`ghcr.io/strykachiboy-art/clinic-system-pro@sha256:0fb49c80b1038635256b9b583a1149ae847ebc8a79cfd8d88b24ec81bf183c3e`
+
+Backend, worker, and Beat were verified against the same immutable image
+identity. Image signing and release-signature verification remain open
+release gates.
 
 The Celery Beat entry `mark-overdue-invoices-hourly` is intentionally retained
 with a 3600-second interval. The name and interval are now consistent and
@@ -157,18 +179,17 @@ before release-candidate freeze.
 
 ## Exit Decision
 
-Phase 5 remains **OPEN** until the applicable roadmap exit conditions are
-verified.
+Phase 6 is **GREEN / CLOSED**.
 
-The repository is a production-readiness candidate with substantial
-verified evidence, but infrastructure-dependent production-like execution
-and remaining supply-chain/reproducibility gates must not be represented as
-complete before they occur.
+The production-like backend environment was established and its documented
+operational gates were executed successfully. The remaining release and
+hardening items are tracked separately and are not being represented as
+complete.
 
 ## Next Gate
 
-Phase 6 — Production-like Backend Environment.
+Phase 7 - Crash Durability.
 
-Phase 6 is responsible for establishing the environment required to execute
-the remaining deployment, restore, rollback, startup/shutdown, smoke-test,
-and operational validations.
+Phase 7 will validate abrupt worker failure, Celery redelivery semantics,
+task idempotency, and recovery behavior before the broader Full Backend E2E
+gate.

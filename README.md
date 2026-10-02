@@ -1,10 +1,10 @@
-﻿# Clinic System Pro v5
+# Clinic System Pro v5
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, and Phase 5 Production Readiness is now the active engineering phase.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, Phase 5 Production Readiness is GREEN / CLOSED, Phase 6 Production-like Backend Environment is GREEN / CLOSED, and Phase 7 Crash Durability is now the active engineering phase.**
 
-**Status date: September 29, 2026**
+**Status date: October 2, 2026**
 
 ---
 
@@ -1578,44 +1578,45 @@ Phase 4 Observability / Operations is formally closed.
 
 Current immediate engineering phase:
 
-PHASE 5 - PRODUCTION READINESS
+PHASE 7 - CRASH DURABILITY
 # 55. Authoritative Master Roadmap
 
-The project roadmap is divided into 33 major phases.
+The project roadmap is divided into 34 major phases.
 
 01. Current Backend State / Architecture Baseline
 02. Resilience Engineering - COMPLETED
 03. Final Security / Compliance Hardening - COMPLETED
 04. Observability / Operations - COMPLETED
-05. Production Readiness - CURRENT
-06. Production-like Backend Environment
-07. Full Backend E2E
-08. Failure Injection
-09. Flutter Foundation
-10. Flutter Authentication + Session
-11. Flutter Core Clinical Workflows
-12. Flutter Feedback
-13. Flutter Chat + Realtime
-14. Flutter Offline-first Foundation
-15. Offline Queue + Idempotency
-16. Synchronization
-17. Conflict Resolution
-18. Offline Sensitive-data Security
-19. Flutter Break-glass + Consent
-20. Flutter Clinical Safety
-21. Flutter Notifications
-22. Device / Session Management
-23. Flutter Unit + Integration Testing
-24. Flutter Offline / Resilience Testing
-25. Full Cross-platform E2E
-26. Production Security Testing
-27. Backup / Restore Drill
-28. Release Candidate Freeze
-29. Deployment
-30. Post-deployment Validation
-31. Production Operations
-32. Future Distributed Scale
-33. White Glove / Rust
+05. Production Readiness - CLOSED
+06. Production-like Backend Environment - GREEN / CLOSED
+07. Crash Durability - CURRENT
+08. Full Backend E2E
+09. Failure Injection
+10. Flutter Foundation
+11. Flutter Authentication + Session
+12. Flutter Core Clinical Workflows
+13. Flutter Feedback
+14. Flutter Chat + Realtime
+15. Flutter Offline-first Foundation
+16. Offline Queue + Idempotency
+17. Synchronization
+18. Conflict Resolution
+19. Offline Sensitive-data Security
+20. Flutter Break-glass + Consent
+21. Flutter Clinical Safety
+22. Flutter Notifications
+23. Device / Session Management
+24. Flutter Unit + Integration Testing
+25. Flutter Offline / Resilience Testing
+26. Full Cross-platform E2E
+27. Production Security Testing
+28. Backup / Restore Drill
+29. Release Candidate Freeze
+30. Deployment
+31. Post-deployment Validation
+32. Production Operations
+33. Future Distributed Scale
+34. White Glove / Rust
 
 ---
 
@@ -1766,7 +1767,7 @@ The backup/restore implementation has also passed static safety verification, in
 - processing-outbox detection
 - restore-target collision protection
 
-The actual operational backup/restore exercise remains a separate controlled drill and is not considered complete until it has been executed against a genuinely separate restore target.
+The operational backup/restore exercise was completed during Phase 6 against separate database and filesystem restore targets.
 
 ## Existing Verification Evidence
 
@@ -1827,52 +1828,91 @@ PHASE 4 EXIT REVIEW: GREEN
 
 Phase 4 is closed.
 
-The project now advances to Phase 5 - Production Readiness.
+The project then advanced to Phase 5 - Production Readiness.
 # 60. Phase 5 - Production Readiness
 
-Status: CURRENT / ACTIVE
+Status: GREEN / CLOSED
 
-Phase 5 converts the verified backend into a deployment-ready production candidate.
+Phase 5 converted the verified backend into a production-readiness
+candidate and established the deployment, security, migration, backup,
+rollback, and operational evidence contracts.
 
-Planned focus:
+The Phase 5 exit review is formally closed. Its remaining release and
+hardening items are tracked separately from the completed Phase 6
+production-like environment gate.
 
-- configuration review
-- secret handling
-- production deployment configuration
-- security review
-- logging review
-- backup policy
-- restore readiness
-- migration readiness
-- health checks
-- startup behavior
-- shutdown behavior
-- deployment validation
-- production configuration consistency
-- operational readiness verification
-- final regression validation
+Production readiness is based on executed evidence rather than application
+test results alone.
 
-Phase 5 must establish evidence for production deployment readiness.
+# 61. Phase 6 - Production-like Backend Environment
 
-Production readiness must not be inferred merely from passing application tests.
+Status: GREEN / CLOSED
 
-The phase remains subject to explicit verification gates before production deployment.
-# 61. Phase 6 â€” Production-like Backend Environment
+The production-like backend environment was established and its documented
+operational exit gates were executed successfully.
 
-Build an environment that resembles deployment conditions closely enough to validate:
+Verified Phase 6 scope includes:
 
-- networking
-- Redis
-- PostgreSQL
-- background workers
-- Socket.IO
-- reverse proxy behavior
-- production configuration
-- realistic service interactions
+- immutable backend/worker/Beat image alignment
+- migration bootstrap from an empty PostgreSQL database to `4d205e66d288`
+- 75 public database tables
+- absence of the legacy `messages` table
+- Redis connectivity
+- Celery worker connectivity
+- Socket.IO handler registration under `/chat`
+- HTTPS reverse proxy and TLS validation
+- graceful backend, worker, and Beat restart
+- Celery shutdown under a 10,000-task backlog
+- backup creation and checksum verification
+- isolated database restore
+- isolated filesystem restore
+- restore authentication invalidation hook
+- restore outbox recovery hook
+- post-restore verification
+- live-state isolation throughout disposable drills
+
+The verified Phase 6 application image is:
+
+`ghcr.io/strykachiboy-art/clinic-system-pro@sha256:0fb49c80b1038635256b9b583a1149ae847ebc8a79cfd8d88b24ec81bf183c3e`
+
+The Phase 6 evidence pack is retained under
+`artifacts/production-readiness/phase6/`.
+
+Actual production deployment, rollback execution, image signing, and other
+remaining release gates are not implied by this phase closure.
 
 ---
 
-# 62. Phase 7 â€” Full Backend E2E
+# 62. Phase 7 - Crash Durability
+
+Status: CURRENT / ACTIVE
+
+Phase 7 validates abrupt worker failure, Celery redelivery semantics,
+background-task recovery, and idempotency under crash conditions.
+
+The phase will establish evidence for:
+
+- late task acknowledgement behavior
+- worker-lost rejection and redelivery behavior
+- replacement-worker recovery
+- task idempotency across redelivery
+- notification/provider behavior across interruption
+- database state after abrupt worker termination
+- recovery without duplicate logical processing
+- audit behavior during crash recovery
+- tenant isolation during crash recovery
+
+This phase must distinguish queue redelivery guarantees from true
+exactly-once external notification delivery. Provider-side idempotency or
+an equivalent deduplication boundary is required where an external side
+effect can occur before the database records completion.
+
+Crash-durability validation is the current engineering gate before the
+broader Full Backend E2E phase.
+
+---
+
+# 63. Phase 8 â€” Full Backend E2E
 
 End-to-end backend workflows will cover critical user journeys across:
 
@@ -1893,7 +1933,7 @@ End-to-end backend workflows will cover critical user journeys across:
 
 ---
 
-# 63. Phase 8 â€” Failure Injection
+# 64. Phase 9 â€” Failure Injection
 
 Introduce controlled failures such as:
 
@@ -1910,7 +1950,7 @@ The goal is to verify recovery behavior rather than merely observe failure.
 
 ---
 
-# 64. Phase 9 â€” Flutter Foundation
+# 65. Phase 10 â€” Flutter Foundation
 
 Establish:
 
@@ -1927,7 +1967,7 @@ The backend remains authoritative.
 
 ---
 
-# 65. Phase 10 â€” Flutter Authentication + Session
+# 66. Phase 11 â€” Flutter Authentication + Session
 
 Implement:
 
@@ -1941,7 +1981,7 @@ Implement:
 
 ---
 
-# 66. Phase 11 â€” Flutter Core Clinical Workflows
+# 67. Phase 12 â€” Flutter Core Clinical Workflows
 
 Implement core client workflows for:
 
@@ -1959,7 +1999,7 @@ All operations use backend authorization.
 
 ---
 
-# 67. Phase 12 â€” Flutter Feedback
+# 68. Phase 13 â€” Flutter Feedback
 
 Connect the Flutter client to the already-hardened Feedback API.
 
@@ -1975,7 +2015,7 @@ Client work includes:
 
 ---
 
-# 68. Phase 13 â€” Flutter Chat + Realtime
+# 69. Phase 14 â€” Flutter Chat + Realtime
 
 Implement:
 
@@ -1990,7 +2030,7 @@ Implement:
 
 ---
 
-# 69. Phase 14 â€” Flutter Offline-first
+# 70. Phase 15 â€” Flutter Offline-first
 
 Introduce:
 
@@ -2004,7 +2044,7 @@ The server remains authoritative.
 
 ---
 
-# 70. Phase 15 â€” Offline Queue / Idempotency
+# 71. Phase 16 â€” Offline Queue / Idempotency
 
 Implement:
 
@@ -2018,7 +2058,7 @@ Implement:
 
 ---
 
-# 71. Phase 16 â€” Synchronization
+# 72. Phase 17 â€” Synchronization
 
 Implement synchronization between:
 
@@ -2030,7 +2070,7 @@ with explicit authorization and validation on the server.
 
 ---
 
-# 72. Phase 17 â€” Conflict Resolution
+# 73. Phase 18 â€” Conflict Resolution
 
 Define deterministic conflict behavior.
 
@@ -2038,7 +2078,7 @@ Conflict resolution must not silently discard authoritative server data.
 
 ---
 
-# 73. Phase 18 â€” Offline Sensitive-data Security
+# 74. Phase 19 â€” Offline Sensitive-data Security
 
 Harden the client for:
 
@@ -2052,7 +2092,7 @@ Harden the client for:
 
 ---
 
-# 74. Phase 19 â€” Flutter Break-glass + Consent
+# 75. Phase 20 â€” Flutter Break-glass + Consent
 
 Integrate:
 
@@ -2068,7 +2108,7 @@ The Flutter client must follow backend emergency authorization rules.
 
 ---
 
-# 75. Phase 20 â€” Flutter Clinical Safety
+# 76. Phase 21 â€” Flutter Clinical Safety
 
 Integrate:
 
@@ -2082,7 +2122,7 @@ The client presents server-defined safety outcomes.
 
 ---
 
-# 76. Phase 21 â€” Flutter Notifications
+# 77. Phase 22 â€” Flutter Notifications
 
 Implement:
 
@@ -2094,7 +2134,7 @@ Implement:
 
 ---
 
-# 77. Phase 22 â€” Device / Session Management
+# 78. Phase 23 â€” Device / Session Management
 
 Implement:
 
@@ -2106,7 +2146,7 @@ Implement:
 
 ---
 
-# 78. Phase 23 â€” Flutter Unit + Integration Testing
+# 79. Phase 24 â€” Flutter Unit + Integration Testing
 
 Test:
 
@@ -2119,7 +2159,7 @@ Test:
 
 ---
 
-# 79. Phase 24 â€” Flutter Offline / Resilience Testing
+# 80. Phase 25 â€” Flutter Offline / Resilience Testing
 
 Test:
 
@@ -2135,7 +2175,7 @@ Test:
 
 ---
 
-# 80. Phase 25 â€” Full Cross-platform E2E
+# 81. Phase 26 â€” Full Cross-platform E2E
 
 Validate:
 
@@ -2151,7 +2191,7 @@ as a complete system.
 
 ---
 
-# 81. Phase 26 â€” Production Security Testing
+# 82. Phase 27 â€” Production Security Testing
 
 Perform final security verification including:
 
@@ -2167,9 +2207,9 @@ Perform final security verification including:
 
 ---
 
-# 82. Phase 27 â€” Backup / Restore Drill
+# 83. Phase 28 â€” Backup / Restore Drill
 
-Status: IMPLEMENTATION VERIFIED / OPERATIONAL DRILL PENDING
+Status: OPERATIONAL DRILL VERIFIED
 
 The controlled backup/restore drill implementation is present and has passed static safety verification.
 
@@ -2191,9 +2231,9 @@ Verified controls include:
 - restore-target collision protection
 - JSON recovery evidence
 
-The operational drill itself must be executed against a genuinely separate PostgreSQL database and filesystem target.
+The operational drill was executed against a genuinely separate PostgreSQL database and filesystem target during Phase 6.
 
-A restore drill is not considered complete merely because the implementation and tests exist.
+The implementation, controlled drill, and post-restore verification are now evidenced.
 
 The operational closure criteria are:
 
@@ -2205,7 +2245,7 @@ post_restore_verification_completed: true
 processing_outbox_count: 0
 ```
 
-# 83. Phase 28 â€” Release Candidate Freeze
+# 84. Phase 29 â€” Release Candidate Freeze
 
 Freeze the release candidate after:
 
@@ -2222,7 +2262,7 @@ Only critical fixes should be accepted after freeze.
 
 ---
 
-# 84. Phase 29 â€” Deployment
+# 85. Phase 30 â€” Deployment
 
 Deploy according to the finalized production architecture.
 
@@ -2238,7 +2278,7 @@ Deployment must preserve:
 
 ---
 
-# 85. Phase 30 â€” Post-deployment Validation
+# 86. Phase 31 â€” Post-deployment Validation
 
 Immediately validate:
 
@@ -2255,7 +2295,7 @@ Immediately validate:
 
 ---
 
-# 86. Phase 31 â€” Production Operations
+# 87. Phase 32 â€” Production Operations
 
 Establish ongoing:
 
@@ -2270,7 +2310,7 @@ Establish ongoing:
 
 ---
 
-# 87. Phase 32 â€” Future Distributed Scale
+# 88. Phase 33 â€” Future Distributed Scale
 
 Only after sufficient production evidence should the system consider:
 
@@ -2286,7 +2326,7 @@ No unsupported scalability claims are made before this work is actually validate
 
 ---
 
-# 88. Phase 33 â€” White Glove / Rust
+# 89. Phase 34 â€” White Glove / Rust
 
 The White Glove/Rust initiative is intentionally the final major backend phase.
 
@@ -2305,7 +2345,7 @@ The existing Python backend remains the primary application platform until evide
 
 ---
 
-# 89. Important Project Boundaries
+# 90. Important Project Boundaries
 
 These rules are intentionally preserved throughout development.
 
@@ -2347,7 +2387,7 @@ Feature development should follow the roadmap and actual platform requirements.
 
 ---
 
-# 90. Development
+# 91. Development
 
 Typical development environment:
 
@@ -2378,7 +2418,7 @@ python -m testing.load_tests.baseline
 
 ---
 
-# 91. Feedback Verification Command
+# 92. Feedback Verification Command
 
 The currently verified Feedback suite can be executed with:
 
@@ -2390,7 +2430,7 @@ Recorded result:
 
 ---
 
-# 92. Engineering Philosophy
+# 93. Engineering Philosophy
 
 Clinic System Pro v5 is being built around the principle that healthcare software must be:
 
@@ -2421,7 +2461,7 @@ The objective is to establish a backend and client architecture where:
 
 ---
 
-# 93. Current Project Position
+# 94. Current Project Position
 
 The project has progressed beyond the basic CRUD phase.
 
@@ -2483,26 +2523,30 @@ Phase 3 is formally closed.
 
 Phase 4 Observability / Operations is formally closed with a GREEN exit review.
 
+Phase 5 Production Readiness is formally closed with a GREEN exit review.
+
+Phase 6 Production-like Backend Environment is formally closed with a GREEN
+exit gate.
+
 The current engineering focus is now:
 
-PHASE 5 - PRODUCTION READINESS
+PHASE 7 - CRASH DURABILITY
 
 followed by:
 
-PRODUCTION-LIKE BACKEND ENVIRONMENT
--> FULL BACKEND E2E
+FULL BACKEND E2E
 -> FAILURE INJECTION
 -> FLUTTER
 -> FULL CROSS-PLATFORM VALIDATION
 -> PRODUCTION SECURITY TESTING
--> BACKUP / RESTORE DRILL
 -> RELEASE CANDIDATE
 -> DEPLOYMENT
 -> POST-DEPLOYMENT VALIDATION
 -> PRODUCTION OPERATIONS
 -> FUTURE DISTRIBUTED SCALE
 -> WHITE GLOVE / RUST
-# 94. Project Boundary Statement
+
+# 95. Project Boundary Statement
 
 Clinic System Pro v5 is an engineering project under active development.
 
@@ -2526,7 +2570,7 @@ The project documentation intentionally avoids claiming certifications or produc
 
 ---
 
-# 95. Final Roadmap Principle
+# 96. Final Roadmap Principle
 
 The roadmap is intentionally sequential.
 
@@ -2548,6 +2592,8 @@ Harden
 
 Current phase:
 
-PHASE 5 - PRODUCTION READINESS
+PHASE 7 - CRASH DURABILITY
 
-The immediate objective is to establish concrete evidence that the verified backend is correctly configured, deployable, recoverable, observable, secure, and operationally ready for a production-like environment.
+The immediate objective is to establish concrete evidence that abrupt
+worker failure, task redelivery, recovery, and idempotency behavior are
+safe and deterministic before entering the broader Full Backend E2E gate.

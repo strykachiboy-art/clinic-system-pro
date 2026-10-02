@@ -1,4 +1,4 @@
-﻿# Migration Readiness
+# Migration Readiness
 
 ## Purpose
 
@@ -9,7 +9,7 @@ Clinic System Pro v5.
 
 The current Git revision is:
 
-`0ee5756ccb39ef18fe41dca3052de0727f5a7192`
+`5957367208670df64cc2116eb0dd48620021e9c0`
 
 The current database migration revision is:
 
@@ -24,6 +24,24 @@ Migration management uses Flask-Migrate and Alembic.
 The latest verified migration state also reports:
 
 `flask db check` → `No new upgrade operations detected`
+
+## Phase 6 Migration Bootstrap Verification
+
+The production-like backend environment executed a clean migration bootstrap
+from an empty PostgreSQL database to the current migration head:
+
+- starting revision: empty database
+- resulting migration revision: `4d205e66d288`
+- migration heads: single head
+- public tables: 75
+- legacy `messages` table: absent
+- live application database state remained isolated from the disposable drill
+- migration bootstrap evidence is retained in
+  `artifacts/production-readiness/phase6/migration-bootstrap-be32576.txt`
+
+This verifies the repository migration chain and production-like bootstrap
+path against the immutable Phase 6 application image. It does not constitute
+an actual production database migration.
 
 ## Production Requirements
 
@@ -89,8 +107,12 @@ Verify:
 
 ## Environment-Dependent Gate
 
-Actual production-like migration execution remains pending the Phase 6
-environment.
+The Phase 6 production-like migration bootstrap has been executed and passed.
 
-This document therefore establishes the readiness contract; it does not
-claim that a production migration has been executed.
+Actual production database migration remains unexecuted and requires the
+approved production deployment process, release artifact, recoverable backup,
+operator evidence, and post-migration verification.
+
+This document therefore establishes the migration-readiness contract and
+records the completed production-like bootstrap without claiming that a
+production migration has been executed.

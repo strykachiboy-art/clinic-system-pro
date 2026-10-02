@@ -109,8 +109,32 @@ Record:
 
 Never record secrets.
 
-## Environment-Dependent Gate
+## Phase 6 Environment Status
 
-Rollback execution remains pending the Phase 6 production-like
-environment and requires two identifiable release states for meaningful
-execution.
+The Phase 6 production-like backend environment is operational and has
+verified immutable image deployment, startup, shutdown, health/readiness,
+TLS, Socket.IO, and backup/restore behavior.
+
+The Phase 6 backup/restore drill is a separate recovery validation and does
+not constitute an application rollback drill.
+
+## Rollback Execution Gate
+
+Rollback execution remains pending until two approved, identifiable
+known-good release states are available for a meaningful rollback test.
+
+The currently verified Phase 6 image is:
+
+`ghcr.io/strykachiboy-art/clinic-system-pro@sha256:0fb49c80b1038635256b9b583a1149ae847ebc8a79cfd8d88b24ec81bf183c3e`
+
+The previously recorded image:
+
+`ghcr.io/strykachiboy-art/clinic-system-pro@sha256:873be0b64bbdfe8bc8b4e208a43ee9c54c73b0ec122515aa6aae2fefe3dd6f7c`
+
+predates the current Socket.IO production-registration fix and is not
+automatically treated as an approved rollback target.
+
+A rollback drill must use two explicitly approved release artifacts,
+verify database compatibility, execute the rollback in the controlled
+production-like environment, and retain the resulting verification
+evidence.

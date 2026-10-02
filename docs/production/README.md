@@ -1,10 +1,11 @@
-﻿# Clinic System Pro v5 — Production Evidence Pack
+# Clinic System Pro v5 — Production Evidence Pack
 
-This directory contains the Phase 5 production-readiness evidence pack.
+This directory contains the Phase 5 production-readiness evidence
+and the executed Phase 6 production-like backend environment evidence.
 
-Phase 5 establishes the production-readiness contract and records the
-evidence available from the verified backend and controlled operational
-checks.
+Phase 5 establishes the production-readiness contract. Phase 6 establishes
+and verifies the production-like backend environment used for operational
+validation.
 
 It does not claim that production deployment has occurred.
 
@@ -24,50 +25,61 @@ The following documents remain authoritative for areas already covered:
 - `docs/runbooks/observability-incident.md`
 - `docs/runbooks/README.md`
 
-## Phase 5 Evidence
+## Production Readiness Evidence
 
 - `MIGRATION_READINESS.md`
 - `ROLLBACK_PROCEDURE.md`
 - `DEPLOYMENT_RUNBOOK.md`
 - `PRODUCTION_READINESS_EXIT_REVIEW.md`
 
+## Phase 6 Executed Evidence
+
+The following Phase 6 evidence artifacts are retained:
+
+- `artifacts/production-readiness/phase6/migration-bootstrap-be32576.txt`
+- `artifacts/production-readiness/phase6/socketio-image-promotion-5957367.txt`
+- `artifacts/production-readiness/phase6/celery-graceful-shutdown-5957367.txt`
+- `artifacts/production-readiness/phase6/backup-restore-drill-5957367.txt`
+- `artifacts/production-readiness/phase6/restore-drill-report-5957367.json`
+
 ## Current Verified Backend State
 
-- Git revision: `0ee5756ccb39ef18fe41dca3052de0727f5a7192`
+- Git revision: `5957367208670df64cc2116eb0dd48620021e9c0`
 - migration head: `4d205e66d288`
 - migration heads: single head
-- migration autogenerate check: clean
-- full regression: 7,397 passed, 0 failed, 0 errors, 2 skipped
-- full regression date: 2026-10-01
-- full regression duration: 8,078.52 seconds (2:14:38)
-- dashboard integration: 4 passed
-- resilience regression: 272 passed
-- dependency audit: `pip-audit -r backend/requirements.lock --strict` → no known vulnerabilities
-- container lock verification: 91/91 locked Python packages matched the container
-- GHCR container supply-chain build: successful
-- registry image digest: `sha256:bf3061cefed2ac377d5e8959678b3626c16f6d48e57e5ec497bd0650c580f348`
-- registry SBOM attestation: verified
-- registry SLSA provenance attestation: verified
-- registry attestation linkage to linux/amd64 image manifest: verified
+- migration bootstrap: zero-to-head passed
+- public tables: 75
+- legacy `messages` table: absent
+- Redis connectivity: verified
+- Celery worker connectivity: verified
+- Socket.IO registration under `/chat`: verified
+- HTTPS reverse proxy and TLS: verified
+- graceful backend restart: verified
+- graceful worker restart: verified
+- graceful Beat restart: verified
+- Celery shutdown under 10,000-task backlog: verified
+- backup creation and checksum verification: verified
+- isolated database restore: verified
+- isolated filesystem restore: verified
+- post-restore verification: verified
+- live-state isolation throughout disposable drills: verified
+- immutable Phase 6 image:
+  `ghcr.io/strykachiboy-art/clinic-system-pro@sha256:0fb49c80b1038635256b9b583a1149ae847ebc8a79cfd8d88b24ec81bf183c3e`
 
-The current regression result is time-specific evidence. It does not by
-itself establish production deployment readiness.
+The production-like Phase 6 environment evidence is time-specific and does
+not by itself establish production deployment readiness.
 
 ## Environment-Dependent Validation
 
-The following require the Phase 6 production-like backend environment or
-later release gates:
+The following remain dependent on later release gates or actual production
+execution:
 
-- actual deployment execution
-- Linux production serving path
-- reverse proxy and TLS execution
-- staging restore
-- rollback execution
-- production-like artifact deployment/execution and image signing
-- startup/shutdown execution
-- post-deployment smoke testing
-- measured production resource baseline
+- rollback execution using two approved identifiable release states
+- image signing and release-signature verification
+- measured production resource and cost baseline
 - independent external security testing
+- actual production deployment
+- post-deployment smoke testing and verification
 
 These must not be represented as completed until independently executed
 and evidenced.
@@ -76,11 +88,20 @@ and evidenced.
 
 The following remain tracked before final release-candidate freeze:
 
+- crash-safe Celery redelivery validation
+- notification/provider idempotency under crash recovery
+- rollback execution using two approved identifiable release states
 - fully hash-pinned dependency artifact reproducibility
 - image signing and release-signature verification
-- review of open dependency-update pull requests
-- current-head production-like restore execution
-- production-like deployment and operational validation
+- review and disposition of open dependency-update pull requests
+- final release-candidate freeze
+- actual production deployment and post-deployment validation
+
+As of the current repository state, open dependency-update pull requests
+include #3 (Pillow) and #5 (qrcode).
+
+These gates must not be represented as completed until independently
+executed and evidenced.
 
 ## Final Regression
 

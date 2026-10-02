@@ -61,7 +61,8 @@ Production deployment must preserve the configured Redis message queue and
 same-origin/CORS security policy.
 
 Socket.IO connectivity must be validated in the production-like
-environment.
+environment. Phase 6 verified Socket.IO handler registration under `/chat`
+and completed an HTTPS/WebSocket/Socket.IO end-to-end connection test.
 
 ## Network and TLS
 
@@ -154,8 +155,35 @@ Record:
 
 Never record secret values.
 
+## Phase 6 Executed Operational Validation
+
+The Phase 6 production-like backend environment executed and passed the
+following deployment-path validations:
+
+- immutable backend/worker/Beat image alignment
+- Linux containerized application serving
+- HTTPS reverse proxy and TLS validation
+- HTTPS health and readiness verification
+- Socket.IO handler registration under `/chat`
+- end-to-end HTTPS/WebSocket/Socket.IO connectivity
+- graceful backend restart
+- graceful worker restart
+- graceful Beat restart
+- Celery shutdown under a 10,000-task backlog
+
+Phase 6 evidence is retained in:
+
+- `artifacts/production-readiness/phase6/socketio-image-promotion-5957367.txt`
+- `artifacts/production-readiness/phase6/celery-graceful-shutdown-5957367.txt`
+
+These executions validate the production-like deployment path. They do not
+constitute an actual production deployment or post-production smoke test.
+
 ## Environment-Dependent Gate
 
-Actual deployment execution, reverse-proxy/TLS validation, startup and
-shutdown execution, and post-deployment validation remain pending the
-Phase 6 production-like environment.
+Actual production deployment execution remains pending the approved release
+process, including production traffic acceptance and post-deployment
+verification.
+
+Rollback execution also remains pending and is governed by
+`docs/production/ROLLBACK_PROCEDURE.md`.
