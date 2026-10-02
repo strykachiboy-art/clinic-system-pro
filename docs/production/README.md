@@ -33,7 +33,7 @@ The following documents remain authoritative for areas already covered:
 
 ## Current Verified Backend State
 
-- Git revision: `bec0b92d429d42d4d59aa8346cb03ba2175fa675`
+- Git revision: `0ee5756ccb39ef18fe41dca3052de0727f5a7192`
 - migration head: `4d205e66d288`
 - migration heads: single head
 - migration autogenerate check: clean
@@ -41,6 +41,14 @@ The following documents remain authoritative for areas already covered:
 - full regression date: 2026-10-01
 - full regression duration: 8,078.52 seconds (2:14:38)
 - dashboard integration: 4 passed
+- resilience regression: 272 passed
+- dependency audit: `pip-audit -r backend/requirements.lock --strict` → no known vulnerabilities
+- container lock verification: 91/91 locked Python packages matched the container
+- GHCR container supply-chain build: successful
+- registry image digest: `sha256:bf3061cefed2ac377d5e8959678b3626c16f6d48e57e5ec497bd0650c580f348`
+- registry SBOM attestation: verified
+- registry SLSA provenance attestation: verified
+- registry attestation linkage to linux/amd64 image manifest: verified
 
 The current regression result is time-specific evidence. It does not by
 itself establish production deployment readiness.
@@ -55,7 +63,7 @@ later release gates:
 - reverse proxy and TLS execution
 - staging restore
 - rollback execution
-- production artifact provenance/SBOM/signing execution
+- production-like artifact deployment/execution and image signing
 - startup/shutdown execution
 - post-deployment smoke testing
 - measured production resource baseline
@@ -68,10 +76,9 @@ and evidenced.
 
 The following remain tracked before final release-candidate freeze:
 
-- deterministic dependency/release artifact reproducibility
-- software supply-chain artifact generation and provenance/signing
+- fully hash-pinned dependency artifact reproducibility
+- image signing and release-signature verification
 - review of open dependency-update pull requests
-- Celery Beat schedule naming/interval consistency
 - current-head production-like restore execution
 - production-like deployment and operational validation
 

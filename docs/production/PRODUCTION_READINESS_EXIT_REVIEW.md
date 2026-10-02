@@ -105,9 +105,9 @@ The following are not claimed as completed:
 - Linux production serving
 - reverse proxy validation
 - TLS execution validation
-- staging restore
+- current-head staging restore
 - rollback execution
-- artifact provenance/SBOM/signing execution
+- image signing and release-signature verification
 - production startup execution
 - production shutdown execution
 - post-deployment smoke testing
@@ -119,17 +119,37 @@ backend environment.
 
 ## Evidence Reconciliation
 
-The production evidence pack must remain synchronized with the repository's
-current migration head and latest verified regression.
+The production evidence pack is synchronized with the current repository
+revision, migration head, latest full regression, dependency lock, and
+container supply-chain evidence.
 
-Dependency reproducibility and software supply-chain evidence remain open
-until the release artifact process is finalized. The current dependency
-manifest uses version ranges rather than a fully pinned release lock.
+Dependency reproducibility is now verified at the exact-version lock level.
+`backend/requirements.lock` contains exact resolved package versions, the
+container installs the lock directly, and lock-to-image verification matched
+91/91 Python packages with no missing, mismatched, or extra packages.
+Full hash-pinned artifact reproducibility is not claimed because the lock is
+version-pinned rather than hash-pinned.
 
-The Celery Beat entry named `mark-overdue-invoices-hourly` currently runs
-hourly despite its name. This is recorded as a configuration consistency item
-for resolution/explicit acceptance before the production release gate; no
-production claim is made from the current configuration.
+Dependency security verification is current for the locked release:
+`pip-audit -r backend/requirements.lock --strict` reports no known
+vulnerabilities. The direct `cryptography` constraint and lock were updated
+to `50.0.2` following the identified vulnerabilities in the previous
+`46.0.7` lock entry.
+
+The container supply-chain workflow has executed successfully from
+`0ee5756ccb39ef18fe41dca3052de0727f5a7192`. The GHCR image root digest is
+`sha256:bf3061cefed2ac377d5e8959678b3626c16f6d48e57e5ec497bd0650c580f348`.
+The registry contains a linux/amd64 runnable manifest
+`sha256:081b2f048010d088bfe5eecd8714bffa012423c54b0ccbf65294e292004f7cc3`
+and an attestation manifest
+`sha256:29e8251d766f37227e8f89f2f097b9f0a2e6eb6507359e69cedc8c6133ed4a77`.
+The attestation is linked to the runnable manifest and contains both an SPDX
+SBOM predicate and SLSA provenance v1 predicate. Image signing is not yet
+claimed.
+
+The Celery Beat entry `mark-overdue-invoices-hourly` is intentionally retained
+with a 3600-second interval. The name and interval are now consistent and
+this item is no longer an open evidence gate.
 
 Open dependency-update pull requests must be reviewed, merged and
 regression-tested, or explicitly deferred with documented risk acceptance,
