@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt requirements.lock ./
 
 RUN apt-get -o Acquire::Retries=10 update && \
     apt-get -o Acquire::Retries=10 install -y --no-install-recommends ca-certificates curl && \
@@ -28,7 +28,7 @@ RUN apt-get -o Acquire::Retries=10 update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 
