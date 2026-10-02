@@ -1,0 +1,95 @@
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PHASE6_POSTGRES_DB:?PHASE6_POSTGRES_DB is required}
+      POSTGRES_USER: ${PHASE6_POSTGRES_USER:?PHASE6_POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${PHASE6_POSTGRES_PASSWORD:?PHASE6_POSTGRES_PASSWORD is required}
+
+  redis:
+    restart: unless-stopped
+
+  backend:
+    build: null
+    image: ${PHASE6_APP_IMAGE:?PHASE6_APP_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      FLASK_ENV: ${PHASE6_FLASK_ENV:?PHASE6_FLASK_ENV is required}
+      SECRET_KEY: ${PHASE6_SECRET_KEY:?PHASE6_SECRET_KEY is required}
+      JWT_SECRET_KEY: ${PHASE6_JWT_SECRET_KEY:?PHASE6_JWT_SECRET_KEY is required}
+      DATABASE_URL: postgresql://${PHASE6_POSTGRES_USER}:${PHASE6_POSTGRES_PASSWORD}@postgres:5432/${PHASE6_POSTGRES_DB}
+      REDIS_URL: ${PHASE6_REDIS_URL:?PHASE6_REDIS_URL is required}
+      CORS_ALLOWED_ORIGINS: ${PHASE6_CORS_ALLOWED_ORIGINS:?PHASE6_CORS_ALLOWED_ORIGINS is required}
+      STORAGE_ROOT: ${PHASE6_STORAGE_ROOT:?PHASE6_STORAGE_ROOT is required}
+      BACKUP_ROOT: ${PHASE6_BACKUP_ROOT:?PHASE6_BACKUP_ROOT is required}
+      STORAGE_PUBLIC_BASE_URL: ${PHASE6_STORAGE_PUBLIC_BASE_URL:?PHASE6_STORAGE_PUBLIC_BASE_URL is required}
+      UPLOAD_FOLDER: ${PHASE6_UPLOAD_FOLDER:?PHASE6_UPLOAD_FOLDER is required}
+      BACKUP_RETENTION_DAYS: ${PHASE6_BACKUP_RETENTION_DAYS:?PHASE6_BACKUP_RETENTION_DAYS is required}
+      BACKUP_MIN_RECOVERY_POINTS: ${PHASE6_BACKUP_MIN_RECOVERY_POINTS:?PHASE6_BACKUP_MIN_RECOVERY_POINTS is required}
+      INTEGRATION_ENCRYPTION_KEY: ${PHASE6_INTEGRATION_ENCRYPTION_KEY:?PHASE6_INTEGRATION_ENCRYPTION_KEY is required}
+    volumes:
+      - ./runtime/phase6/storage:/data/storage
+      - ./runtime/phase6/backups:/data/backups
+
+  worker:
+    build: null
+    image: ${PHASE6_APP_IMAGE:?PHASE6_APP_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      FLASK_ENV: ${PHASE6_FLASK_ENV:?PHASE6_FLASK_ENV is required}
+      SECRET_KEY: ${PHASE6_SECRET_KEY:?PHASE6_SECRET_KEY is required}
+      JWT_SECRET_KEY: ${PHASE6_JWT_SECRET_KEY:?PHASE6_JWT_SECRET_KEY is required}
+      DATABASE_URL: postgresql://${PHASE6_POSTGRES_USER}:${PHASE6_POSTGRES_PASSWORD}@postgres:5432/${PHASE6_POSTGRES_DB}
+      REDIS_URL: ${PHASE6_REDIS_URL:?PHASE6_REDIS_URL is required}
+      CORS_ALLOWED_ORIGINS: ${PHASE6_CORS_ALLOWED_ORIGINS:?PHASE6_CORS_ALLOWED_ORIGINS is required}
+      STORAGE_ROOT: ${PHASE6_STORAGE_ROOT:?PHASE6_STORAGE_ROOT is required}
+      BACKUP_ROOT: ${PHASE6_BACKUP_ROOT:?PHASE6_BACKUP_ROOT is required}
+      STORAGE_PUBLIC_BASE_URL: ${PHASE6_STORAGE_PUBLIC_BASE_URL:?PHASE6_STORAGE_PUBLIC_BASE_URL is required}
+      UPLOAD_FOLDER: ${PHASE6_UPLOAD_FOLDER:?PHASE6_UPLOAD_FOLDER is required}
+      BACKUP_RETENTION_DAYS: ${PHASE6_BACKUP_RETENTION_DAYS:?PHASE6_BACKUP_RETENTION_DAYS is required}
+      BACKUP_MIN_RECOVERY_POINTS: ${PHASE6_BACKUP_MIN_RECOVERY_POINTS:?PHASE6_BACKUP_MIN_RECOVERY_POINTS is required}
+      INTEGRATION_ENCRYPTION_KEY: ${PHASE6_INTEGRATION_ENCRYPTION_KEY:?PHASE6_INTEGRATION_ENCRYPTION_KEY is required}
+    volumes:
+      - ./runtime/phase6/storage:/data/storage
+      - ./runtime/phase6/backups:/data/backups
+
+  beat:
+    build: null
+    image: ${PHASE6_APP_IMAGE:?PHASE6_APP_IMAGE is required}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      FLASK_ENV: ${PHASE6_FLASK_ENV:?PHASE6_FLASK_ENV is required}
+      SECRET_KEY: ${PHASE6_SECRET_KEY:?PHASE6_SECRET_KEY is required}
+      JWT_SECRET_KEY: ${PHASE6_JWT_SECRET_KEY:?PHASE6_JWT_SECRET_KEY is required}
+      DATABASE_URL: postgresql://${PHASE6_POSTGRES_USER}:${PHASE6_POSTGRES_PASSWORD}@postgres:5432/${PHASE6_POSTGRES_DB}
+      REDIS_URL: ${PHASE6_REDIS_URL:?PHASE6_REDIS_URL is required}
+      CORS_ALLOWED_ORIGINS: ${PHASE6_CORS_ALLOWED_ORIGINS:?PHASE6_CORS_ALLOWED_ORIGINS is required}
+      STORAGE_ROOT: ${PHASE6_STORAGE_ROOT:?PHASE6_STORAGE_ROOT is required}
+      BACKUP_ROOT: ${PHASE6_BACKUP_ROOT:?PHASE6_BACKUP_ROOT is required}
+      STORAGE_PUBLIC_BASE_URL: ${PHASE6_STORAGE_PUBLIC_BASE_URL:?PHASE6_STORAGE_PUBLIC_BASE_URL is required}
+      UPLOAD_FOLDER: ${PHASE6_UPLOAD_FOLDER:?PHASE6_UPLOAD_FOLDER is required}
+      BACKUP_RETENTION_DAYS: ${PHASE6_BACKUP_RETENTION_DAYS:?PHASE6_BACKUP_RETENTION_DAYS is required}
+      BACKUP_MIN_RECOVERY_POINTS: ${PHASE6_BACKUP_MIN_RECOVERY_POINTS:?PHASE6_BACKUP_MIN_RECOVERY_POINTS is required}
+      INTEGRATION_ENCRYPTION_KEY: ${PHASE6_INTEGRATION_ENCRYPTION_KEY:?PHASE6_INTEGRATION_ENCRYPTION_KEY is required}
+    volumes:
+      - ./runtime/phase6/storage:/data/storage
+      - ./runtime/phase6/backups:/data/backups
+
+  proxy:
+    restart: unless-stopped
+    ports: !override
+      - "18080:80"
+      - "18443:8443"
+    volumes:
+      - ./deployment/nginx/nginx.phase6.conf:/etc/nginx/nginx.conf:ro
+      - ./deployment/nginx/certs:/etc/nginx/certs:ro
+
+volumes:
+  postgres_data:
+    name: clinic-system-phase6-postgres-data
+  redis_data:
+    name: clinic-system-phase6-redis-data
