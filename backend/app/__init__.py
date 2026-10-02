@@ -152,6 +152,7 @@ def create_app(config_name=None):
 
     with app.app_context():
         from app import models_registry  # noqa: F401
+        from app.modules.chat.realtime import chat_socket  # noqa: F401
 
     register_error_handlers(app)
     register_api_version_boundary(app)
