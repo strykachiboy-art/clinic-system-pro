@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    op.drop_table("messages")
+    op.drop_table("messages", if_exists=True)
 
     # Remove PostgreSQL enum types belonging exclusively to the
     # deleted legacy messages table.
