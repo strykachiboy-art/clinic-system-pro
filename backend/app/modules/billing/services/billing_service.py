@@ -545,6 +545,7 @@ def create_invoice(
         action=AuditAction.CREATE,
         entity_type="Invoice",
         entity_id=invoice.id,
+        clinic_id=clinic_id,
         description=(
             f"Invoice {invoice.invoice_number} "
             f"created for patient {patient.id}"
@@ -835,6 +836,7 @@ def record_payment(
         action=AuditAction.PAYMENT,
         entity_type="Invoice",
         entity_id=invoice.id,
+        clinic_id=clinic_id,
         description=(
             f"Payment of {amount} recorded "
             f"via {method.value}"
@@ -956,10 +958,21 @@ def _mark_overdue_invoices(
             InvoiceStatus.OVERDUE
         )
 
+        audit_clinic_id = (
+            clinic_id
+            if clinic_id is not None
+            else getattr(
+                invoice,
+                "clinic_id",
+                None,
+            )
+        )
+
         create_audit_log(
             action=AuditAction.STATUS_CHANGE,
             entity_type="Invoice",
             entity_id=invoice.id,
+            clinic_id=audit_clinic_id,
             description=(
                 "Invoice marked overdue"
                 + (
