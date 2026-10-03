@@ -754,6 +754,7 @@ def create_lab_test(
         action=AuditAction.CREATE,
         entity_type="LabTest",
         entity_id=test.id,
+        clinic_id=clinic_id,
         description=(
             f"Lab test '{test.name}' added to catalog"
         ),
@@ -904,6 +905,7 @@ def update_lab_test(
             action=AuditAction.UPDATE,
             entity_type="LabTest",
             entity_id=test.id,
+        clinic_id=clinic_id,
             description=(
                 f"Lab test '{test.name}' updated"
             ),
@@ -1194,6 +1196,7 @@ def create_lab_order(
         action=AuditAction.CREATE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             f"Lab order created for patient "
             f"{patient_id} ({len(tests)} test(s))"
@@ -1294,6 +1297,7 @@ def collect_sample(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             f"Sample collected by staff {actor.id}"
         ),
@@ -1388,6 +1392,7 @@ def link_equipment(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             "Lab order linked to equipment reference "
             f"'{equipment_reference_id}'"
@@ -1520,6 +1525,7 @@ def process_sample(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             f"Sample processed by staff {actor.id}"
         ),
@@ -1609,6 +1615,7 @@ def cancel_order(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             "Lab order cancelled by staff "
             f"{actor.id}"
@@ -1950,6 +1957,7 @@ def enter_result(
         action=AuditAction.UPDATE,
         entity_type="LabOrderItem",
         entity_id=item.id,
+        clinic_id=clinic_id,
         description=(
             f"Result entered for test "
             f"'{item.test.name}'"
@@ -2091,6 +2099,7 @@ def verify_results(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             f"Lab results verified by staff {actor.id}"
         ),
@@ -2206,6 +2215,7 @@ def complete_order(
         action=AuditAction.STATUS_CHANGE,
         entity_type="LabOrder",
         entity_id=order.id,
+        clinic_id=clinic_id,
         description=(
             "All results verified — lab order completed"
         ),
