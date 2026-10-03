@@ -2,9 +2,9 @@
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, Phase 5 Production Readiness is GREEN / CLOSED, Phase 6 Production-like Backend Environment is GREEN / CLOSED, and Phase 7 Crash Durability is now the active engineering phase.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, Phase 5 Production Readiness is GREEN / CLOSED, Phase 6 Production-like Backend Environment is GREEN / CLOSED, Phase 7 Crash Durability is GREEN / CLOSED, and Phase 8 Full Backend E2E is now the active engineering phase.**
 
-**Status date: October 2, 2026**
+**Status date: October 3, 2026**
 
 ---
 
@@ -1885,30 +1885,33 @@ remaining release gates are not implied by this phase closure.
 
 # 62. Phase 7 - Crash Durability
 
-Status: CURRENT / ACTIVE
+Status: GREEN / CLOSED
 
-Phase 7 validates abrupt worker failure, Celery redelivery semantics,
-background-task recovery, and idempotency under crash conditions.
+Phase 7 crash-durability validation is complete.
 
-The phase will establish evidence for:
+Verified evidence includes:
 
-- late task acknowledgement behavior
-- worker-lost rejection and redelivery behavior
-- replacement-worker recovery
-- task idempotency across redelivery
-- notification/provider behavior across interruption
-- database state after abrupt worker termination
-- recovery without duplicate logical processing
-- audit behavior during crash recovery
-- tenant isolation during crash recovery
+- pre-change Celery runtime inspection (`5.6.3`, early acknowledgement, prefetch `4`)
+- disposable SIGKILL redelivery drill with late acknowledgements, worker-lost rejection, and prefetch `1`
+- replacement-worker recovery with attempt count `1 -> 2` and one logical completion
+- transaction/state recovery verification (`9 passed`)
+- live notification crash drill confirming the duplicate external-side-effect window
+- notification idempotency key implementation and regression verification (`121 passed` targeted, `216 passed` full notification suite)
+- production configuration promotion limited to `task_acks_late=True`, `task_reject_on_worker_lost=True`, and `worker_prefetch_multiplier=1`
+- immutable GHCR runtime image verification
+- controlled backend, worker, and Beat replacement
+- final production-like runtime verification with PostgreSQL, Redis, Celery, proxy, and Beat schedule checks
 
-This phase must distinguish queue redelivery guarantees from true
-exactly-once external notification delivery. Provider-side idempotency or
-an equivalent deduplication boundary is required where an external side
-effect can occur before the database records completion.
+Production configuration was intentionally not changed by the disposable
+visibility-timeout setting; the short `10` second timeout used for the SIGKILL
+drill remained test-only.
 
-Crash-durability validation is the current engineering gate before the
-broader Full Backend E2E phase.
+The notification work establishes an application/provider idempotency
+boundary. It does not establish exactly-once delivery by every external
+provider.
+
+Phase 7 is formally closed. The project advances to Phase 8 - Full Backend
+E2E.
 
 ---
 
@@ -2530,12 +2533,11 @@ exit gate.
 
 The current engineering focus is now:
 
-PHASE 7 - CRASH DURABILITY
+PHASE 8 - FULL BACKEND E2E
 
 followed by:
 
-FULL BACKEND E2E
--> FAILURE INJECTION
+FAILURE INJECTION
 -> FLUTTER
 -> FULL CROSS-PLATFORM VALIDATION
 -> PRODUCTION SECURITY TESTING
@@ -2592,8 +2594,8 @@ Harden
 
 Current phase:
 
-PHASE 7 - CRASH DURABILITY
+PHASE 8 - FULL BACKEND E2E
 
-The immediate objective is to establish concrete evidence that abrupt
-worker failure, task redelivery, recovery, and idempotency behavior are
-safe and deterministic before entering the broader Full Backend E2E gate.
+Phase 7 Crash Durability is GREEN / CLOSED. The immediate objective is now to
+validate complete backend workflows and critical user journeys end-to-end
+before entering broader controlled failure injection.
