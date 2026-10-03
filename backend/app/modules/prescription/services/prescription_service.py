@@ -905,6 +905,7 @@ def create_prescription(
         action=AuditAction.CREATE,
         entity_type="Prescription",
         entity_id=prescription.id,
+        clinic_id=clinic_id,
         description=(
             f"Prescription created for patient "
             f"{patient_id} ({len(items)} item(s))"
@@ -1025,6 +1026,7 @@ def cancel_prescription(
         action=AuditAction.STATUS_CHANGE,
         entity_type="Prescription",
         entity_id=prescription.id,
+        clinic_id=clinic_id,
         description=(
             "Prescription cancelled"
             + (
@@ -1088,6 +1090,7 @@ def complete_prescription(
         action=AuditAction.STATUS_CHANGE,
         entity_type="Prescription",
         entity_id=prescription.id,
+        clinic_id=clinic_id,
         description="Prescription marked completed",
         old_value={
             "status": old_status,
@@ -1139,7 +1142,8 @@ def expire_stale_prescriptions() -> int:
             action=AuditAction.STATUS_CHANGE,
             entity_type="Prescription",
             entity_id=prescription.id,
-            description="Prescription expired (automated)",
+            clinic_id=prescription.clinic_id,
+description="Prescription expired (automated)",
             old_value={
                 "status": old_status,
             },
