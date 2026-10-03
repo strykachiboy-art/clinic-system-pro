@@ -383,6 +383,7 @@ def start_consultation(
     create_audit_log(
         action=AuditAction.CREATE,
         entity_type="Consultation",
+        clinic_id=clinic.id,
         entity_id=consultation.id,
         description=(
             f"Consultation started for patient "

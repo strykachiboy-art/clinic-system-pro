@@ -445,6 +445,7 @@ def create_appointment(
     create_audit_log(
         action=AuditAction.CREATE,
         entity_type="Appointment",
+        clinic_id=clinic.id,
         entity_id=appointment.id,
         description=(
             f"Appointment created for patient "

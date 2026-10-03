@@ -1,7 +1,7 @@
 from app.core.exceptions import ValidationError
 from functools import wraps
 
-from flask import g, jsonify
+from flask import g, jsonify, request
 from flask_jwt_extended import (
     get_jwt,
     get_jwt_identity,
@@ -36,7 +36,7 @@ def _load_auth_context():
     `login_required` and `role_required` use the same authentication flow.
     """
 
-    if getattr(g, "_auth_context_loaded", False):
+    if getattr(g, "_auth_context_request", None) is request._get_current_object():
         return
 
     verify_jwt_in_request()
@@ -52,6 +52,9 @@ def _load_auth_context():
 
     g.current_user_role = claims.get("role")
     g.current_clinic_id = None
+
+    g._auth_context_request = request._get_current_object()
+    g._auth_context_loaded = True
 
     if g.current_user_id is not None:
         from app.core.auth.user.services.clinic_context_service import (
