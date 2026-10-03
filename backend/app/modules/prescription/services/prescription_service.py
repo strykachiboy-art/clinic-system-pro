@@ -1143,7 +1143,7 @@ def expire_stale_prescriptions() -> int:
             entity_type="Prescription",
             entity_id=prescription.id,
             clinic_id=prescription.clinic_id,
-description="Prescription expired (automated)",
+            description="Prescription expired (automated)",
             old_value={
                 "status": old_status,
             },
