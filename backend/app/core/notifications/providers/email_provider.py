@@ -35,6 +35,7 @@ class EmailNotificationProvider(NotificationProviderBase):
         *,
         notification: Notification,
         email: str,
+        idempotency_key: str | None = None,
     ) -> bool:
         if notification is None:
             raise ValidationError(
@@ -48,6 +49,7 @@ class EmailNotificationProvider(NotificationProviderBase):
         message = self._build_message(
             notification=notification,
             recipient=email,
+            idempotency_key=idempotency_key,
         )
 
         return self._send_email(
@@ -89,6 +91,7 @@ class EmailNotificationProvider(NotificationProviderBase):
         *,
         notification: Notification,
         recipient: str,
+        idempotency_key: str | None = None,
     ) -> EmailMessage:
         from_email = self._get_required_credential(
             "from_email"
@@ -121,6 +124,11 @@ class EmailNotificationProvider(NotificationProviderBase):
         message["From"] = from_email
         message["To"] = recipient
         message["Subject"] = subject.strip()
+
+        if idempotency_key:
+            message["Message-ID"] = (
+                f"<{idempotency_key}@clinic-system.local>"
+            )
 
         message.set_content(
             body.strip()

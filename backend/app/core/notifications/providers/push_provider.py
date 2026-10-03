@@ -29,6 +29,7 @@ class PushNotificationProvider(
         self,
         *,
         notification,
+        idempotency_key: str | None = None,
     ) -> bool:
         if notification is None:
             raise ValidationError(
@@ -68,6 +69,7 @@ class PushNotificationProvider(
                 if self._send_to_device(
                     device=device,
                     payload=payload,
+                    idempotency_key=idempotency_key,
                 ):
                     delivered = True
             except Exception:
@@ -132,6 +134,7 @@ class PushNotificationProvider(
         *,
         device: UserDevice,
         payload: dict[str, Any],
+        idempotency_key: str | None = None,
     ) -> bool:
         device_token = getattr(
             device,
@@ -161,6 +164,7 @@ class PushNotificationProvider(
             device_token=device_token.strip(),
             platform=platform.strip().lower(),
             payload=payload,
+            idempotency_key=idempotency_key,
         )
 
     def _deliver_to_device(
@@ -169,6 +173,7 @@ class PushNotificationProvider(
         device_token: str,
         platform: str,
         payload: dict[str, Any],
+        idempotency_key: str | None = None,
     ) -> bool:
         raise NotImplementedError(
             "Push notification transport is not configured"

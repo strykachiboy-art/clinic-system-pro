@@ -453,3 +453,32 @@ class TestEmailNotificationProvider:
                     notification=notification,
                     email="patient@example.com",
                 )
+
+    def test_build_message_sets_idempotency_message_id(
+        self,
+        make_notification,
+        clinic,
+        user,
+    ):
+        notification = make_notification(
+            clinic_id=clinic.id,
+            user_id=user.id,
+            title="Appointment Reminder",
+            message="Your appointment is tomorrow.",
+        )
+
+        provider = EmailNotificationProvider(
+            credentials={
+                "from_email": "mailer@example.com",
+            }
+        )
+
+        message = provider._build_message(
+            notification=notification,
+            recipient="patient@example.com",
+            idempotency_key="clinic-notification-1-2",
+        )
+
+        assert message["Message-ID"] == (
+            "<clinic-notification-1-2@clinic-system.local>"
+        )

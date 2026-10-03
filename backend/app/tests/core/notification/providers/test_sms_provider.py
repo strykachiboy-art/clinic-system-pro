@@ -39,6 +39,7 @@ class TestSMSNotificationProvider:
         deliver.assert_called_once_with(
             phone="+2348012345678",
             message="Your appointment is tomorrow.",
+            idempotency_key=None,
         )
 
     def test_send_rejects_missing_notification(self):
@@ -171,6 +172,7 @@ class TestSMSNotificationProvider:
         deliver.assert_called_once_with(
             phone="+2348012345678",
             message="Test SMS",
+            idempotency_key=None,
         )
 
     def test_sms_transport_boundary_is_not_configured(

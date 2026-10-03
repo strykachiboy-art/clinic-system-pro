@@ -512,6 +512,9 @@ def test_deliver_with_provider_push_uses_factory(
 
         provider.send.assert_called_once_with(
             notification=notification,
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -570,6 +573,9 @@ def test_deliver_with_provider_patient_email_uses_patient_email(
         provider.send.assert_called_once_with(
             notification=notification,
             email="patient@test.com",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
         assert patient.email == "patient@test.com"
@@ -630,6 +636,9 @@ def test_deliver_with_provider_patient_email_falls_back_to_user_email(
         provider.send.assert_called_once_with(
             notification=notification,
             email="patient-user@test.com",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -688,6 +697,9 @@ def test_deliver_with_provider_patient_sms_uses_patient_phone(
         provider.send.assert_called_once_with(
             notification=notification,
             phone="+2348022222222",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
         assert patient.phone == "+2348022222222"
@@ -741,6 +753,9 @@ def test_deliver_with_provider_staff_email_uses_staff_email(
         provider.send.assert_called_once_with(
             notification=notification,
             email="doctor@test.com",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -795,6 +810,9 @@ def test_deliver_with_provider_staff_email_falls_back_to_user_email(
         provider.send.assert_called_once_with(
             notification=notification,
             email="doctor-user@test.com",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -846,6 +864,9 @@ def test_deliver_with_provider_staff_sms_uses_staff_phone(
         provider.send.assert_called_once_with(
             notification=notification,
             phone="+2348055555555",
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -1225,6 +1246,9 @@ def test_deliver_notification_push_uses_provider(
 
         provider.send.assert_called_once_with(
             notification=notification,
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -1286,6 +1310,9 @@ def test_deliver_notification_push_provider_rejection_marks_failed(
 
         provider.send.assert_called_once_with(
             notification=notification,
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 
@@ -1352,6 +1379,9 @@ def test_deliver_notification_push_provider_exception_marks_failed(
 
         provider.send.assert_called_once_with(
             notification=notification,
+            idempotency_key=(
+                f"clinic-notification-{clinic.id}-{notification.id}"
+            ),
         )
 
 

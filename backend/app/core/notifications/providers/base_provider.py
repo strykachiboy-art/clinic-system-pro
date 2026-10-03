@@ -19,6 +19,7 @@ class NotificationProviderBase(ABC):
         self,
         *,
         notification,
+        idempotency_key: str | None = None,
     ) -> bool:
         raise NotImplementedError
 

@@ -26,6 +26,7 @@ class SMSNotificationProvider(NotificationProviderBase):
         *,
         notification: Notification,
         phone: str,
+        idempotency_key: str | None = None,
     ) -> bool:
         if notification is None:
             raise ValidationError(
@@ -43,6 +44,7 @@ class SMSNotificationProvider(NotificationProviderBase):
         return self._deliver_sms(
             phone=phone,
             message=message,
+            idempotency_key=idempotency_key,
         )
 
     @staticmethod
@@ -116,6 +118,7 @@ class SMSNotificationProvider(NotificationProviderBase):
         *,
         phone: str,
         message: str,
+        idempotency_key: str | None = None,
     ) -> bool:
         """
         SMS transport boundary.

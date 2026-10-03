@@ -343,11 +343,23 @@ def _normalize_type(notification_type):
 # ============================================================================
 
 
+def _notification_idempotency_key(notification):
+    return (
+        f"clinic-notification-"
+        f"{notification.clinic_id}-"
+        f"{notification.id}"
+    )
+
+
 def _deliver_with_provider(notification):
     channel = notification.channel
 
     if channel == NotificationChannel.IN_APP:
         return False
+
+    idempotency_key = _notification_idempotency_key(
+        notification
+    )
 
     try:
         provider = get_notification_provider(
@@ -429,6 +441,7 @@ def _deliver_with_provider(notification):
         return provider.send(
             notification=notification,
             email=email,
+            idempotency_key=idempotency_key,
         )
 
     if channel == NotificationChannel.SMS:
@@ -475,11 +488,13 @@ def _deliver_with_provider(notification):
         return provider.send(
             notification=notification,
             phone=phone,
+            idempotency_key=idempotency_key,
         )
 
     if channel == NotificationChannel.PUSH:
         return provider.send(
             notification=notification,
+            idempotency_key=idempotency_key,
         )
 
     raise ValidationError(
