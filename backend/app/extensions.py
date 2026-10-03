@@ -138,6 +138,17 @@ def init_extensions(app):
             "CELERY_RESULT_BACKEND",
             redis_url,
         ),
+        task_acks_late=app.config.get(
+            "CELERY_TASK_ACKS_LATE",
+            False,
+        ),
+        task_reject_on_worker_lost=app.config.get(
+            "CELERY_TASK_REJECT_ON_WORKER_LOST",
+        ),
+        worker_prefetch_multiplier=app.config.get(
+            "CELERY_WORKER_PREFETCH_MULTIPLIER",
+            4,
+        ),
         timezone="UTC",
         beat_schedule={
             "check-upcoming-appointments-hourly": {
