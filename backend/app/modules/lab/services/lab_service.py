@@ -905,7 +905,7 @@ def update_lab_test(
             action=AuditAction.UPDATE,
             entity_type="LabTest",
             entity_id=test.id,
-        clinic_id=clinic_id,
+            clinic_id=clinic_id,
             description=(
                 f"Lab test '{test.name}' updated"
             ),
