@@ -1033,7 +1033,7 @@ Resilience Engineering has been completed and verified for the current backend P
 
 The verified resilience framework includes:
 
-testing/load_tests/resilience/
+testing/resilience/
 ??? README.md
 ??? __init__.py
 ??? checks/
@@ -1056,11 +1056,11 @@ Unused empty fault/check scaffolding was removed after verification.
 
 The active synthetic fault-injection engine is:
 
-testing/load_tests/resilience/common/faults.py
+testing/resilience/common/faults.py
 
 The active integrity verification layer is:
 
-testing/load_tests/resilience/checks/integrity.py
+testing/resilience/checks/integrity.py
 
 ## Phase 2 Final Resilience Evidence
 
@@ -1080,7 +1080,7 @@ resilience-phase2-final-20260928
 
 Result artifact:
 
-testing/load_tests/resilience/results/resilience-phase2-final-20260928.json
+testing/resilience/results/resilience-phase2-final-20260928.json
 
 Verified resilience areas include:
 
@@ -1411,10 +1411,17 @@ clinic-system/
 |   `-- white_glove_migrations/
 |-- scripts/
 |-- testing/
-|   `-- load_tests/
-|       |-- common/
-|       |-- resilience/
-|       `-- scenarios/
+|   |-- benchmarks/
+|   |-- common/
+|   |-- data/
+|   |-- diagnostics/
+|   |-- profiles/
+|   |-- provisioning/
+|   |-- resilience/
+|   |-- scenarios/
+|   |-- load_tests/
+|   |   `-- .gitkeep
+|   `-- locust.py
 |-- training/
 |-- compose.yaml
 `-- README.md
@@ -2417,7 +2424,7 @@ pytest backend/app/tests/modules/feedback -q
 
 Load testing:
 
-python -m testing.load_tests.baseline
+python -m testing.benchmarks.baseline
 
 ---
 

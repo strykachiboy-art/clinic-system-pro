@@ -32,7 +32,7 @@ from app.modules.ward.models.ward_model import Bed, Ward
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = (
     PROJECT_ROOT
-    / "testing" / "load_tests"
+    / "testing" / "benchmarks"
     / "benchmark_dataset.json"
 )
 

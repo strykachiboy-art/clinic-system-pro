@@ -613,7 +613,7 @@ python docs/security/scripts/pre_full_suite_verify.py
 
 ```powershell
 $env:PYTHONPATH="$PWD\backend;$PWD\testing"
-python -m load_tests.resilience.runners.resilience --scenario all
+python -m resilience.runners.resilience --scenario all
 ```
 
 Specific scenarios may be selected when validating an individual failure domain.
