@@ -859,10 +859,27 @@ def create_prescription(
         for drug in drugs
     ]
 
-    warnings = check_interactions(
-        drug_ids=drug_ids,
-        clinic_id=clinic_id,
+    from app.core.clinical_safety.services.medication_safety_service import (
+        evaluate_medication_safety,
     )
+
+    safety_evaluation = evaluate_medication_safety(
+        clinic_id=clinic_id,
+        medication_ids=drug_ids,
+        context={
+            "patient_id": patient_id,
+        },
+    )
+
+    warnings = [
+        dict(item)
+        for item in safety_evaluation.known_interactions
+    ]
+
+    if safety_evaluation.blocked:
+        raise ValidationError(
+            "Prescription blocked by clinical safety rules"
+        )
 
     if notes is not None:
         notes = notes.strip() or None

@@ -222,6 +222,7 @@ def select_clinic_context(
 @transactional
 def clear_clinic_context(
     user_id: int,
+    clinic_id: int | None = None,
 ) -> None:
     user = _get_user(
         user_id
@@ -232,11 +233,21 @@ def clear_clinic_context(
             "Only a super administrator can clear a clinic context"
         )
 
+    if clinic_id is not None and (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
+        raise ValidationError(
+            "Invalid clinic context"
+        )
+
     create_audit_log(
         action=AuditAction.UPDATE,
         entity_type="User",
         entity_id=user.id,
         user_id=user.id,
+        clinic_id=clinic_id,
         description=(
             "Super administrator cleared clinic context"
         ),

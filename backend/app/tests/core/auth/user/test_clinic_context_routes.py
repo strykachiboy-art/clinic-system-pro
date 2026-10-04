@@ -318,6 +318,43 @@ def test_clear_clinic_context_rejects_normal_user(
     )
 
 
+def test_clear_clinic_context_passes_previous_context_to_service(
+    client,
+    make_user,
+    clinic,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        role=Role.SUPER_ADMIN,
+    )
+
+    captured = {}
+
+    def fake_clear_clinic_context(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        auth_routes,
+        "clear_clinic_context",
+        fake_clear_clinic_context,
+    )
+
+    response = client.delete(
+        "/api/v1/auth/clinic-context",
+        headers=auth_headers_for(
+            user,
+            clinic_context_id=clinic.id,
+        ),
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "user_id": user.id,
+        "clinic_id": clinic.id,
+    }
+
+
 def test_clear_clinic_context_returns_tokens_without_context(
     client,
     make_user,

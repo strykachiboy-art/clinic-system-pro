@@ -2296,6 +2296,59 @@ def test_create_prescription_returns_interaction_warnings(
     assert warnings[0]["severity"] == "severe"
 
 
+def test_create_prescription_rejects_clinical_safety_block(
+    prescription_service,
+    active_clinic,
+    patient,
+    make_authenticated_staff,
+    make_drug,
+    monkeypatch,
+):
+    patient.clinic_id = active_clinic.id
+    patient.is_active = True
+
+    staff, _ = _make_doctor(
+        make_authenticated_staff,
+        active_clinic,
+    )
+
+    drug = make_drug(
+        active_clinic,
+        is_active=True,
+    )
+
+    safety_evaluation = Mock(
+        blocked=True,
+        known_interactions=(),
+    )
+
+    monkeypatch.setattr(
+        "app.core.clinical_safety.services.medication_safety_service.evaluate_medication_safety",
+        Mock(
+            return_value=safety_evaluation,
+        ),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Prescription blocked by clinical safety rules",
+    ):
+        prescription_service.create_prescription(
+            clinic_id=active_clinic.id,
+            patient_id=patient.id,
+            prescribed_by_id=staff.id,
+            items=[
+                {
+                    "drug_id": drug.id,
+                    "dosage": "100 mg",
+                    "frequency": "once daily",
+                    "duration": "5 days",
+                    "quantity": 5,
+                }
+            ],
+        )
+
+
 def test_create_prescription_rejects_inactive_clinic(
     prescription_service,
     active_clinic,

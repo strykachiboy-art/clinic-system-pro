@@ -313,6 +313,36 @@ def test_select_clinic_context_returns_active_clinic(
     assert result.status is ClinicStatus.ACTIVE
 
 
+def test_clear_clinic_context_preserves_selected_clinic_in_audit(
+    make_user,
+    make_clinic,
+    monkeypatch,
+):
+    user = make_user(
+        role=Role.SUPER_ADMIN,
+    )
+    clinic = make_clinic()
+
+    captured = {}
+
+    monkeypatch.setattr(
+        clinic_context_service,
+        "create_audit_log",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    result = clinic_context_service.clear_clinic_context(
+        user_id=user.id,
+        clinic_id=clinic.id,
+    )
+
+    assert result is None
+    assert captured["clinic_id"] == clinic.id
+    assert captured["new_value"] == {
+        "clinic_context_id": None,
+    }
+
+
 def test_clear_clinic_context_requires_super_admin(
     user,
 ):

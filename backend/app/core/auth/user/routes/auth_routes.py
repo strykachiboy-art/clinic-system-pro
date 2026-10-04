@@ -427,8 +427,14 @@ def clear_clinic_context_route():
         ), 403
 
     try:
+        jwt_payload = get_jwt()
+        clinic_context_id = jwt_payload.get(
+            "clinic_context_id"
+        )
+
         clear_clinic_context(
-            user_id=user.id
+            user_id=user.id,
+            clinic_id=clinic_context_id,
         )
 
         tokens = issue_auth_tokens(

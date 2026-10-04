@@ -53,9 +53,6 @@ def _load_auth_context():
     g.current_user_role = claims.get("role")
     g.current_clinic_id = None
 
-    g._auth_context_request = request._get_current_object()
-    g._auth_context_loaded = True
-
     if g.current_user_id is not None:
         from app.core.auth.user.services.clinic_context_service import (
             resolve_effective_clinic_id,
@@ -66,6 +63,7 @@ def _load_auth_context():
             jwt_payload=claims,
         )
 
+    g._auth_context_request = request._get_current_object()
     g._auth_context_loaded = True
 
 

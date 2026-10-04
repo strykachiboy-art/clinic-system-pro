@@ -60,6 +60,22 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc_aware(
+    value: datetime | None,
+) -> datetime | None:
+    if value is None:
+        return None
+
+    if value.tzinfo is None:
+        return value.replace(
+            tzinfo=timezone.utc,
+        )
+
+    return value.astimezone(
+        timezone.utc,
+    )
+
+
 def _validate_positive_id(
     value,
     field_name: str,
@@ -670,11 +686,15 @@ def request_emergency_access(
     now = _utcnow()
 
     if existing is not None:
+        existing_expires_at = _as_utc_aware(
+            existing.expires_at,
+        )
+
         if (
             existing.status
             == EmergencyAccessStatus.ACTIVE
-            and existing.expires_at is not None
-            and existing.expires_at <= now
+            and existing_expires_at is not None
+            and existing_expires_at <= now
         ):
             existing.status = (
                 EmergencyAccessStatus.EXPIRED
@@ -921,9 +941,13 @@ def revoke_emergency_access(
 
     now = _utcnow()
 
+    grant_expires_at = _as_utc_aware(
+        grant.expires_at,
+    )
+
     if (
-        grant.expires_at is not None
-        and grant.expires_at <= now
+        grant_expires_at is not None
+        and grant_expires_at <= now
     ):
         old_status = grant.status
 
@@ -1016,8 +1040,11 @@ def expire_emergency_access(
         )
 
     now = _utcnow()
+    grant_expires_at = _as_utc_aware(
+        grant.expires_at,
+    )
 
-    if grant.expires_at > now:
+    if grant_expires_at > now:
         raise ConflictError(
             "Emergency access grant has not expired yet"
         )
