@@ -412,6 +412,7 @@ def create_message(
         action=AuditAction.CREATE,
         entity_type="Message",
         entity_id=message.id,
+        clinic_id=clinic_id,
         description=(
             f"Message {message.id} created "
             f"in conversation {conversation.id}"
@@ -712,6 +713,7 @@ def edit_message(
         action=AuditAction.UPDATE,
         entity_type="Message",
         entity_id=message.id,
+        clinic_id=clinic_id,
         description=(
             f"Message {message.id} edited"
         ),
@@ -785,6 +787,7 @@ def delete_message(
         action=AuditAction.DELETE,
         entity_type="Message",
         entity_id=message.id,
+        clinic_id=clinic_id,
         description=(
             f"Message {message.id} deleted"
         ),

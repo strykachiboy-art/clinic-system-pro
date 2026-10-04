@@ -819,6 +819,7 @@ def create_conversation(
         action=AuditAction.CREATE,
         entity_type="Conversation",
         entity_id=conversation.id,
+        clinic_id=clinic_id,
         description=(
             f"Conversation {conversation.id} created"
         ),
@@ -1097,6 +1098,7 @@ def update_conversation(
             action=AuditAction.UPDATE,
             entity_type="Conversation",
             entity_id=conversation.id,
+            clinic_id=clinic_id,
             description=(
                 f"Conversation {conversation.id} updated"
             ),
@@ -1178,6 +1180,7 @@ def update_conversation_status(
         action=AuditAction.STATUS_CHANGE,
         entity_type="Conversation",
         entity_id=conversation.id,
+        clinic_id=clinic_id,
         description=(
             f"Conversation status changed to "
             f"'{new_status.value}'"
@@ -1311,6 +1314,7 @@ def add_participant(
             action=AuditAction.UPDATE,
             entity_type="ConversationParticipant",
             entity_id=existing.id,
+            clinic_id=clinic_id,
             description=(
                 f"User {user.id} re-added to "
                 f"conversation {conversation.id}"
@@ -1360,6 +1364,7 @@ def add_participant(
         action=AuditAction.CREATE,
         entity_type="ConversationParticipant",
         entity_id=participant.id,
+        clinic_id=clinic_id,
         description=(
             f"User {user.id} added to "
             f"conversation {conversation.id}"
@@ -1583,6 +1588,7 @@ def update_participant(
             action=AuditAction.UPDATE,
             entity_type="ConversationParticipant",
             entity_id=participant.id,
+            clinic_id=clinic_id,
             description=(
                 f"Conversation participant "
                 f"{participant.id} updated"
@@ -1661,6 +1667,7 @@ def leave_conversation(
         action=AuditAction.UPDATE,
         entity_type="ConversationParticipant",
         entity_id=participant.id,
+        clinic_id=clinic_id,
         description=(
             f"User {user_id} left "
             f"conversation {conversation.id}"
