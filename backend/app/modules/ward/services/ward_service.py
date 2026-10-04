@@ -1034,6 +1034,7 @@ def create_ward(
         action=AuditAction.CREATE,
         entity_type="ward",
         entity_id=ward.id,
+        clinic_id=clinic_id,
         description=(
             f"Created ward '{ward.name}' "
             f"in clinic {clinic_id}"
@@ -1168,6 +1169,7 @@ def update_ward(
         action=AuditAction.UPDATE,
         entity_type="ward",
         entity_id=ward.id,
+        clinic_id=clinic_id,
         description=f"Updated ward {ward.id}",
         old_value=old_value,
         new_value=new_value,
@@ -1417,6 +1419,7 @@ def add_bed(
         action=AuditAction.CREATE,
         entity_type="bed",
         entity_id=bed.id,
+        clinic_id=clinic_id,
         description=(
             f"Added bed '{bed.bed_number}' "
             f"to ward {ward.id}"
@@ -1495,6 +1498,7 @@ def set_bed_maintenance(
         action=AuditAction.UPDATE,
         entity_type="bed",
         entity_id=bed.id,
+        clinic_id=clinic_id,
         description=(
             f"Changed bed {bed.id} maintenance status"
         ),
@@ -1809,6 +1813,7 @@ def reserve_bed(
         action=AuditAction.CREATE,
         entity_type="bed_reservation",
         entity_id=reservation.id,
+        clinic_id=clinic_id,
         description=(
             f"Reserved bed {bed.id} "
             f"for patient {patient.id}"
@@ -1883,6 +1888,7 @@ def cancel_bed_reservation(
         action=AuditAction.UPDATE,
         entity_type="bed_reservation",
         entity_id=reservation.id,
+        clinic_id=clinic_id,
         description=(
             f"Cancelled bed reservation "
             f"{reservation.id}"
@@ -1941,6 +1947,7 @@ def expire_bed_reservation(
         action=AuditAction.UPDATE,
         entity_type="bed_reservation",
         entity_id=reservation.id,
+        clinic_id=reservation.bed.ward.clinic_id,
         description=(
             f"Expired bed reservation "
             f"{reservation.id}"
@@ -2018,6 +2025,7 @@ def expire_due_bed_reservations(
             action=AuditAction.UPDATE,
             entity_type="bed_reservation",
             entity_id=reservation.id,
+            clinic_id=clinic_id,
             description=(
                 f"Expired bed reservation "
                 f"{reservation.id}"
@@ -2279,6 +2287,7 @@ def admit_patient(
         action=AuditAction.CREATE,
         entity_type="admission",
         entity_id=admission.id,
+        clinic_id=clinic_id,
         description=(
             f"Admitted patient {patient.id} "
             f"to bed {bed.id}"
@@ -2435,6 +2444,7 @@ def admit_patient_from_reservation(
         action=AuditAction.CREATE,
         entity_type="admission",
         entity_id=admission.id,
+        clinic_id=clinic_id,
         description=(
             f"Admitted patient {patient.id} "
             f"from reservation {reservation.id}"
@@ -2446,6 +2456,7 @@ def admit_patient_from_reservation(
         action=AuditAction.UPDATE,
         entity_type="bed_reservation",
         entity_id=reservation.id,
+        clinic_id=clinic_id,
         description=(
             f"Fulfilled bed reservation "
             f"{reservation.id}"
@@ -2576,6 +2587,7 @@ def transfer_bed(
         action=AuditAction.UPDATE,
         entity_type="admission",
         entity_id=admission.id,
+        clinic_id=clinic_id,
         description=(
             f"Transferred admission {admission.id} "
             f"from bed {from_bed.id} "
@@ -2660,6 +2672,7 @@ def discharge_patient(
         action=AuditAction.UPDATE,
         entity_type="admission",
         entity_id=admission.id,
+        clinic_id=clinic_id,
         description=(
             f"Discharged patient "
             f"{admission.patient_id} "

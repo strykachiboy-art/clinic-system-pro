@@ -320,6 +320,7 @@ def create_vehicle(
         action=AuditAction.CREATE,
         entity_type="AmbulanceVehicle",
         entity_id=vehicle.id,
+        clinic_id=clinic_id,
         description=(
             f"Ambulance vehicle "
             f"{vehicle.plate_number} created"
@@ -379,6 +380,7 @@ def set_vehicle_status(
         action=AuditAction.STATUS_CHANGE,
         entity_type="AmbulanceVehicle",
         entity_id=vehicle.id,
+        clinic_id=vehicle.clinic_id,
         description=(
             f"Ambulance vehicle {vehicle.plate_number} "
             f"status changed from {old_status} "
@@ -733,6 +735,7 @@ def request_trip(
         action=AuditAction.CREATE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=clinic_id,
         description=(
             f"Ambulance trip {trip.id} requested"
         ),
@@ -834,6 +837,7 @@ def dispatch_trip(
         action=AuditAction.STATUS_CHANGE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Ambulance trip {trip.id} dispatched "
             f"with vehicle {vehicle.id}"
@@ -922,6 +926,7 @@ def update_trip_status(
         action=AuditAction.STATUS_CHANGE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Ambulance trip {trip.id} status "
             f"changed to '{new_status.value}'"
@@ -987,6 +992,7 @@ def link_patient(
         action=AuditAction.UPDATE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Patient {patient.id} linked to "
             f"ambulance trip {trip.id}"
@@ -1053,6 +1059,7 @@ def complete_trip(
         action=AuditAction.STATUS_CHANGE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Ambulance trip {trip.id} completed; "
             "vehicle released"
@@ -1141,6 +1148,7 @@ def link_invoice(
         action=AuditAction.UPDATE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Invoice {invoice.id} linked to "
             f"ambulance trip {trip.id}"
@@ -1218,6 +1226,7 @@ def cancel_trip(
         action=AuditAction.STATUS_CHANGE,
         entity_type="AmbulanceTrip",
         entity_id=trip.id,
+        clinic_id=trip.clinic_id,
         description=(
             f"Ambulance trip {trip.id} cancelled: "
             f"{trip.cancellation_reason}"
