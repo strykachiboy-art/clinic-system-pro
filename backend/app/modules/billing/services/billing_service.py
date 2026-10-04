@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+﻿from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -422,6 +422,7 @@ def create_invoice(
     patient_id,
     items: list[dict],
     appointment_id=None,
+    actor_user_id=None,
     due_date=None,
     is_insurance_claim=False,
     insurance_provider=None,
@@ -546,6 +547,7 @@ def create_invoice(
         entity_type="Invoice",
         entity_id=invoice.id,
         clinic_id=clinic_id,
+        user_id=actor_user_id,
         description=(
             f"Invoice {invoice.invoice_number} "
             f"created for patient {patient.id}"

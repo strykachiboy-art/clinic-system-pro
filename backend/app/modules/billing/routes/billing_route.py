@@ -276,6 +276,7 @@ def create_invoice_route():
         invoice = create_invoice(
             clinic_id=clinic_id,
             patient_id=payload.patient_id,
+            actor_user_id=_current_user().id,
             appointment_id=payload.appointment_id,
             due_date=payload.due_date,
             is_insurance_claim=(
