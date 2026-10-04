@@ -70,14 +70,54 @@ def _get_active_clinic(
     return clinic
 
 
+def _resolve_assigned_clinic_id(
+    clinic_id: int | None,
+) -> int | None:
+    if clinic_id is None:
+        return None
+
+    if (
+        isinstance(clinic_id, bool)
+        or not isinstance(clinic_id, int)
+        or clinic_id <= 0
+    ):
+        raise ValidationError(
+            "Invalid clinic context"
+        )
+
+    clinic = db.session.get(
+        Clinic,
+        clinic_id,
+    )
+
+    if clinic is None:
+        raise NotFoundError(
+            f"Clinic {clinic_id} not found"
+        )
+
+    if clinic.status is not ClinicStatus.ACTIVE:
+        raise ValidationError(
+            "Assigned clinic is not active"
+        )
+
+    return clinic.id
+
+
 def resolve_effective_clinic_id(
     user_id: int,
     jwt_payload: dict,
 ) -> int | None:
     user = _get_user(user_id)
 
+    if not isinstance(jwt_payload, dict):
+        raise ValidationError(
+            "Invalid clinic context"
+        )
+
     if user.role is not Role.SUPER_ADMIN:
-        return user.clinic_id
+        return _resolve_assigned_clinic_id(
+            user.clinic_id,
+        )
 
     raw_context = jwt_payload.get(
         CLINIC_CONTEXT_CLAIM

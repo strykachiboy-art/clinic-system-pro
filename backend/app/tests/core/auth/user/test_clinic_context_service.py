@@ -37,6 +37,27 @@ def test_resolve_effective_clinic_id_returns_none_for_super_admin_without_contex
     assert result is None
 
 
+def test_resolve_effective_clinic_id_rejects_inactive_assigned_clinic(
+    make_user,
+    make_clinic,
+):
+    clinic = make_clinic(
+        status=ClinicStatus.INACTIVE,
+    )
+    user = make_user(
+        clinic=clinic,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Assigned clinic is not active",
+    ):
+        clinic_context_service.resolve_effective_clinic_id(
+            user_id=user.id,
+            jwt_payload={},
+        )
+
+
 def test_resolve_effective_clinic_id_returns_selected_active_clinic(
     make_user,
     make_clinic,
@@ -116,6 +137,23 @@ def test_resolve_effective_clinic_id_rejects_inactive_context(
             jwt_payload={
                 "clinic_context_id": clinic.id,
             },
+        )
+
+
+def test_resolve_effective_clinic_id_rejects_non_mapping_payload(
+    make_user,
+):
+    user = make_user(
+        role=Role.SUPER_ADMIN,
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Invalid clinic context",
+    ):
+        clinic_context_service.resolve_effective_clinic_id(
+            user_id=user.id,
+            jwt_payload=None,
         )
 
 
