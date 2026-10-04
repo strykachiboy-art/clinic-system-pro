@@ -293,6 +293,7 @@ def create_feedback_comment(
         action=AuditAction.CREATE,
         entity_type="FeedbackComment",
         entity_id=comment.id,
+        clinic_id=feedback.clinic_id,
         description=(
             f"Comment {comment.id} added to "
             f"feedback {feedback.id}"
@@ -497,6 +498,7 @@ def update_feedback_comment(
         action=AuditAction.UPDATE,
         entity_type="FeedbackComment",
         entity_id=comment.id,
+        clinic_id=feedback.clinic_id,
         description=(
             f"Comment {comment.id} updated"
         ),

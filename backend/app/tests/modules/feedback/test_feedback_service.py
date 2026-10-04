@@ -698,3 +698,31 @@ def test_create_system_feedback_uses_system_source(
 
     assert feedback.source == FeedbackSource.SYSTEM
 
+
+
+def test_feedback_audit_preserves_clinic_id(
+    clinic,
+    feedback_submitter,
+    monkeypatch,
+):
+    captured = {}
+
+    monkeypatch.setattr(
+        feedback_service,
+        "create_audit_log",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    payload = FeedbackCreateSchema(
+        feedback_type=FeedbackType.BUG_REPORT,
+        category=FeedbackCategory.USABILITY,
+        subject="Gate 9 audit context",
+        message="Feedback audit must retain clinic context.",
+    )
+
+    feedback_service.create_feedback(
+        actor_user_id=feedback_submitter.id,
+        payload=payload,
+    )
+
+    assert captured["clinic_id"] == clinic.id

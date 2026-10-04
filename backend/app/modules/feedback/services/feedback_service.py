@@ -686,6 +686,7 @@ def _create_feedback_audit(
             }
         ),
         user_id=actor_user_id,
+        clinic_id=feedback.clinic_id,
     )
 
 

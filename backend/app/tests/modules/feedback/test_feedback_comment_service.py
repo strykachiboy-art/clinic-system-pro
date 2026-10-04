@@ -451,3 +451,31 @@ def test_is_active_staff_requires_active_staff_status(
 
     assert result is expected
 
+
+
+def test_feedback_comment_audit_preserves_clinic_id(
+    clinic,
+    feedback,
+    feedback_submitter,
+    monkeypatch,
+):
+    captured = {}
+
+    monkeypatch.setattr(
+        feedback_comment_service,
+        "create_audit_log",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    payload = FeedbackCommentCreateSchema(
+        body="Gate 9 comment audit context.",
+    )
+
+    feedback_comment_service.create_feedback_comment(
+        actor_user_id=feedback_submitter.id,
+        feedback_id=feedback.id,
+        payload=payload,
+        clinic_id=clinic.id,
+    )
+
+    assert captured["clinic_id"] == clinic.id

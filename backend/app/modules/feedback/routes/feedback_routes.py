@@ -395,11 +395,15 @@ def resolve_feedback_route(feedback_id: int):
     try:
         actor_user_id = _get_current_user_id()
 
+        payload = _get_json_object()
+        resolution_note = payload.get("resolution_note")
+
         clinic_id = _get_optional_clinic_id()
 
         feedback = resolve_feedback(
             actor_user_id=actor_user_id,
             feedback_id=feedback_id,
+            resolution_note=resolution_note,
             clinic_id=clinic_id,
         )
 

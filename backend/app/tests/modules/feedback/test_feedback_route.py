@@ -1020,3 +1020,45 @@ def test_super_admin_can_supply_feedback_clinic_id(
     )
 
 
+
+
+def test_resolve_feedback_forwards_resolution_note(
+    client,
+    feedback,
+    feedback_admin,
+    auth_headers_for,
+    feedback_routes,
+    monkeypatch,
+):
+    service = Mock(return_value=feedback)
+
+    monkeypatch.setattr(
+        feedback_routes,
+        "resolve_feedback",
+        service,
+    )
+
+    response = client.post(
+        f"{BASE_URL}/{feedback.id}/resolve",
+        json={
+            "resolution_note": "Gate 9 resolution verification.",
+        },
+        headers=_auth_headers(
+            auth_headers_for,
+            feedback_admin,
+        ),
+    )
+
+    assert response.status_code == 200
+
+    assert service.call_args.kwargs["actor_user_id"] == (
+        feedback_admin.id
+    )
+
+    assert service.call_args.kwargs["feedback_id"] == (
+        feedback.id
+    )
+
+    assert service.call_args.kwargs["resolution_note"] == (
+        "Gate 9 resolution verification."
+    )
