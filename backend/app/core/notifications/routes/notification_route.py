@@ -195,6 +195,7 @@ def create():
 
         notification = create_notification(
             clinic_id=user.clinic_id,
+            actor_user_id=user.id,
             **payload.model_dump(),
         )
 

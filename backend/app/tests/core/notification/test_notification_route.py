@@ -248,14 +248,15 @@ def test_create_notification_success(
 
     service.assert_called_once_with(
         clinic_id=user.clinic_id,
+        actor_user_id=user.id,
         user_id=user.id,
         title="Appointment Reminder",
         message=(
             "Your appointment is scheduled for tomorrow."
         ),
-        notification_type=NotificationType.SYSTEM.value,
-        priority=NotificationPriority.NORMAL.value,
-        channel=NotificationChannel.IN_APP.value,
+        notification_type=NotificationType.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        channel=NotificationChannel.IN_APP,
         reference_type="Appointment",
         reference_id=123,
     )

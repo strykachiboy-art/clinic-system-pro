@@ -518,6 +518,7 @@ def create_notification(
     channel=NotificationChannel.IN_APP,
     reference_type=None,
     reference_id=None,
+    actor_user_id=None,
 ):
     """
     Create a notification for a clinic-owned user.
@@ -587,6 +588,7 @@ def create_notification(
 
     create_audit_log(
         action=AuditAction.CREATE,
+        user_id=actor_user_id,
         entity_type="Notification",
         entity_id=notification.id,
         description=(
