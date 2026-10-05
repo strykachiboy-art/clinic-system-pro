@@ -2,9 +2,9 @@
 
 Enterprise-oriented healthcare clinic management platform designed around secure multi-tenant architecture, clinical safety, auditable workflows, resilient backend services, and a future Flutter client.
 
-**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, Phase 5 Production Readiness is GREEN / CLOSED, Phase 6 Production-like Backend Environment is GREEN / CLOSED, Phase 7 Crash Durability is GREEN / CLOSED, and Phase 8 Full Backend E2E is now the active engineering phase.**
+**Current status: Backend hardening and current-cycle feature development are substantially complete; Feedback is complete, Resilience Engineering is verified, Phase 3 security/compliance hardening is complete, Phase 4 Observability / Operations is formally GREEN, Phase 5 Production Readiness is GREEN / CLOSED, Phase 6 Production-like Backend Environment is GREEN / CLOSED, Phase 7 Crash Durability is GREEN / CLOSED, and Phase 8 Full Backend E2E has reached Gate 16 GREEN. Phase 8 Gate 17 - Exit Review - is now the active engineering gate.**
 
-**Status date: October 3, 2026**
+**Status date: October 5, 2026**
 
 ---
 
@@ -1585,7 +1585,7 @@ Phase 4 Observability / Operations is formally closed.
 
 Current immediate engineering phase:
 
-PHASE 7 - CRASH DURABILITY
+PHASE 8 - FULL BACKEND E2E / GATE 17 EXIT REVIEW
 # 55. Authoritative Master Roadmap
 
 The project roadmap is divided into 34 major phases.
@@ -1596,8 +1596,8 @@ The project roadmap is divided into 34 major phases.
 04. Observability / Operations - COMPLETED
 05. Production Readiness - CLOSED
 06. Production-like Backend Environment - GREEN / CLOSED
-07. Crash Durability - CURRENT
-08. Full Backend E2E
+07. Crash Durability - GREEN / CLOSED
+08. Full Backend E2E - GATE 16 GREEN / GATE 17 CURRENT
 09. Failure Injection
 10. Flutter Foundation
 11. Flutter Authentication + Session
@@ -1924,25 +1924,79 @@ E2E.
 
 # 63. Phase 8 â€” Full Backend E2E
 
-End-to-end backend workflows will cover critical user journeys across:
+Phase 8 has completed Gates 3 through 16. Gate 17 - Phase 8 Exit Review - is the current active gate.
 
-- authentication
-- patient workflows
+## Phase 8 Gate Status
+
+| Gate | Scope | Status |
+| --- | --- | --- |
+| 3 | Patient -> Appointment -> Consultation | GREEN |
+| 4 | Consultation -> Laboratory | GREEN |
+| 5 | Prescription -> Pharmacy | GREEN |
+| 6 | Billing | GREEN |
+| 7 | Ward -> Ambulance | GREEN |
+| 8 | Emergency Access + Clinical Safety | GREEN |
+| 9 | Feedback + Core | GREEN |
+| 10 | Clinical Chat + Realtime | GREEN |
+| 11 | Reporting + File / Storage | GREEN |
+| 12 | Identity + Session + Clinic Context | GREEN |
+| 13 | Security + Audit Cross-Domain | GREEN |
+| 14 | Background + Notifications | GREEN |
+| 15 | HIE + AI + Final Integration Coverage Audit | GREEN / CLOSED |
+| 16 | Full Phase 8 E2E Regression | GREEN |
+| 17 | Phase 8 Exit Review | CURRENT |
+
+## Gate 15 Evidence
+
+Gate 15 closed after:
+
+- HIE E2E: 1 passed
+- AI E2E: 1 passed
+- Existing Phase 8 E2E regression after Gate 15C hardening: 14 passed
+- Dedicated Audit API E2E covering audit-log list, single-record retrieval, and cross-clinic isolation: 1 passed
+- Final Gate 15C E2E regression including the Audit API E2E: 15 passed in 65.47s
+- Targeted StaffDepartment tenant-isolation route test: 1 passed
+- Targeted Clinic Settings inactive-clinic route test: 1 passed
+
+The Gate 15 route regression baseline recorded 2,053 passed and 2 failed. Both failures were diagnosed and corrected through focused test-contract fixes, and the corrected tests passed individually. The full 2,053-route suite was intentionally not rerun after those focused corrections.
+
+Gate 15 was committed and pushed at:
+
+e374ca8
+
+## Gate 16 Evidence
+
+The complete Phase 8 E2E suite was executed after Gate 15 closure:
+
+    15 passed in 60.72s
+
+This is the current full Phase 8 E2E regression checkpoint.
+
+Phase 8 E2E coverage currently spans:
+
+- authentication / session / clinic context
+- patients
 - appointments
 - consultations
 - laboratory
 - pharmacy
 - prescriptions
 - billing
-- ambulance
+- ward / ambulance
 - emergency access
 - clinical safety
 - feedback
-- chat
-- reporting
+- chat / realtime
+- reporting / file storage
+- security / audit cross-domain behavior
+- audit API
+- notifications / background processing
+- HIE
+- AI
+
+Gate 17 is now responsible for the final Phase 8 exit review and evidence consolidation before the project advances to Phase 9 - Failure Injection.
 
 ---
-
 # 64. Phase 9 â€” Failure Injection
 
 Introduce controlled failures such as:
