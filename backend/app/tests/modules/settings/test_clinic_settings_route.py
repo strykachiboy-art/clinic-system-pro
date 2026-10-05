@@ -250,7 +250,7 @@ class TestClinicSettingsRoutes:
 
         assert data["success"] is False
         assert data["error"] == (
-            "Clinic must be active to modify settings"
+            "Assigned clinic is not active"
         )
 
     def test_update_settings_success(

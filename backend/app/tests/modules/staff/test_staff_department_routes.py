@@ -347,6 +347,7 @@ def test_staff_department_route_enforces_tenant_isolation(
         name="Emergency",
         code="ER",
     )
+    db.session.commit()
 
     response = client.post(
         f"/api/v1/staff-departments/staff/"
