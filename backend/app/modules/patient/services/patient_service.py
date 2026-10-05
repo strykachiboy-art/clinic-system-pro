@@ -161,6 +161,7 @@ def _serialize_audit_changes(
 def _audit(
     *,
     actor_id: Optional[int],
+    clinic_id: int,
     action: AuditAction,
     entity_type: str,
     entity_id: int,
@@ -169,6 +170,7 @@ def _audit(
 ) -> None:
     create_audit_log(
         user_id=actor_id,
+        clinic_id=clinic_id,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -620,6 +622,7 @@ def create_patient(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=clinic_id,
         action=AuditAction.CREATE,
         entity_type="patient",
         entity_id=patient.id,
@@ -709,6 +712,7 @@ def update_patient(
 
         _audit(
             actor_id=actor_id,
+            clinic_id=patient.clinic_id,
             action=AuditAction.UPDATE,
             entity_type="patient",
             entity_id=patient.id,
@@ -754,6 +758,7 @@ def set_active_status(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=patient.clinic_id,
         action=AuditAction.UPDATE,
         entity_type="patient",
         entity_id=patient.id,
@@ -869,6 +874,7 @@ def add_family_member(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=patient.clinic_id,
         action=AuditAction.CREATE,
         entity_type="patient_family_member",
         entity_id=member.id,
@@ -958,6 +964,7 @@ def update_family_member(
 
         _audit(
             actor_id=actor_id,
+            clinic_id=patient.clinic_id,
             action=AuditAction.UPDATE,
             entity_type="patient_family_member",
             entity_id=member.id,
@@ -996,6 +1003,7 @@ def remove_family_member(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=patient.clinic_id,
         action=AuditAction.DELETE,
         entity_type="patient_family_member",
         entity_id=member.id,
@@ -1149,6 +1157,7 @@ def add_insurance(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=patient.clinic_id,
         action=AuditAction.CREATE,
         entity_type="patient_insurance",
         entity_id=insurance.id,
@@ -1284,6 +1293,7 @@ def update_insurance(
 
         _audit(
             actor_id=actor_id,
+            clinic_id=patient.clinic_id,
             action=AuditAction.UPDATE,
             entity_type="patient_insurance",
             entity_id=insurance.id,
@@ -1450,6 +1460,7 @@ def record_vitals(
 
     _audit(
         actor_id=actor_id,
+        clinic_id=patient.clinic_id,
         action=AuditAction.CREATE,
         entity_type="patient_vitals",
         entity_id=vitals.id,
