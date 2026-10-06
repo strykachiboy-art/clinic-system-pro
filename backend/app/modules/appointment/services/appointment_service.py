@@ -18,6 +18,9 @@ from app.core.enums.appointment_enums import (
     AppointmentStatus,
     AppointmentType,
 )
+from app.core.idempotency.services.idempotency_service import (
+    reserve_idempotency_operation,
+)
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
 from app.core.exceptions import (
@@ -382,6 +385,8 @@ def create_appointment(
     appointment_type=AppointmentType.IN_PERSON,
     reason=None,
     notes=None,
+    idempotency_key=None,
+    idempotency_user_id=None,
 ):
     _validate_positive_id(
         clinic_id,
@@ -404,6 +409,57 @@ def create_appointment(
     appointment_type = _normalize_appointment_type(
         appointment_type,
     )
+
+    idempotency_record = None
+
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError(
+                "Idempotency user ID is required"
+            )
+
+        idempotency_record, created = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="appointment.create",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "patient_id": patient_id,
+                "staff_id": staff_id,
+                "scheduled_start": scheduled_start,
+                "scheduled_end": scheduled_end,
+                "appointment_type": appointment_type,
+                "reason": reason,
+                "notes": notes,
+            },
+        )
+
+        if not created:
+            if (
+                idempotency_record.entity_type != "Appointment"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency record does not reference "
+                    "a completed appointment"
+                )
+
+            existing_appointment = db.session.get(
+                Appointment,
+                idempotency_record.entity_id,
+            )
+
+            if existing_appointment is None:
+                raise ConflictError(
+                    "Idempotency record references a missing appointment"
+                )
+
+            if existing_appointment.clinic_id != clinic_id:
+                raise ConflictError(
+                    "Idempotency record references another clinic"
+                )
+
+            return existing_appointment
 
     clinic = _lock_clinic(
         clinic_id,
@@ -470,6 +526,10 @@ def create_appointment(
             "reason": reason,
         },
     )
+
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "Appointment"
+        idempotency_record.entity_id = appointment.id
 
     return appointment
 

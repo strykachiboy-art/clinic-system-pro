@@ -2557,3 +2557,185 @@ def test_check_upcoming_appointments_handles_no_upcoming_appointments(
     appointment_service.check_upcoming_appointments()
 
     assert queued == []
+# ============================================================================
+# Phase 9 Gate 3 — idempotency
+# ============================================================================
+
+
+def test_create_appointment_idempotency_replays_existing_appointment(
+    app,
+    monkeypatch,
+):
+    existing = type(
+        "ExistingAppointment",
+        (),
+        {
+            "id": 101,
+            "clinic_id": 10,
+        },
+    )()
+
+    record = type(
+        "IdempotencyRecord",
+        (),
+        {
+            "entity_type": "Appointment",
+            "entity_id": 101,
+        },
+    )()
+
+    captured = {}
+
+    def fake_reserve(**kwargs):
+        captured.update(kwargs)
+        return record, False
+
+    monkeypatch.setattr(
+        appointment_service,
+        "reserve_idempotency_operation",
+        fake_reserve,
+    )
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "get",
+        lambda model, entity_id: existing,
+    )
+
+    start = datetime(2026, 9, 8, 11, 0)
+    end = datetime(2026, 9, 8, 11, 30)
+
+    result = appointment_service.create_appointment(
+        clinic_id=10,
+        patient_id=20,
+        staff_id=30,
+        scheduled_start=start,
+        scheduled_end=end,
+        appointment_type=AppointmentType.EMERGENCY,
+        reason="Priority appointment",
+        notes="Replay test",
+        idempotency_key="appointment-service-001",
+        idempotency_user_id=50,
+    )
+
+    assert result is existing
+    assert captured["operation"] == "appointment.create"
+    assert captured["idempotency_key"] == (
+        "appointment-service-001"
+    )
+    assert captured["user_id"] == 50
+
+
+def test_create_appointment_idempotency_binds_created_appointment(
+    app,
+    monkeypatch,
+):
+    clinic = type(
+        "Clinic",
+        (),
+        {"id": 10},
+    )()
+
+    patient = type(
+        "Patient",
+        (),
+        {"clinic_id": 10},
+    )()
+
+    staff = type(
+        "Staff",
+        (),
+        {"id": 30},
+    )()
+
+    record = type(
+        "IdempotencyRecord",
+        (),
+        {
+            "entity_type": None,
+            "entity_id": None,
+        },
+    )()
+
+    monkeypatch.setattr(
+        appointment_service,
+        "reserve_idempotency_operation",
+        lambda **kwargs: (record, True),
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_lock_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "ensure_clinic_active",
+        lambda clinic_id: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_clinic",
+        lambda clinic_id: clinic,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_patient",
+        lambda patient_id: patient,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "get_staff",
+        lambda staff_id, clinic_id: staff,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "_ensure_no_schedule_conflict",
+        lambda **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        appointment_service,
+        "create_audit_log",
+        lambda **kwargs: None,
+    )
+
+    created = {}
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "add",
+        lambda appointment: created.update(
+            appointment=appointment
+        ),
+    )
+
+    def fake_flush():
+        created["appointment"].id = 202
+
+    monkeypatch.setattr(
+        appointment_service.db.session,
+        "flush",
+        fake_flush,
+    )
+
+    result = appointment_service.create_appointment(
+        clinic_id=10,
+        patient_id=20,
+        staff_id=30,
+        scheduled_start=datetime(2026, 9, 8, 11, 0),
+        scheduled_end=datetime(2026, 9, 8, 11, 30),
+        appointment_type=AppointmentType.EMERGENCY,
+        reason="Priority appointment",
+        idempotency_key="appointment-service-002",
+        idempotency_user_id=50,
+    )
+
+    assert result.id == 202
+    assert record.entity_type == "Appointment"
+    assert record.entity_id == 202

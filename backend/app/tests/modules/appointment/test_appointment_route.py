@@ -2356,3 +2356,115 @@ def test_appointment_routes_are_registered(app):
         "/api/v1/appointments/"
         "staff/<int:staff_id>"
     ) in rules
+
+# ============================================================================
+# Phase 9 Gate 3 — idempotency
+# ============================================================================
+
+
+def test_create_appointment_forwards_idempotency_header(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+    headers["Idempotency-Key"] = "appointment-route-001"
+
+    appointment = make_appointment(
+        appointment_id=77,
+        clinic_id=clinic.id,
+        patient_id=20,
+        staff_id=30,
+    )
+
+    captured = {}
+
+    def fake_create_appointment(**kwargs):
+        captured.update(kwargs)
+        return appointment
+
+    monkeypatch.setattr(
+        appointment_route,
+        "create_appointment",
+        fake_create_appointment,
+    )
+
+    response = client.post(
+        "/api/v1/appointments/",
+        json={
+            "patient_id": 20,
+            "staff_id": 30,
+            "scheduled_start": "2026-09-08T11:00:00",
+            "scheduled_end": "2026-09-08T11:30:00",
+            "appointment_type": AppointmentType.EMERGENCY.value,
+            "reason": "Priority appointment",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    assert captured["idempotency_key"] == (
+        "appointment-route-001"
+    )
+    assert captured["idempotency_user_id"] == user.id
+
+
+def test_create_appointment_rejects_blank_idempotency_header(
+    app,
+    client,
+    clinic,
+    make_user,
+    auth_headers_for,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+    headers["Idempotency-Key"] = "   "
+
+    called = False
+
+    def fake_create_appointment(**kwargs):
+        nonlocal called
+        called = True
+        return make_appointment(
+            clinic_id=clinic.id,
+        )
+
+    monkeypatch.setattr(
+        appointment_route,
+        "create_appointment",
+        fake_create_appointment,
+    )
+
+    response = client.post(
+        "/api/v1/appointments/",
+        json={
+            "patient_id": 20,
+            "staff_id": 30,
+            "scheduled_start": "2026-09-08T11:00:00",
+            "scheduled_end": "2026-09-08T11:30:00",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Idempotency-Key cannot be blank"
+    )
+    assert called is False

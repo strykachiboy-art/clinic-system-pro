@@ -268,18 +268,46 @@ def create():
     if isinstance(payload, tuple):
         return payload
 
+    idempotency_key = request.headers.get("Idempotency-Key")
+    idempotency_user_id = None
+
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+
+        if not idempotency_key:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Idempotency-Key cannot be blank",
+                }
+            ), 400
+
+        idempotency_user_id = _current_user().id
+
     try:
         clinic_id = _current_clinic_id()
 
+        appointment_kwargs = {
+            "clinic_id": clinic_id,
+            "patient_id": payload.patient_id,
+            "staff_id": payload.staff_id,
+            "scheduled_start": payload.scheduled_start,
+            "scheduled_end": payload.scheduled_end,
+            "appointment_type": payload.appointment_type,
+            "reason": payload.reason,
+            "notes": payload.notes,
+        }
+
+        if idempotency_key is not None:
+            appointment_kwargs.update(
+                {
+                    "idempotency_key": idempotency_key,
+                    "idempotency_user_id": idempotency_user_id,
+                }
+            )
+
         appointment = create_appointment(
-            clinic_id=clinic_id,
-            patient_id=payload.patient_id,
-            staff_id=payload.staff_id,
-            scheduled_start=payload.scheduled_start,
-            scheduled_end=payload.scheduled_end,
-            appointment_type=payload.appointment_type,
-            reason=payload.reason,
-            notes=payload.notes,
+            **appointment_kwargs
         )
 
         return jsonify(
