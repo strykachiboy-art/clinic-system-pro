@@ -46,3 +46,154 @@ class FakeResponse:
             raise self._json_error
 
         return self._json_data
+# ---------------------------------------------------------------------------
+# Phase 9 - Gate 4 / Slice 1
+# Provider identity replay and failure semantics
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_payment_reuses_stable_tx_ref_on_retry(
+    gateway,
+    monkeypatch,
+):
+    first_response = FakeResponse(
+        ok=True,
+        json_data={
+            "status": "success",
+            "data": {
+                "id": 1001,
+                "tx_ref": "FLW-RETRY-001",
+                "link": (
+                    "https://flutterwave.test/pay/1"
+                ),
+            },
+        },
+    )
+
+    second_response = FakeResponse(
+        ok=True,
+        json_data={
+            "status": "success",
+            "data": {
+                "id": 1001,
+                "tx_ref": "FLW-RETRY-001",
+                "link": (
+                    "https://flutterwave.test/pay/1"
+                ),
+            },
+        },
+    )
+
+    mock_post = Mock(
+        side_effect=[
+            first_response,
+            second_response,
+        ]
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.flutterwave_gateway.requests.post",
+        mock_post,
+    )
+
+    first = gateway.initialize_payment(
+        reference="FLW-RETRY-001",
+        amount=Decimal("100"),
+        currency="NGN",
+        customer_email="patient@example.com",
+    )
+
+    second = gateway.initialize_payment(
+        reference="FLW-RETRY-001",
+        amount=Decimal("100"),
+        currency="NGN",
+        customer_email="patient@example.com",
+    )
+
+    assert first["reference"] == "FLW-RETRY-001"
+    assert second["reference"] == "FLW-RETRY-001"
+
+    assert mock_post.call_count == 2
+
+    first_payload = (
+        mock_post.call_args_list[0]
+        .kwargs["json"]
+    )
+
+    second_payload = (
+        mock_post.call_args_list[1]
+        .kwargs["json"]
+    )
+
+    assert first_payload["tx_ref"] == "FLW-RETRY-001"
+    assert second_payload["tx_ref"] == "FLW-RETRY-001"
+    assert (
+        first_payload["tx_ref"]
+        == second_payload["tx_ref"]
+    )
+
+
+def test_initialize_payment_preserves_tx_ref_when_provider_rejects_request(
+    gateway,
+    monkeypatch,
+):
+    response = FakeResponse(
+        ok=False,
+        json_data={
+            "status": "error",
+            "message": "Transaction already exists",
+        },
+    )
+
+    mock_post = Mock(
+        return_value=response
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.flutterwave_gateway.requests.post",
+        mock_post,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Flutterwave payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="FLW-REJECTED-001",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+
+    assert payload["tx_ref"] == "FLW-REJECTED-001"
+
+
+def test_initialize_payment_maps_transport_failure_to_runtime_error(
+    gateway,
+    monkeypatch,
+):
+    mock_post = Mock(
+        side_effect=requests.Timeout(
+            "provider timeout"
+        )
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.flutterwave_gateway.requests.post",
+        mock_post,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Flutterwave payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="FLW-TIMEOUT-001",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )
+
+    mock_post.assert_called_once()

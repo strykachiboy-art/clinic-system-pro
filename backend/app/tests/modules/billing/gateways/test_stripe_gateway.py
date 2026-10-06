@@ -541,6 +541,81 @@ def test_initialize_payment_converts_metadata_values_to_strings(
     }
 
 
+def test_initialize_payment_passes_idempotency_key_to_stripe(
+    gateway,
+    monkeypatch,
+):
+    intent = Mock()
+    intent.id = "pi_idempotent"
+    intent.status = "requires_payment_method"
+    intent.client_secret = "secret_idempotent"
+
+    mock_create = Mock(
+        return_value=intent
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
+
+    result = gateway.initialize_payment(
+        reference="REF-IDEMPOTENT",
+        amount=Decimal("100"),
+        currency="USD",
+        customer_email="user@example.com",
+        idempotency_key=" billing-payment-001 ",
+    )
+
+    assert result["transaction_id"] == "pi_idempotent"
+
+    _, kwargs = mock_create.call_args
+
+    assert kwargs["idempotency_key"] == (
+        "billing-payment-001"
+    )
+
+
+@pytest.mark.parametrize(
+    "idempotency_key,expected_message",
+    [
+        (
+            "   ",
+            "Idempotency-Key cannot be blank",
+        ),
+        (
+            "x" * 256,
+            "Idempotency-Key cannot exceed 255 characters",
+        ),
+    ],
+)
+def test_initialize_payment_rejects_invalid_idempotency_key(
+    gateway,
+    monkeypatch,
+    idempotency_key,
+    expected_message,
+):
+    mock_create = Mock()
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        mock_create,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=expected_message,
+    ):
+        gateway.initialize_payment(
+            reference="REF-INVALID-IDEMPOTENCY",
+            amount=Decimal("100"),
+            currency="USD",
+            customer_email="user@example.com",
+            idempotency_key=idempotency_key,
+        )
+
+    mock_create.assert_not_called()
+
 def test_initialize_payment_handles_stripe_error(
     gateway,
     monkeypatch,

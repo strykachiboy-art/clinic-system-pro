@@ -173,6 +173,35 @@ class StripeGateway(PaymentGatewayBase):
         return reference.strip()
 
     @staticmethod
+    def _normalize_idempotency_key(
+        idempotency_key: str | None,
+    ) -> str | None:
+        if idempotency_key is None:
+            return None
+
+        if not isinstance(
+            idempotency_key,
+            str,
+        ):
+            raise ValueError(
+                "Idempotency-Key must be a string"
+            )
+
+        idempotency_key = idempotency_key.strip()
+
+        if not idempotency_key:
+            raise ValueError(
+                "Idempotency-Key cannot be blank"
+            )
+
+        if len(idempotency_key) > 255:
+            raise ValueError(
+                "Idempotency-Key cannot exceed 255 characters"
+            )
+
+        return idempotency_key
+
+    @staticmethod
     def _from_smallest_unit(
         amount,
         currency: str,
@@ -209,9 +238,16 @@ class StripeGateway(PaymentGatewayBase):
         customer_email: str,
         callback_url: str | None = None,
         metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         reference = self._normalize_reference(
             reference
+        )
+
+        idempotency_key = (
+            self._normalize_idempotency_key(
+                idempotency_key
+            )
         )
 
         currency = self._normalize_currency(
@@ -257,6 +293,11 @@ class StripeGateway(PaymentGatewayBase):
             "receipt_email": customer_email,
             "metadata": payment_metadata,
         }
+
+        if idempotency_key is not None:
+            params["idempotency_key"] = (
+                idempotency_key
+            )
 
         try:
             intent = (
