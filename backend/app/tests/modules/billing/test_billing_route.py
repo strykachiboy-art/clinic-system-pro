@@ -1487,3 +1487,218 @@ def test_mark_overdue_invoices_returns_domain_error(
 
     assert body["success"] is False
     assert body["error"] == "Invalid clinic"
+# ---------------------------------------------------------------------------
+# Idempotency-Key boundary
+# ---------------------------------------------------------------------------
+
+
+def test_create_invoice_forwards_idempotency_key_and_authenticated_user(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+
+    invoice = _invoice_response(
+        invoice_id=500,
+        clinic_id=clinic.id,
+        patient_id=20,
+    )
+
+    captured = {}
+
+    def fake_create_invoice(**kwargs):
+        captured.update(kwargs)
+        return invoice
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.create_invoice",
+        fake_create_invoice,
+    )
+
+    headers = dict(headers)
+    headers["Idempotency-Key"] = " billing-invoice-001 "
+
+    response = client.post(
+        "/api/v1/billing/invoices",
+        headers=headers,
+        json={
+            "patient_id": 20,
+            "items": [
+                {
+                    "description": "Consultation",
+                    "quantity": 1,
+                    "unit_price": "100.00",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+
+    assert captured["idempotency_key"] == (
+        "billing-invoice-001"
+    )
+    assert captured["idempotency_user_id"] == user.id
+    assert captured["actor_user_id"] == user.id
+
+
+def test_create_invoice_rejects_blank_idempotency_key(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    def fail_create_invoice(**kwargs):
+        raise AssertionError(
+            "create_invoice must not run for blank Idempotency-Key"
+        )
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.create_invoice",
+        fail_create_invoice,
+    )
+
+    headers = dict(headers)
+    headers["Idempotency-Key"] = "   "
+
+    response = client.post(
+        "/api/v1/billing/invoices",
+        headers=headers,
+        json={
+            "patient_id": 20,
+            "items": [
+                {
+                    "description": "Consultation",
+                    "quantity": 1,
+                    "unit_price": "100.00",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Idempotency-Key cannot be blank"
+    )
+
+
+def test_record_payment_forwards_idempotency_key_and_authenticated_user(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    user = make_user(
+        clinic=clinic,
+        role=Role.ADMIN,
+    )
+
+    headers = auth_headers_for(user)
+
+    payment = _payment_response(
+        payment_id=500,
+        invoice_id=100,
+    )
+
+    captured = {}
+
+    def fake_record_payment(**kwargs):
+        captured.update(kwargs)
+        return payment
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.record_payment",
+        fake_record_payment,
+    )
+
+    headers = dict(headers)
+    headers["Idempotency-Key"] = " billing-payment-001 "
+
+    response = client.post(
+        "/api/v1/billing/payments",
+        headers=headers,
+        json={
+            "invoice_id": 100,
+            "amount": "50.00",
+            "method": "cash",
+        },
+    )
+
+    assert response.status_code == 201
+
+    assert captured["idempotency_key"] == (
+        "billing-payment-001"
+    )
+    assert captured["idempotency_user_id"] == user.id
+
+
+def test_record_payment_rejects_blank_idempotency_key(
+    app,
+    client,
+    make_user,
+    auth_headers_for,
+    clinic,
+    monkeypatch,
+):
+    headers = _admin_headers(
+        app,
+        make_user,
+        auth_headers_for,
+        clinic,
+    )
+
+    def fail_record_payment(**kwargs):
+        raise AssertionError(
+            "record_payment must not run for blank Idempotency-Key"
+        )
+
+    monkeypatch.setattr(
+        "app.modules.billing.routes.billing_route.record_payment",
+        fail_record_payment,
+    )
+
+    headers = dict(headers)
+    headers["Idempotency-Key"] = "   "
+
+    response = client.post(
+        "/api/v1/billing/payments",
+        headers=headers,
+        json={
+            "invoice_id": 100,
+            "amount": "50.00",
+            "method": "cash",
+        },
+    )
+
+    assert response.status_code == 400
+
+    body = response.get_json()
+
+    assert body["success"] is False
+    assert body["error"] == (
+        "Idempotency-Key cannot be blank"
+    )

@@ -252,6 +252,35 @@ def _domain_error_response(exc):
     )
 
 
+def _read_idempotency_key():
+    raw = request.headers.get(
+        "Idempotency-Key"
+    )
+
+    if raw is None:
+        return None, None
+
+    key = raw.strip()
+
+    if not key:
+        return (
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Idempotency-Key cannot be blank"
+                        ),
+                    }
+                ),
+                400,
+            ),
+        )
+
+    return key, None
+
+
 # ============================================================================
 # Invoice Creation
 # ============================================================================
@@ -273,23 +302,54 @@ def create_invoice_route():
     try:
         clinic_id = _current_clinic_id()
 
-        invoice = create_invoice(
-            clinic_id=clinic_id,
-            patient_id=payload.patient_id,
-            actor_user_id=_current_user().id,
-            appointment_id=payload.appointment_id,
-            due_date=payload.due_date,
-            is_insurance_claim=(
-                payload.is_insurance_claim
-            ),
-            insurance_provider=(
-                payload.insurance_provider
-            ),
-            items=[
-                item.model_dump()
-                for item in payload.items
-            ],
+        idempotency_key, idempotency_error = (
+            _read_idempotency_key()
         )
+
+        if idempotency_error:
+            return idempotency_error
+
+        if idempotency_key is None:
+            invoice = create_invoice(
+                clinic_id=clinic_id,
+                patient_id=payload.patient_id,
+                actor_user_id=_current_user().id,
+                appointment_id=payload.appointment_id,
+                due_date=payload.due_date,
+                is_insurance_claim=(
+                    payload.is_insurance_claim
+                ),
+                insurance_provider=(
+                    payload.insurance_provider
+                ),
+                items=[
+                    item.model_dump()
+                    for item in payload.items
+                ],
+            )
+
+        else:
+            current_user = _current_user()
+
+            invoice = create_invoice(
+                clinic_id=clinic_id,
+                patient_id=payload.patient_id,
+                actor_user_id=current_user.id,
+                appointment_id=payload.appointment_id,
+                due_date=payload.due_date,
+                is_insurance_claim=(
+                    payload.is_insurance_claim
+                ),
+                insurance_provider=(
+                    payload.insurance_provider
+                ),
+                items=[
+                    item.model_dump()
+                    for item in payload.items
+                ],
+                idempotency_key=idempotency_key,
+                idempotency_user_id=current_user.id,
+            )
 
         return (
             jsonify(
@@ -373,17 +433,42 @@ def record_payment_route():
     try:
         clinic_id = _current_clinic_id()
 
-        payment = record_payment(
-            clinic_id=clinic_id,
-            invoice_id=payload.invoice_id,
-            amount=payload.amount,
-            method=payload.method,
-            gateway=payload.gateway,
-            reference=payload.reference,
-            gateway_transaction_id=(
-                payload.gateway_transaction_id
-            ),
+        idempotency_key, idempotency_error = (
+            _read_idempotency_key()
         )
+
+        if idempotency_error:
+            return idempotency_error
+
+        if idempotency_key is None:
+            payment = record_payment(
+                clinic_id=clinic_id,
+                invoice_id=payload.invoice_id,
+                amount=payload.amount,
+                method=payload.method,
+                gateway=payload.gateway,
+                reference=payload.reference,
+                gateway_transaction_id=(
+                    payload.gateway_transaction_id
+                ),
+            )
+
+        else:
+            current_user = _current_user()
+
+            payment = record_payment(
+                clinic_id=clinic_id,
+                invoice_id=payload.invoice_id,
+                amount=payload.amount,
+                method=payload.method,
+                gateway=payload.gateway,
+                reference=payload.reference,
+                gateway_transaction_id=(
+                    payload.gateway_transaction_id
+                ),
+                idempotency_key=idempotency_key,
+                idempotency_user_id=current_user.id,
+            )
 
         return (
             jsonify(

@@ -8,6 +8,9 @@ from app.core.audit.services.audit_service import (
     create_audit_log,
 )
 from app.core.enums.audit_enums import AuditAction
+from app.core.idempotency.services.idempotency_service import (
+    reserve_idempotency_operation,
+)
 from app.core.enums.billing_enums import (
     InvoiceStatus,
     PaymentGateway,
@@ -426,7 +429,58 @@ def create_invoice(
     due_date=None,
     is_insurance_claim=False,
     insurance_provider=None,
+    idempotency_key=None,
+    idempotency_user_id=None,
 ):
+    idempotency_record = None
+
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError(
+                "Idempotency user ID is required"
+            )
+
+        idempotency_record, created = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="billing.invoice.create",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "patient_id": patient_id,
+                "items": items,
+                "appointment_id": appointment_id,
+                "due_date": due_date,
+                "is_insurance_claim": is_insurance_claim,
+                "insurance_provider": insurance_provider,
+            },
+        )
+
+        if not created:
+            if (
+                idempotency_record.entity_type != "Invoice"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency record does not reference a completed invoice"
+                )
+
+            existing_invoice = db.session.get(
+                Invoice,
+                idempotency_record.entity_id,
+            )
+
+            if existing_invoice is None:
+                raise ConflictError(
+                    "Idempotency record references a missing invoice"
+                )
+
+            if existing_invoice.clinic_id != clinic_id:
+                raise ConflictError(
+                    "Idempotency record references another clinic"
+                )
+
+            return existing_invoice
+
     _validate_positive_id(
         clinic_id,
         "Clinic ID",
@@ -574,6 +628,10 @@ def create_invoice(
         },
     )
 
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "Invoice"
+        idempotency_record.entity_id = invoice.id
+
     return invoice
 
 
@@ -680,7 +738,69 @@ def record_payment(
     reference=None,
     gateway=None,
     gateway_transaction_id=None,
+    idempotency_key=None,
+    idempotency_user_id=None,
 ):
+    idempotency_record = None
+
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError(
+                "Idempotency user ID is required"
+            )
+
+        idempotency_record, created = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="billing.payment.record",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "invoice_id": invoice_id,
+                "amount": amount,
+                "method": method,
+                "reference": reference,
+                "gateway": gateway,
+                "gateway_transaction_id": gateway_transaction_id,
+            },
+        )
+
+        if not created:
+            if (
+                idempotency_record.entity_type != "Payment"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency record does not reference a completed payment"
+                )
+
+            existing_payment = db.session.get(
+                Payment,
+                idempotency_record.entity_id,
+            )
+
+            if existing_payment is None:
+                raise ConflictError(
+                    "Idempotency record references a missing payment"
+                )
+
+            existing_invoice = db.session.get(
+                Invoice,
+                existing_payment.invoice_id,
+            )
+
+            if existing_invoice is None:
+                raise ConflictError(
+                    "Idempotency record references a payment "
+                    "with a missing invoice"
+                )
+
+            if existing_invoice.clinic_id != clinic_id:
+                raise ConflictError(
+                    "Idempotency record references another clinic"
+                )
+
+            return existing_payment
+
     _validate_positive_id(
         clinic_id,
         "Clinic ID",
@@ -865,6 +985,10 @@ def record_payment(
             ),
         },
     )
+
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "Payment"
+        idempotency_record.entity_id = payment.id
 
     return payment
 
