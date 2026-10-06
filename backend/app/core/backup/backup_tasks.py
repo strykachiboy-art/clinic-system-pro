@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from typing import Any
 
 from app.core.backup.backup_service import (
@@ -73,7 +74,20 @@ def _verify_backup_result(
                 file_metadata
             ),
         )
+
     except BackupVerificationError as exc:
+        try:
+            shutil.rmtree(
+                backup_path
+            )
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup_exc:
+            raise BackupServiceError(
+                "Scheduled backup verification failed and "
+                f"cleanup failed: {cleanup_exc}"
+            ) from cleanup_exc
+
         raise BackupServiceError(
             f"Scheduled backup verification failed: {exc}"
         ) from exc
