@@ -17,6 +17,12 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.utils.decorators import transactional
 from app.extensions import db
 
+from app.modules.ai.ai_provider_exceptions import (
+    AIProviderError,
+    AIProviderHTTPError,
+    classify_ai_failure,
+)
+
 from app.modules.ai.models.ai_model import AILog
 from app.modules.ai.schemas.ai_response_schema import (
     DrugInteractionResponseSchema,
@@ -357,9 +363,30 @@ def _call_openai(
             ],
         )
 
+    except AIProviderError:
+        raise
+
     except Exception as exc:
-        raise ValidationError(
-            "AI provider request failed"
+        status_code = getattr(
+            exc,
+            "status_code",
+            None,
+        )
+
+        if (
+            isinstance(status_code, int)
+            and not isinstance(status_code, bool)
+            and 100 <= status_code <= 599
+        ):
+            raise AIProviderHTTPError(
+                status_code,
+            ) from exc
+
+        raise AIProviderError(
+            "AI provider request failed",
+            failure_class=classify_ai_failure(
+                exc
+            ),
         ) from exc
 
     if not response.choices:
