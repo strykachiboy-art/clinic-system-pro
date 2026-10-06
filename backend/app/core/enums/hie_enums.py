@@ -22,6 +22,12 @@ class HIESubmissionStatus(str, Enum):
     FAILED = "failed"
 
 
+class HIEFailureClass(str, Enum):
+    RETRYABLE = "retryable"
+    RECONCILIATION_REQUIRED = "reconciliation_required"
+    USER_ACTION_REQUIRED = "user_action_required"
+    FAIL_CLOSED = "fail_closed"
+
 class HIEPurposeOfUse(str, Enum):
     TREATMENT = "treatment"
     PAYMENT = "payment"
