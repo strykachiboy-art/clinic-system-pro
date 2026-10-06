@@ -20,6 +20,7 @@ from app.extensions import db
 from app.modules.ai.ai_provider_exceptions import (
     AIProviderError,
     AIProviderHTTPError,
+    AIProviderResponseError,
     classify_ai_failure,
 )
 
@@ -389,27 +390,58 @@ def _call_openai(
             ),
         ) from exc
 
-    if not response.choices:
-        raise ValidationError(
+    choices = getattr(
+        response,
+        "choices",
+        None,
+    )
+
+    if not choices:
+        raise AIProviderResponseError(
             "AI provider returned no choices"
         )
 
-    content = response.choices[0].message.content
+    try:
+        choice = choices[0]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise AIProviderResponseError(
+            "AI provider returned malformed response"
+        ) from exc
 
-    if not content:
-        raise ValidationError(
+    message = getattr(
+        choice,
+        "message",
+        None,
+    )
+
+    content = getattr(
+        message,
+        "content",
+        None,
+    )
+
+    if content is None or (
+        isinstance(content, str)
+        and not content.strip()
+    ):
+        raise AIProviderResponseError(
             "AI provider returned an empty response"
+        )
+
+    if not isinstance(content, str):
+        raise AIProviderResponseError(
+            "AI provider returned malformed response"
         )
 
     try:
         result = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ValidationError(
+        raise AIProviderResponseError(
             "AI provider returned invalid JSON"
         ) from exc
 
     if not isinstance(result, dict):
-        raise ValidationError(
+        raise AIProviderResponseError(
             "AI provider must return a JSON object"
         )
 
@@ -599,15 +631,20 @@ def _run_feature(
     )
 
     if not isinstance(result, dict):
-        raise ValidationError(
+        raise AIProviderResponseError(
             "AI provider must return a JSON object"
         )
 
     # Validate output.
-    result = _validate_provider_result(
-        feature=feature,
-        result=result,
-    )
+    try:
+        result = _validate_provider_result(
+            feature=feature,
+            result=result,
+        )
+    except ValidationError as exc:
+        raise AIProviderResponseError(
+            str(exc)
+        ) from exc
 
     # Determine risk.
     risk_level = _determine_risk_level(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from app.core.exceptions import DomainError
+from app.core.exceptions import DomainError, ValidationError
 
 
 class AIProviderFailureClass(str, Enum):
@@ -47,6 +47,13 @@ class AIUserInterventionRequiredError(AIProviderError):
 
 class AIFailClosedError(AIProviderError):
     failure_class = AIProviderFailureClass.FAIL_CLOSED
+
+
+class AIProviderResponseError(
+    AIFailClosedError,
+    ValidationError,
+):
+    status_code = 422
 
 
 class AIProviderUnavailableError(AIRetryableError):
