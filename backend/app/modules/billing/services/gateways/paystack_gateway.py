@@ -9,6 +9,8 @@ from typing import Any
 import requests
 
 from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
     PaymentGatewayBase,
 )
 
@@ -207,7 +209,7 @@ class PaystackGateway(PaymentGatewayBase):
                 timeout=30,
             )
         except requests.RequestException as exc:
-            raise RuntimeError(
+            raise GatewayUnknownOutcomeError(
                 "Paystack payment initialization "
                 f"failed: {exc}"
             ) from exc
@@ -215,7 +217,7 @@ class PaystackGateway(PaymentGatewayBase):
         try:
             response_data = response.json()
         except ValueError as exc:
-            raise RuntimeError(
+            raise GatewayUnknownOutcomeError(
                 "Paystack returned an invalid "
                 "response"
             ) from exc
@@ -230,7 +232,7 @@ class PaystackGateway(PaymentGatewayBase):
                 "Paystack payment initialization failed",
             )
 
-            raise RuntimeError(
+            raise GatewayRejectedError(
                 "Paystack payment initialization "
                 f"failed: {message}"
             )

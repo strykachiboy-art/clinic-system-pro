@@ -3,6 +3,13 @@ from decimal import Decimal
 from typing import Any
 
 
+class GatewayRejectedError(RuntimeError):
+    """The payment provider explicitly rejected the request."""
+
+
+class GatewayUnknownOutcomeError(RuntimeError):
+    """The payment provider outcome cannot be known safely."""
+
 class PaymentGatewayBase(ABC):
     @abstractmethod
     def initialize_payment(

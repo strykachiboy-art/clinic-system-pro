@@ -10,6 +10,8 @@ from typing import Any
 import requests
 
 from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
     PaymentGatewayBase,
 )
 
@@ -189,7 +191,7 @@ class FlutterwaveGateway(PaymentGatewayBase):
                 timeout=30,
             )
         except requests.RequestException as exc:
-            raise RuntimeError(
+            raise GatewayUnknownOutcomeError(
                 "Flutterwave payment initialization "
                 f"failed: {exc}"
             ) from exc
@@ -197,7 +199,7 @@ class FlutterwaveGateway(PaymentGatewayBase):
         try:
             response_data = response.json()
         except ValueError as exc:
-            raise RuntimeError(
+            raise GatewayUnknownOutcomeError(
                 "Flutterwave returned an invalid response"
             ) from exc
 
@@ -211,7 +213,7 @@ class FlutterwaveGateway(PaymentGatewayBase):
                 "Flutterwave payment initialization failed",
             )
 
-            raise RuntimeError(
+            raise GatewayRejectedError(
                 "Flutterwave payment initialization "
                 f"failed: {message}"
             )

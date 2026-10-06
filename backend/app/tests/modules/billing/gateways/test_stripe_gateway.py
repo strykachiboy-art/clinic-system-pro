@@ -9,6 +9,10 @@ import stripe
 from app.modules.billing.services.gateways.stripe_gateway import (
     StripeGateway,
 )
+from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
+)
 
 
 @pytest.fixture
@@ -876,4 +880,59 @@ def test_zero_decimal_currency_rejects_fractional_amount(
         gateway._to_smallest_unit(
             Decimal("5000.50"),
             currency,
+        )
+# ---------------------------------------------------------------------------
+# Phase 9 - Gate 4 / Slice 2A
+# Provider outcome classification
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_payment_stripe_error_without_http_status_is_unknown_outcome(
+    gateway,
+    monkeypatch,
+):
+    error = stripe.StripeError(
+        "provider connection failed"
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        Mock(side_effect=error),
+    )
+
+    with pytest.raises(
+        GatewayUnknownOutcomeError,
+        match="Stripe payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="REF-UNKNOWN-001",
+            amount=Decimal("100"),
+            currency="USD",
+            customer_email="user@example.com",
+        )
+
+
+def test_initialize_payment_stripe_client_error_is_known_failure(
+    gateway,
+    monkeypatch,
+):
+    error = stripe.StripeError(
+        "invalid request"
+    )
+    error.http_status = 400
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.stripe_gateway.stripe.PaymentIntent.create",
+        Mock(side_effect=error),
+    )
+
+    with pytest.raises(
+        GatewayRejectedError,
+        match="Stripe payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="REF-REJECTED-001",
+            amount=Decimal("100"),
+            currency="USD",
+            customer_email="user@example.com",
         )

@@ -6,6 +6,8 @@ from typing import Any
 import stripe
 
 from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
     PaymentGatewayBase,
 )
 
@@ -307,7 +309,26 @@ class StripeGateway(PaymentGatewayBase):
                 )
             )
         except stripe.StripeError as exc:
-            raise RuntimeError(
+            http_status = getattr(
+                exc,
+                "http_status",
+                None,
+            )
+
+            if (
+                isinstance(
+                    http_status,
+                    int,
+                )
+                and 400 <= http_status < 500
+                and http_status != 429
+            ):
+                raise GatewayRejectedError(
+                    "Stripe payment initialization "
+                    f"failed: {exc}"
+                ) from exc
+
+            raise GatewayUnknownOutcomeError(
                 "Stripe payment initialization "
                 f"failed: {exc}"
             ) from exc

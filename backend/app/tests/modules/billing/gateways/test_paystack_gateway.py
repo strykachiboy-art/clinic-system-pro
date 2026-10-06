@@ -10,6 +10,10 @@ import requests
 from app.modules.billing.services.gateways.paystack_gateway import (
     PaystackGateway,
 )
+from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
+)
 
 
 @pytest.fixture
@@ -164,3 +168,61 @@ def test_initialize_payment_maps_transport_failure_to_runtime_error(
         )
 
     mock_post.assert_called_once()
+
+# ---------------------------------------------------------------------------
+# Phase 9 - Gate 4 / Slice 2A
+# Provider outcome classification
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_payment_transport_failure_is_unknown_outcome(
+    gateway,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.paystack_gateway.requests.post",
+        Mock(
+            side_effect=requests.Timeout(
+                "provider timeout"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        GatewayUnknownOutcomeError,
+        match="Paystack payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="PAY-UNKNOWN-001",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )
+
+
+def test_initialize_payment_provider_rejection_is_known_failure(
+    gateway,
+    monkeypatch,
+):
+    response = Mock()
+    response.ok = False
+    response.json.return_value = {
+        "status": False,
+        "message": "Duplicate transaction",
+    }
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.paystack_gateway.requests.post",
+        Mock(return_value=response),
+    )
+
+    with pytest.raises(
+        GatewayRejectedError,
+        match="Paystack payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="PAY-REJECTED-002",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )

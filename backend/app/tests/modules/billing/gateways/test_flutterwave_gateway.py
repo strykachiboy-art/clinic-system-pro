@@ -9,6 +9,10 @@ import requests
 from app.modules.billing.services.gateways.flutterwave_gateway import (
     FlutterwaveGateway,
 )
+from app.modules.billing.services.gateways.base_gateway import (
+    GatewayRejectedError,
+    GatewayUnknownOutcomeError,
+)
 
 
 @pytest.fixture
@@ -197,3 +201,62 @@ def test_initialize_payment_maps_transport_failure_to_runtime_error(
         )
 
     mock_post.assert_called_once()
+
+# ---------------------------------------------------------------------------
+# Phase 9 - Gate 4 / Slice 2A
+# Provider outcome classification
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_payment_transport_failure_is_unknown_outcome(
+    gateway,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.flutterwave_gateway.requests.post",
+        Mock(
+            side_effect=requests.Timeout(
+                "provider timeout"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        GatewayUnknownOutcomeError,
+        match="Flutterwave payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="FLW-UNKNOWN-001",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )
+
+
+def test_initialize_payment_provider_rejection_is_known_failure(
+    gateway,
+    monkeypatch,
+):
+    response = FakeResponse(
+        ok=False,
+        json_data={
+            "status": "error",
+            "message": "Transaction already exists",
+        },
+    )
+
+    monkeypatch.setattr(
+        "app.modules.billing.services.gateways.flutterwave_gateway.requests.post",
+        Mock(return_value=response),
+    )
+
+    with pytest.raises(
+        GatewayRejectedError,
+        match="Flutterwave payment initialization failed",
+    ):
+        gateway.initialize_payment(
+            reference="FLW-REJECTED-002",
+            amount=Decimal("100"),
+            currency="NGN",
+            customer_email="patient@example.com",
+        )
