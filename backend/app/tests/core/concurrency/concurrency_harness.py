@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -51,6 +51,72 @@ class PostgresConcurrencyHarness:
 
     def close(self) -> None:
         self.engine.dispose()
+
+    def run_flask(
+        self,
+        app,
+        operation: Callable[[int], T],
+    ) -> list[ConcurrencyWorkerResult[T]]:
+        from app.extensions import db
+
+        barrier = Barrier(self.workers)
+
+        def worker(worker_index: int) -> ConcurrencyWorkerResult[T]:
+            backend_pid: int | None = None
+
+            with app.app_context():
+                try:
+                    backend_pid = int(
+                        db.session.execute(
+                            text("SELECT pg_backend_pid()")
+                        ).scalar_one()
+                    )
+
+                    barrier.wait(
+                        timeout=self.barrier_timeout_seconds
+                    )
+
+                    value = operation(
+                        worker_index
+                    )
+
+                    return ConcurrencyWorkerResult(
+                        worker_index=worker_index,
+                        backend_pid=backend_pid,
+                        value=value,
+                        error=None,
+                    )
+
+                except BaseException as exc:
+                    try:
+                        barrier.abort()
+                    except Exception:
+                        pass
+
+                    return ConcurrencyWorkerResult(
+                        worker_index=worker_index,
+                        backend_pid=backend_pid,
+                        value=None,
+                        error=exc,
+                    )
+
+                finally:
+                    try:
+                        db.session.rollback()
+                    finally:
+                        db.session.remove()
+
+        with ThreadPoolExecutor(
+            max_workers=self.workers
+        ) as executor:
+            results = list(
+                executor.map(
+                    worker,
+                    range(self.workers),
+                )
+            )
+
+        return results
 
     def run(
         self,
