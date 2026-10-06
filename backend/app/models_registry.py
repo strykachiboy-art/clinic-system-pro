@@ -1,6 +1,8 @@
 # Core
 from app.core.auth.user.models.user_model import User
 from app.core.audit.models.audit_model import AuditLog
+from app.core.idempotency.models.idempotency_model import IdempotencyRecord
+
 
 # Clinic
 from app.modules.clinic.models.clinic_model import Clinic
@@ -165,6 +167,8 @@ __all__ = [
     # Core
     "User",
     "AuditLog",
+    "IdempotencyRecord",
+
 
     # Clinic
     "Clinic",

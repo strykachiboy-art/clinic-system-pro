@@ -393,6 +393,20 @@ def start():
     if isinstance(payload, tuple):
         return payload
 
+    idempotency_key = request.headers.get("Idempotency-Key")
+    idempotency_user_id = None
+
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+
+        if not idempotency_key:
+            return jsonify({
+                "success": False,
+                "error": "Idempotency-Key cannot be blank",
+            }), 400
+
+        idempotency_user_id = _get_current_user().id
+
     clinic_id, error = _get_authenticated_clinic_id()
 
     if error is not None:
@@ -401,6 +415,8 @@ def start():
     consultation = start_consultation(
         clinic_id=clinic_id,
         **payload.model_dump(),
+        idempotency_key=idempotency_key,
+        idempotency_user_id=idempotency_user_id,
     )
 
     return jsonify({

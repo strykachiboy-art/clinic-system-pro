@@ -5,6 +5,9 @@ from sqlalchemy import or_
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
+from app.core.idempotency.services.idempotency_service import (
+    reserve_idempotency_operation,
+)
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.appointment_enums import AppointmentStatus
 from app.core.enums.consultation_enums import (
@@ -343,7 +346,57 @@ def start_consultation(
     template_id: int | None = None,
     chief_complaint: str | None = None,
     symptoms: str | None = None,
+    idempotency_key: str | None = None,
+    idempotency_user_id: int | None = None,
 ) -> Consultation:
+    idempotency_record = None
+
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError(
+                "Authenticated user is required for Idempotency-Key"
+            )
+
+        idempotency_record, is_new = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="consultation.start",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "patient_id": patient_id,
+                "staff_id": staff_id,
+                "appointment_id": appointment_id,
+                "consultation_type": consultation_type,
+                "template_id": template_id,
+                "chief_complaint": chief_complaint,
+                "symptoms": symptoms,
+            },
+        )
+
+        if not is_new:
+            if (
+                idempotency_record.entity_type != "Consultation"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency operation has no reconciled Consultation"
+                )
+
+            existing_consultation = db.session.get(
+                Consultation,
+                idempotency_record.entity_id,
+            )
+
+            if (
+                existing_consultation is None
+                or existing_consultation.clinic_id != clinic_id
+            ):
+                raise ConflictError(
+                    "Idempotency operation points to an invalid Consultation"
+                )
+
+            return existing_consultation
+
     clinic, patient, staff = (
         _validate_consultation_participants(
             clinic_id=clinic_id,
@@ -401,6 +454,10 @@ def start_consultation(
             ),
         },
     )
+
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "Consultation"
+        idempotency_record.entity_id = consultation.id
 
     return consultation
 
