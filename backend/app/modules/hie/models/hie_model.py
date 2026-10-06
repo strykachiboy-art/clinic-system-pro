@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint
 
 from app.core.enums.hie_enums import (
+    HIEFailureClass,
     HIEIntegrationStatus,
     HIEOperation,
     HIESubmissionStatus,
@@ -152,6 +153,15 @@ class HIESubmission(db.Model):
         db.Enum(HIESubmissionStatus),
         nullable=False,
         default=HIESubmissionStatus.PENDING,
+        index=True,
+    )
+
+    failure_class = db.Column(
+        db.Enum(
+            HIEFailureClass,
+            name="hiefailureclass",
+        ),
+        nullable=True,
         index=True,
     )
 

@@ -19,6 +19,7 @@ from app.modules.hie.models.hie_model import (
     HIESubmission,
 )
 from app.modules.hie.providers.base import HIEProvider
+from app.modules.hie.providers.exceptions import classify_hie_failure
 from app.modules.hie.providers.registry import get_provider
 from app.modules.patient.models.patient_model import Patient
 
@@ -516,6 +517,7 @@ def _mark_submission_success(
     submission.status = (
         HIESubmissionStatus.SUCCESS
     )
+    submission.failure_class = None
     submission.response_data = response
     submission.status_code = response.get(
         "status_code"
@@ -551,6 +553,9 @@ def _mark_submission_failure(
         HIESubmissionStatus.FAILED
     )
 
+    submission.failure_class = classify_hie_failure(
+        error
+    )
     submission.error_message = (
         "HIE provider operation failed"
     )

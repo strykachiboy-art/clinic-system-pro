@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from app.core.enums.hie_enums import (
+    HIEFailureClass,
     HIEIntegrationStatus,
     HIEOperation,
     HIEPurposeOfUse,
@@ -277,6 +278,7 @@ class HIESubmissionResponseSchema(BaseModel):
     patient_id: Optional[int]
     operation: HIEOperation
     status: HIESubmissionStatus
+    failure_class: Optional[HIEFailureClass]
     external_reference: Optional[str]
     request_data: Optional[dict[str, Any]]
     response_data: Optional[dict[str, Any]]

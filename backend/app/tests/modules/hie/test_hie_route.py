@@ -49,6 +49,7 @@ def make_submission(
     patient_id=1,
     operation=HIEOperation.PATIENT_SUBMISSION,
     status=HIESubmissionStatus.PENDING,
+    failure_class=None,
     external_reference=None,
     request_data=None,
     response_data=None,
@@ -66,6 +67,7 @@ def make_submission(
         patient_id=patient_id,
         operation=operation,
         status=status,
+        failure_class=failure_class,
         external_reference=external_reference,
         request_data=request_data,
         response_data=response_data,
@@ -1333,6 +1335,7 @@ def test_get_submissions_serializes_submission_fields(
         HIESubmissionStatus.SUCCESS.value
     )
     assert item["external_reference"] == "EXT-55"
+    assert item["failure_class"] is None
     assert item["request_data"] == {
         "patient_identifier": "MRN-55",
     }
