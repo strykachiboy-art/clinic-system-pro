@@ -7,6 +7,9 @@ from sqlalchemy import func, select
 
 from app.core.audit.services.audit_service import create_audit_log
 from app.core.enums.audit_enums import AuditAction
+from app.core.idempotency.services.idempotency_service import (
+    reserve_idempotency_operation,
+)
 from app.core.enums.clinic_enums import ClinicStatus
 from app.core.enums.prescription_enums import (
     DrugInteractionSeverity,
@@ -815,6 +818,8 @@ def create_prescription(
     consultation_id: int | None = None,
     expires_at: datetime | None = None,
     notes: str | None = None,
+    idempotency_key: str | None = None,
+    idempotency_user_id: int | None = None,
 ) -> tuple[Prescription, list[dict]]:
     """
     Create a prescription for a patient.
@@ -825,6 +830,52 @@ def create_prescription(
     Returns:
         (prescription, interaction_warnings)
     """
+    idempotency_record = None
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError("Idempotency user ID is required")
+
+        idempotency_record, created = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="prescription.create",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "patient_id": patient_id,
+                "prescribed_by_id": prescribed_by_id,
+                "items": items,
+                "consultation_id": consultation_id,
+                "expires_at": expires_at,
+                "notes": notes,
+            },
+        )
+
+        if not created:
+            if (
+                idempotency_record.entity_type != "Prescription"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency record does not reference a completed prescription"
+                )
+
+            existing_prescription = db.session.get(
+                Prescription,
+                idempotency_record.entity_id,
+            )
+
+            if existing_prescription is None:
+                raise ConflictError(
+                    "Idempotency record references a missing prescription"
+                )
+
+            if existing_prescription.clinic_id != clinic_id:
+                raise ConflictError(
+                    "Idempotency record references another clinic"
+                )
+
+            return existing_prescription, []
+
     _ensure_clinic_active(
         clinic_id
     )
@@ -927,7 +978,7 @@ def create_prescription(
             f"Prescription created for patient "
             f"{patient_id} ({len(items)} item(s))"
             + (
-                f" — {len(warnings)} interaction warning(s)"
+                f" â€” {len(warnings)} interaction warning(s)"
                 if warnings
                 else ""
             )
@@ -946,6 +997,10 @@ def create_prescription(
             ),
         },
     )
+
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "Prescription"
+        idempotency_record.entity_id = prescription.id
 
     return prescription, warnings
 

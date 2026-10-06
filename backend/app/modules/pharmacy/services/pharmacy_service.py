@@ -7,6 +7,9 @@ from sqlalchemy import func, or_, select
 from app.extensions import db
 
 from app.core.audit.services.audit_service import create_audit_log
+from app.core.idempotency.services.idempotency_service import (
+    reserve_idempotency_operation,
+)
 from app.core.enums.audit_enums import AuditAction
 from app.core.enums.pharmacy_enums import DispenseStatus
 from app.core.enums.role_enums import Role
@@ -1524,6 +1527,8 @@ def create_dispense_record(
     dispensed_by_id: int,
     items: list[dict],
     notes: str | None = None,
+    idempotency_key: str | None = None,
+    idempotency_user_id: int | None = None,
 ) -> DispenseRecord:
     _validate_positive_id(
         clinic_id,
@@ -1538,10 +1543,64 @@ def create_dispense_record(
         "dispensed_by_id",
     )
 
+    idempotency_record = None
+    if idempotency_key is not None:
+        if idempotency_user_id is None:
+            raise ValidationError("Idempotency user ID is required")
+
+        idempotency_record, created = reserve_idempotency_operation(
+            clinic_id=clinic_id,
+            user_id=idempotency_user_id,
+            operation="pharmacy.dispense",
+            idempotency_key=idempotency_key,
+            request_payload={
+                "prescription_id": prescription_id,
+                "dispensed_by_id": dispensed_by_id,
+                "items": items,
+                "notes": notes,
+            },
+        )
+
+        if not created:
+            if (
+                idempotency_record.entity_type != "DispenseRecord"
+                or idempotency_record.entity_id is None
+            ):
+                raise ConflictError(
+                    "Idempotency record does not reference a completed dispense"
+                )
+
+            existing_dispense = db.session.get(
+                DispenseRecord,
+                idempotency_record.entity_id,
+            )
+
+            if existing_dispense is None:
+                raise ConflictError(
+                    "Idempotency record references a missing dispense"
+                )
+
+            existing_prescription = db.session.get(
+                Prescription,
+                existing_dispense.prescription_id,
+            )
+
+            if existing_prescription is None:
+                raise ConflictError(
+                    "Idempotency record references a dispense "
+                    "with a missing prescription"
+                )
+
+            if existing_prescription.clinic_id != clinic_id:
+                raise ConflictError(
+                    "Idempotency record references another clinic"
+                )
+
+            return existing_dispense
+
     ensure_clinic_active(
         clinic_id
     )
-
     if not isinstance(items, list):
         raise ValidationError(
             "Dispensing items must be a list"
@@ -1958,6 +2017,10 @@ def create_dispense_record(
             ],
         },
     )
+
+    if idempotency_record is not None:
+        idempotency_record.entity_type = "DispenseRecord"
+        idempotency_record.entity_id = dispense_record.id
 
     return dispense_record
 

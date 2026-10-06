@@ -517,14 +517,40 @@ def create_dispense_record_route():
         _json_body()
     )
 
-    record = create_dispense_record(
-        clinic_id=clinic_id,
-        prescription_id=payload.prescription_id,
-        dispensed_by_id=staff.id,
-        items=payload.to_service_items(),
-        notes=payload.notes,
+    idempotency_key = request.headers.get(
+        "Idempotency-Key"
     )
 
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+
+        if not idempotency_key:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Idempotency-Key cannot be blank",
+                }
+            ), 400
+
+    dispense_kwargs = {
+        "clinic_id": clinic_id,
+        "prescription_id": payload.prescription_id,
+        "dispensed_by_id": staff.id,
+        "items": payload.to_service_items(),
+        "notes": payload.notes,
+    }
+
+    if idempotency_key is not None:
+        dispense_kwargs.update(
+            {
+                "idempotency_key": idempotency_key,
+                "idempotency_user_id": user.id,
+            }
+        )
+
+    record = create_dispense_record(
+        **dispense_kwargs
+    )
     return jsonify(
         {
             "success": True,

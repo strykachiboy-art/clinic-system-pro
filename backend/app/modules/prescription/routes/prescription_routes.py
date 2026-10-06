@@ -244,19 +244,45 @@ def create_prescription_route():
         _json_body()
     )
 
-    prescription, warnings = create_prescription(
-        clinic_id=clinic_id,
-        patient_id=payload.patient_id,
-        prescribed_by_id=staff.id,
-        items=[
+    idempotency_key = request.headers.get(
+        "Idempotency-Key"
+    )
+
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+
+        if not idempotency_key:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Idempotency-Key cannot be blank",
+                }
+            ), 400
+
+    prescription_kwargs = {
+        "clinic_id": clinic_id,
+        "patient_id": payload.patient_id,
+        "prescribed_by_id": staff.id,
+        "items": [
             item.model_dump()
             for item in payload.items
         ],
-        consultation_id=payload.consultation_id,
-        expires_at=payload.expires_at,
-        notes=payload.notes,
-    )
+        "consultation_id": payload.consultation_id,
+        "expires_at": payload.expires_at,
+        "notes": payload.notes,
+    }
 
+    if idempotency_key is not None:
+        prescription_kwargs.update(
+            {
+                "idempotency_key": idempotency_key,
+                "idempotency_user_id": staff.user_id,
+            }
+        )
+
+    prescription, warnings = create_prescription(
+        **prescription_kwargs
+    )
     return jsonify(
         {
             "success": True,
