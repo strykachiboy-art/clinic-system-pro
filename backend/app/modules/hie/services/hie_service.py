@@ -19,7 +19,11 @@ from app.modules.hie.models.hie_model import (
     HIESubmission,
 )
 from app.modules.hie.providers.base import HIEProvider
-from app.modules.hie.providers.exceptions import classify_hie_failure
+from app.modules.hie.providers.exceptions import (
+    HIEFailClosedError,
+    HIEProviderHTTPError,
+    classify_hie_failure,
+)
 from app.modules.hie.providers.registry import get_provider
 from app.modules.patient.models.patient_model import Patient
 
@@ -486,6 +490,69 @@ def _create_submission(
     return submission.id
 
 
+def _validate_provider_response(
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(
+        response,
+        dict,
+    ):
+        raise HIEFailClosedError(
+            "HIE provider response must be an object"
+        )
+
+    if not response:
+        raise HIEFailClosedError(
+            "HIE provider response was empty"
+        )
+
+    status_code = response.get(
+        "status_code"
+    )
+
+    if (
+        isinstance(status_code, bool)
+        or not isinstance(status_code, int)
+        or status_code < 100
+        or status_code > 599
+    ):
+        raise HIEFailClosedError(
+            "HIE provider response status_code is invalid"
+        )
+
+    if not 200 <= status_code <= 299:
+        raise HIEProviderHTTPError(
+            status_code
+        )
+
+    payload_fields = {
+        key: value
+        for key, value in response.items()
+        if key != "status_code"
+    }
+
+    if not payload_fields:
+        raise HIEFailClosedError(
+            "HIE provider response payload is missing"
+        )
+
+    external_reference = response.get(
+        "external_reference"
+    )
+
+    if external_reference is not None and (
+        not isinstance(
+            external_reference,
+            str,
+        )
+        or not external_reference.strip()
+    ):
+        raise HIEFailClosedError(
+            "HIE provider response external_reference is invalid"
+        )
+
+    return response
+
 @transactional
 def _mark_submission_success(
     submission_id: int,
@@ -506,13 +573,14 @@ def _mark_submission_success(
             f"HIE submission {submission_id} not found"
         )
 
-    if not isinstance(
-        response,
-        dict,
-    ):
-        raise ValidationError(
-            "HIE provider response must be an object"
+    try:
+        _validate_provider_response(
+            response
         )
+    except HIEFailClosedError as exc:
+        raise ValidationError(
+            str(exc)
+        ) from exc
 
     submission.status = (
         HIESubmissionStatus.SUCCESS
@@ -634,6 +702,10 @@ def submit_patient(
         response = provider.submit_patient(
             payload
         )
+        _validate_provider_response(
+            response
+        )
+
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
@@ -698,6 +770,10 @@ def submit_clinical_data(
         response = provider.submit_clinical_data(
             payload
         )
+        _validate_provider_response(
+            response
+        )
+
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
@@ -762,6 +838,10 @@ def submit_clinical_document(
         response = provider.submit_clinical_document(
             payload
         )
+        _validate_provider_response(
+            response
+        )
+
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
@@ -832,6 +912,10 @@ def query_patient(
         response = provider.query_patient(
             patient_identifier
         )
+        _validate_provider_response(
+            response
+        )
+
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
@@ -915,6 +999,10 @@ def query_clinical_data(
             patient_identifier,
             filters,
         )
+        _validate_provider_response(
+            response
+        )
+
     except Exception as exc:
         _mark_submission_failure(
             submission_id,
