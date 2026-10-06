@@ -211,6 +211,28 @@ def _get_model_version() -> Optional[str]:
     return model_version or None
 
 
+
+def _get_provider_timeout_seconds() -> float:
+    timeout_seconds = current_app.config.get(
+        "AI_PROVIDER_TIMEOUT_SECONDS",
+        30,
+    )
+
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(
+            timeout_seconds,
+            (int, float),
+        )
+        or timeout_seconds <= 0
+    ):
+        raise ValidationError(
+            "AI_PROVIDER_TIMEOUT_SECONDS must be a positive number"
+        )
+
+    return float(timeout_seconds)
+
+
 def _get_input_context_version() -> str:
     version = current_app.config.get(
         "AI_INPUT_CONTEXT_VERSION",
@@ -322,6 +344,7 @@ def _call_openai(
         ) from exc
 
     model = _get_model_name()
+    timeout_seconds = _get_provider_timeout_seconds()
 
     provider_payload = _build_provider_payload(
         feature=feature,
@@ -335,6 +358,7 @@ def _call_openai(
 
         response = client.chat.completions.create(
             model=model,
+            timeout=timeout_seconds,
             response_format={
                 "type": "json_object",
             },

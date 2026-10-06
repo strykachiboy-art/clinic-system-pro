@@ -172,6 +172,7 @@ class Config:
     )
 
     OPENAI_MODEL = "gpt-4o-mini"
+    AI_PROVIDER_TIMEOUT_SECONDS = 30
 
     AI_PROVIDER = "openai"
 
