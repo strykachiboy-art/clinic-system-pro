@@ -158,6 +158,7 @@ class PaystackGateway(PaymentGatewayBase):
         customer_email: str,
         callback_url: str | None = None,
         metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         reference = self._normalize_reference(
             reference

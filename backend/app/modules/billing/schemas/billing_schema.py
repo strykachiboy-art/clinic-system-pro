@@ -263,6 +263,100 @@ class OutstandingInvoiceQuery(BaseModel):
 # ============================================================================
 
 
+class InitializePaymentRequest(BaseModel):
+    invoice_id: StrictInt = Field(
+        ...,
+        gt=0,
+    )
+
+    amount: Decimal = Field(
+        ...,
+        gt=0,
+    )
+
+    method: PaymentMethod
+
+    gateway: PaymentGateway
+
+    currency: str = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+    )
+
+    reference: str | None = Field(
+        default=None,
+        max_length=MAX_PAYMENT_REFERENCE_LENGTH,
+    )
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(
+        cls,
+        value: Decimal,
+    ) -> Decimal:
+        if not value.is_finite():
+            raise ValueError(
+                "Amount must be a finite value"
+            )
+
+        if value <= 0:
+            raise ValueError(
+                "Amount must be greater than zero"
+            )
+
+        return value
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip().upper()
+
+        if len(value) != 3 or not value.isalpha():
+            raise ValueError(
+                "Currency must be a 3-letter code"
+            )
+
+        return value
+
+    @field_validator("reference")
+    @classmethod
+    def normalize_reference(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_gateway_data(self):
+        electronic_methods = {
+            PaymentMethod.CARD,
+            PaymentMethod.BANK_TRANSFER,
+            PaymentMethod.MOBILE_MONEY,
+        }
+
+        if self.method not in electronic_methods:
+            raise ValueError(
+                "Gateway orchestration requires "
+                "an electronic payment method"
+            )
+
+        return self
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+
 class RecordPaymentRequest(BaseModel):
     invoice_id: StrictInt = Field(
         ...,

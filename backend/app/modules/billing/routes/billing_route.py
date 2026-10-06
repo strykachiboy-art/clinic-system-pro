@@ -14,6 +14,7 @@ from app.core.utils.decorators import get_current_clinic_id, role_required
 
 from app.modules.billing.schemas.billing_schema import (
     CreateInvoiceRequest,
+    InitializePaymentRequest,
     InvoiceResponse,
     OutstandingInvoiceQuery,
     OutstandingInvoiceResponse,
@@ -26,6 +27,9 @@ from app.modules.billing.services.billing_service import (
     get_outstanding_invoices,
     mark_overdue_invoices,
     record_payment,
+)
+from app.modules.billing.services.payment_orchestration_service import (
+    orchestrate_payment,
 )
 
 
@@ -406,6 +410,115 @@ def get_outstanding_invoices_route():
                 }
             ),
             200,
+        )
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
+
+
+# ============================================================================
+# Payment Orchestration
+# ============================================================================
+
+
+@billing_bp.route(
+    "/payments/initialize",
+    methods=["POST"],
+)
+@role_required(Role.ADMIN)
+def initialize_payment_route():
+    payload, error = _payload(
+        InitializePaymentRequest
+    )
+
+    if error:
+        return error
+
+    try:
+        clinic_id = _current_clinic_id()
+
+        idempotency_key, idempotency_error = (
+            _read_idempotency_key()
+        )
+
+        if idempotency_error:
+            return idempotency_error
+
+        if idempotency_key is None:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Idempotency-Key is required "
+                            "for gateway payment "
+                            "orchestration"
+                        ),
+                    }
+                ),
+                400,
+            )
+
+        current_user = _current_user()
+
+        result = orchestrate_payment(
+            clinic_id=clinic_id,
+            invoice_id=payload.invoice_id,
+            amount=payload.amount,
+            method=payload.method,
+            gateway=payload.gateway,
+            currency=payload.currency,
+            reference=payload.reference,
+            idempotency_key=idempotency_key,
+            idempotency_user_id=current_user.id,
+            actor_user_id=current_user.id,
+        )
+
+        payment = result["payment"]
+        outcome = result["outcome"]
+
+        data = {
+            "payment": _serialize_response(
+                PaymentResponse,
+                payment,
+            ),
+            "outcome": outcome,
+        }
+
+        if outcome == "failed":
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            payment.failure_reason
+                            or "Payment failed"
+                        ),
+                        "data": data,
+                    }
+                ),
+                422,
+            )
+
+        if outcome == "pending":
+            return (
+                jsonify(
+                    {
+                        "success": True,
+                        "data": data,
+                    }
+                ),
+                202,
+            )
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "data": data,
+                }
+            ),
+            201,
         )
 
     except DomainError as exc:
