@@ -32,6 +32,10 @@ from app.modules.billing.services.payment_orchestration_service import (
     orchestrate_payment,
 )
 
+from app.modules.billing.services.payment_webhook_service import (
+    process_payment_webhook,
+)
+
 
 billing_bp = Blueprint(
     "billing",
@@ -526,6 +530,44 @@ def initialize_payment_route():
 
 
 # ============================================================================
+# ============================================================================
+# Payment Provider Webhooks
+# ============================================================================
+
+
+@billing_bp.route(
+    "/webhooks/<int:clinic_id>/<gateway>",
+    methods=["POST"],
+)
+def payment_webhook_route(
+    clinic_id,
+    gateway,
+):
+    payload = request.get_data(
+        cache=True,
+    )
+
+    try:
+        result = process_payment_webhook(
+            clinic_id=clinic_id,
+            gateway=gateway,
+            payload=payload,
+            headers=dict(request.headers),
+        )
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "data": result,
+                }
+            ),
+            200,
+        )
+
+    except DomainError as exc:
+        return _domain_error_response(exc)
+
 # Payment Recording
 # ============================================================================
 

@@ -64,6 +64,7 @@ from app.modules.billing.models.billing_model import (
     Invoice,
     InvoiceItem,
     Payment,
+    PaymentWebhookEvent,
 )
 
 # Ward
@@ -213,6 +214,7 @@ __all__ = [
     "Invoice",
     "InvoiceItem",
     "Payment",
+    "PaymentWebhookEvent",
 
     # Ward
     "Ward",

@@ -353,3 +353,86 @@ class Payment(db.Model):
             f"{self.amount} - "
             f"{self.status.value}>"
         )
+class PaymentWebhookEvent(db.Model):
+    __tablename__ = "payment_webhook_events"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "clinic_id",
+            "gateway",
+            "event_id",
+            name="uq_payment_webhook_events_scope",
+        ),
+        db.Index(
+            "ix_payment_webhook_events_clinic_created",
+            "clinic_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    clinic_id = db.Column(
+        db.Integer,
+        db.ForeignKey("clinics.id"),
+        nullable=False,
+        index=True,
+    )
+
+    payment_id = db.Column(
+        db.Integer,
+        db.ForeignKey("payments.id"),
+        nullable=True,
+        index=True,
+    )
+
+    gateway = db.Column(
+        db.String(32),
+        nullable=False,
+        index=True,
+    )
+
+    event_id = db.Column(
+        db.String(255),
+        nullable=False,
+    )
+
+    event_type = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    reference = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    transaction_id = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+        index=True,
+    )
+
+    clinic = db.relationship(
+        "Clinic",
+    )
+
+    payment = db.relationship(
+        "Payment",
+    )
+
+    def __repr__(self):
+        return (
+            f"<PaymentWebhookEvent "
+            f"{self.gateway}:{self.event_id}>"
+        )
