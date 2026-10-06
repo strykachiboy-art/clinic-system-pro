@@ -273,26 +273,59 @@ def write_artifact(
             parents=True,
             exist_ok=True,
         )
+    except OSError as exc:
+        raise BackupStorageError(
+            f"Unable to create backup artifact directory: {exc}"
+        ) from exc
 
-        mode = (
-            "wb"
-            if overwrite
-            else "xb"
+    temporary_path = (
+        parent
+        / (
+            f".{target.name}."
+            f"{uuid4().hex}.tmp"
         )
+    )
 
-        with target.open(
-            mode
+    try:
+        with temporary_path.open(
+            "xb"
         ) as handle:
             handle.write(
                 data
             )
 
+        if (
+            target.exists()
+            and not overwrite
+        ):
+            raise BackupStorageError(
+                "Backup artifact already exists"
+            )
+
+        temporary_path.replace(
+            target
+        )
+
+    except BackupStorageError:
+        temporary_path.unlink(
+            missing_ok=True
+        )
+        raise
+
     except FileExistsError as exc:
+        temporary_path.unlink(
+            missing_ok=True
+        )
+
         raise BackupStorageError(
             "Backup artifact already exists"
         ) from exc
 
     except OSError as exc:
+        temporary_path.unlink(
+            missing_ok=True
+        )
+
         raise BackupStorageError(
             f"Unable to write backup artifact: {exc}"
         ) from exc
