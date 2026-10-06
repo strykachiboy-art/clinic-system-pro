@@ -2578,7 +2578,6 @@ def list_reports(
 # Report generation
 # ============================================================================
 
-@transactional
 def generate_report(
     requester_user_id: int,
     clinic_id: int,
@@ -2723,9 +2722,13 @@ def generate_report(
             user_id=requester_user_id,
         )
 
+        db.session.commit()
+
         return report
 
     except Exception:
+        db.session.rollback()
+
         _delete_report_file(
             file_path
         )
