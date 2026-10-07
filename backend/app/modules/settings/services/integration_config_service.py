@@ -536,5 +536,8 @@ def get_integration_credentials(
         )
 
     return decrypt_credentials(
-        integration.encrypted_credentials
+        integration.encrypted_credentials,
+        encryption_key_version=(
+            integration.encryption_key_version
+        ),
     )

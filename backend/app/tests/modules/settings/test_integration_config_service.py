@@ -144,7 +144,10 @@ def test_create_integration_config_encrypts_credentials(app):
         )
 
         decrypted = decrypt_credentials(
-            integration.encrypted_credentials
+            integration.encrypted_credentials,
+            encryption_key_version=(
+                integration.encryption_key_version
+            ),
         )
 
         assert decrypted == credentials
@@ -971,7 +974,10 @@ def test_update_integration_credentials_encrypts_new_credentials(
         )
 
         decrypted = decrypt_credentials(
-            updated.encrypted_credentials
+            updated.encrypted_credentials,
+            encryption_key_version=(
+                updated.encryption_key_version
+            ),
         )
 
         assert decrypted == {
@@ -1057,7 +1063,10 @@ def test_rotate_integration_credentials(app):
         )
 
         decrypted = decrypt_credentials(
-            rotated.encrypted_credentials
+            rotated.encrypted_credentials,
+            encryption_key_version=(
+                rotated.encryption_key_version
+            ),
         )
 
         assert decrypted == {

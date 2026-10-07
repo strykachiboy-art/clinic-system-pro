@@ -195,6 +195,11 @@ class Config:
         "1",
     )
 
+    INTEGRATION_ENCRYPTION_LEGACY_KEYS = os.environ.get(
+        "INTEGRATION_ENCRYPTION_LEGACY_KEYS",
+        "{}",
+    )
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

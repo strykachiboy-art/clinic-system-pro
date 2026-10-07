@@ -27,7 +27,10 @@ def test_encrypt_decrypt_credentials_round_trip(app):
         assert "sk_test_secret" not in encrypted
         assert "pk_test_public" not in encrypted
 
-        assert decrypt_credentials(encrypted) == credentials
+        assert decrypt_credentials(
+            encrypted,
+            encryption_key_version=1,
+        ) == credentials
 
 
 def test_generate_encryption_key_produces_valid_fernet_key():
@@ -67,9 +70,10 @@ def test_decrypt_credentials_fails_closed_when_key_is_missing(
             ValidationError,
             match="INTEGRATION_ENCRYPTION_KEY is not configured",
         ):
-            decrypt_credentials("synthetic-ciphertext")
-
-
+            decrypt_credentials(
+                "synthetic-ciphertext",
+                encryption_key_version=1,
+            )
 def test_decrypt_credentials_fails_closed_when_key_is_invalid(
     app,
 ):
@@ -82,9 +86,10 @@ def test_decrypt_credentials_fails_closed_when_key_is_invalid(
             ValidationError,
             match="INTEGRATION_ENCRYPTION_KEY is invalid",
         ):
-            decrypt_credentials("synthetic-ciphertext")
-
-
+            decrypt_credentials(
+                "synthetic-ciphertext",
+                encryption_key_version=1,
+            )
 def test_decrypt_credentials_fails_closed_with_wrong_key(
     app,
 ):
@@ -104,9 +109,10 @@ def test_decrypt_credentials_fails_closed_with_wrong_key(
             ValidationError,
             match="Unable to decrypt integration credentials",
         ):
-            decrypt_credentials(encrypted)
-
-
+            decrypt_credentials(
+                encrypted,
+                encryption_key_version=1,
+            )
 def test_decrypt_credentials_fails_closed_with_corrupted_ciphertext(
     app,
 ):
@@ -127,9 +133,10 @@ def test_decrypt_credentials_fails_closed_with_corrupted_ciphertext(
             ValidationError,
             match="Unable to decrypt integration credentials",
         ):
-            decrypt_credentials(corrupted)
-
-
+            decrypt_credentials(
+                corrupted,
+                encryption_key_version=1,
+            )
 def test_decrypt_credentials_rejects_non_object_plaintext(
     app,
 ):
@@ -150,4 +157,7 @@ def test_decrypt_credentials_rejects_non_object_plaintext(
             ValidationError,
             match="Decrypted credentials must be an object",
         ):
-            decrypt_credentials(encrypted)
+            decrypt_credentials(
+                encrypted,
+                encryption_key_version=1,
+            )

@@ -22,6 +22,10 @@ _ENCRYPTION_KEY_VERSION_CONFIG = (
     "INTEGRATION_ENCRYPTION_KEY_VERSION"
 )
 
+_ENCRYPTION_LEGACY_KEYS_CONFIG = (
+    "INTEGRATION_ENCRYPTION_LEGACY_KEYS"
+)
+
 
 def _get_fernet() -> Fernet:
     """
@@ -55,23 +59,19 @@ def _get_fernet() -> Fernet:
         ) from exc
 
 
-def get_encryption_key_version() -> int:
-    """
-    Return the active integration encryption-key version.
-    """
-
-    version = current_app.config.get(
-        _ENCRYPTION_KEY_VERSION_CONFIG
-    )
-
+def _parse_encryption_key_version(
+    version: Any,
+    *,
+    field_name: str,
+) -> int:
     if version is None:
         raise ValidationError(
-            "INTEGRATION_ENCRYPTION_KEY_VERSION is not configured"
+            f"{field_name} is not configured"
         )
 
     if isinstance(version, bool):
         raise ValidationError(
-            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+            f"{field_name} is invalid"
         )
 
     if isinstance(version, int):
@@ -82,25 +82,131 @@ def get_encryption_key_version() -> int:
 
         if not raw_version or not raw_version.isdigit():
             raise ValidationError(
-                "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+                f"{field_name} is invalid"
             )
 
         parsed_version = int(raw_version)
 
     else:
         raise ValidationError(
-            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+            f"{field_name} is invalid"
         )
 
     if parsed_version < 1:
         raise ValidationError(
-            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+            f"{field_name} is invalid"
         )
 
     return parsed_version
 
 
+def get_encryption_key_version() -> int:
+    """
+    Return the active integration encryption-key version.
+    """
+
+    version = current_app.config.get(
+        _ENCRYPTION_KEY_VERSION_CONFIG
+    )
+
+    return _parse_encryption_key_version(
+        version,
+        field_name=_ENCRYPTION_KEY_VERSION_CONFIG,
+    )
+
+
+def _get_legacy_fernet(
+    encryption_key_version: int,
+) -> Fernet:
+    configured_keys = current_app.config.get(
+        _ENCRYPTION_LEGACY_KEYS_CONFIG,
+        "{}",
+    )
+
+    if isinstance(configured_keys, str):
+        raw_config = configured_keys.strip()
+
+        if not raw_config:
+            legacy_keys = {}
+
+        else:
+            try:
+                legacy_keys = json.loads(
+                    raw_config
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise ValidationError(
+                    "INTEGRATION_ENCRYPTION_LEGACY_KEYS is invalid"
+                ) from exc
+
+    elif isinstance(configured_keys, dict):
+        legacy_keys = configured_keys
+
+    else:
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_LEGACY_KEYS is invalid"
+        )
+
+    if not isinstance(legacy_keys, dict):
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_LEGACY_KEYS is invalid"
+        )
+
+    key = legacy_keys.get(
+        str(encryption_key_version)
+    )
+
+    if key is None:
+        raise ValidationError(
+            f"Encryption key version "
+            f"{encryption_key_version} is not configured"
+        )
+
+    if not isinstance(key, str) or not key:
+        raise ValidationError(
+            f"Encryption key version "
+            f"{encryption_key_version} is invalid"
+        )
+
+    try:
+        return Fernet(
+            key.encode("utf-8")
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise ValidationError(
+            f"Encryption key version "
+            f"{encryption_key_version} is invalid"
+        ) from exc
+
+
+def _get_fernet_for_version(
+    encryption_key_version: int,
+) -> Fernet:
+    requested_version = _parse_encryption_key_version(
+        encryption_key_version,
+        field_name="Encryption key version",
+    )
+
+    active_version = get_encryption_key_version()
+
+    if requested_version == active_version:
+        return _get_fernet()
+
+    return _get_legacy_fernet(
+        requested_version
+    )
+
+
 def encrypt_credentials(
+
     credentials: dict[str, Any],
 ) -> str:
     """
@@ -150,6 +256,7 @@ def encrypt_credentials(
 
 def decrypt_credentials(
     encrypted_credentials: str,
+    encryption_key_version: int,
 ) -> dict[str, Any]:
     """
     Decrypt integration credentials.
@@ -168,7 +275,9 @@ def decrypt_credentials(
             "Encrypted credentials are invalid"
         )
 
-    fernet = _get_fernet()
+    fernet = _get_fernet_for_version(
+        encryption_key_version
+    )
 
     try:
         decrypted = fernet.decrypt(
