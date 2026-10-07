@@ -124,16 +124,46 @@ def init_extensions(app):
             "message_queue"
         ] = redis_url
 
+    previous_message_queue = (
+        getattr(
+            socketio,
+            "server_options",
+            {},
+        ).get("message_queue")
+    )
+    current_message_queue = (
+        socketio_options.get("message_queue")
+    )
+
+    if (
+        previous_message_queue
+        != current_message_queue
+    ):
+        socketio.server = None
+        socketio.server_options = {}
+
     socketio.init_app(
         app,
         **socketio_options,
     )
 
+    broker_url = app.config.get(
+        "CELERY_BROKER_URL",
+        redis_url,
+    )
+
+    previous_broker_url = celery.conf.get(
+        "broker_url"
+    )
+
+    if previous_broker_url != broker_url:
+        from kombu import pools
+
+        pools.reset()
+        celery.amqp._producer_pool = None
+
     celery.conf.update(
-        broker_url=app.config.get(
-            "CELERY_BROKER_URL",
-            redis_url,
-        ),
+        broker_url=broker_url,
         result_backend=app.config.get(
             "CELERY_RESULT_BACKEND",
             redis_url,
