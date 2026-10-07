@@ -22,6 +22,10 @@ class IntegrationConfig(db.Model):
             "credentials_version >= 1",
             name="ck_integration_config_credentials_version_positive",
         ),
+        db.CheckConstraint(
+            "encryption_key_version >= 1",
+            name="ck_integration_config_encryption_key_version_positive",
+        ),
     )
 
     id = db.Column(
@@ -74,6 +78,14 @@ class IntegrationConfig(db.Model):
 
     # Increment when credentials are rotated.
     credentials_version = db.Column(
+        db.Integer,
+        nullable=False,
+        default=1,
+    )
+
+    # Version of the cryptographic key generation used
+    # for the currently stored encrypted credentials.
+    encryption_key_version = db.Column(
         db.Integer,
         nullable=False,
         default=1,

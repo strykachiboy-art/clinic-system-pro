@@ -18,6 +18,10 @@ _ENCRYPTION_KEY_CONFIG = (
     "INTEGRATION_ENCRYPTION_KEY"
 )
 
+_ENCRYPTION_KEY_VERSION_CONFIG = (
+    "INTEGRATION_ENCRYPTION_KEY_VERSION"
+)
+
 
 def _get_fernet() -> Fernet:
     """
@@ -49,6 +53,51 @@ def _get_fernet() -> Fernet:
         raise ValidationError(
             "INTEGRATION_ENCRYPTION_KEY is invalid"
         ) from exc
+
+
+def get_encryption_key_version() -> int:
+    """
+    Return the active integration encryption-key version.
+    """
+
+    version = current_app.config.get(
+        _ENCRYPTION_KEY_VERSION_CONFIG
+    )
+
+    if version is None:
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_KEY_VERSION is not configured"
+        )
+
+    if isinstance(version, bool):
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+        )
+
+    if isinstance(version, int):
+        parsed_version = version
+
+    elif isinstance(version, str):
+        raw_version = version.strip()
+
+        if not raw_version or not raw_version.isdigit():
+            raise ValidationError(
+                "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+            )
+
+        parsed_version = int(raw_version)
+
+    else:
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+        )
+
+    if parsed_version < 1:
+        raise ValidationError(
+            "INTEGRATION_ENCRYPTION_KEY_VERSION is invalid"
+        )
+
+    return parsed_version
 
 
 def encrypt_credentials(
@@ -87,6 +136,8 @@ def encrypt_credentials(
         raise ValidationError(
             "Credentials contain unsupported values"
         ) from exc
+
+    get_encryption_key_version()
 
     fernet = _get_fernet()
 

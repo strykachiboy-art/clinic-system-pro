@@ -190,6 +190,11 @@ class Config:
         "INTEGRATION_ENCRYPTION_KEY"
     )
 
+    INTEGRATION_ENCRYPTION_KEY_VERSION = os.environ.get(
+        "INTEGRATION_ENCRYPTION_KEY_VERSION",
+        "1",
+    )
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

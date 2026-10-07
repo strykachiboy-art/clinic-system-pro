@@ -14,6 +14,7 @@ from app.core.exceptions import (
 from app.core.security.encryption import (
     decrypt_credentials,
     encrypt_credentials,
+    get_encryption_key_version,
 )
 from app.core.utils.decorators import transactional
 from app.extensions import db
@@ -175,6 +176,10 @@ def create_integration_config(
         payload.configuration
     )
 
+    encryption_key_version = (
+        get_encryption_key_version()
+    )
+
     encrypted_credentials = encrypt_credentials(
         payload.credentials
     )
@@ -186,6 +191,7 @@ def create_integration_config(
         configuration=payload.configuration,
         encrypted_credentials=encrypted_credentials,
         credentials_version=1,
+        encryption_key_version=encryption_key_version,
         last_rotated_at=_utcnow(),
     )
 
@@ -361,6 +367,10 @@ def update_integration_config(
             credentials
         )
 
+        integration.encryption_key_version = (
+            get_encryption_key_version()
+        )
+
         integration.encrypted_credentials = (
             encrypt_credentials(credentials)
         )
@@ -402,6 +412,10 @@ def rotate_integration_credentials(
 
     _ensure_credentials_are_supported(
         credentials
+    )
+
+    integration.encryption_key_version = (
+        get_encryption_key_version()
     )
 
     integration.encrypted_credentials = (
