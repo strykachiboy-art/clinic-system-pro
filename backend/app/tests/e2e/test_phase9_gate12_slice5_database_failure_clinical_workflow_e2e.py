@@ -14,7 +14,7 @@ from flask_jwt_extended import create_access_token
 from sqlalchemy import create_engine, delete, select
 
 import app.core.utils.decorators as auth_decorators
-from app import create_app
+from app import create_app, extensions
 from app import models_registry  # noqa: F401
 from app.core.audit.models.audit_model import AuditLog
 from app.core.enums.appointment_enums import (
@@ -29,7 +29,7 @@ from app.core.enums.consultation_enums import (
 from app.core.enums.patient_enums import BloodType
 from app.core.enums.role_enums import Role
 from app.core.enums.staff_enums import StaffStatus
-from app.extensions import db
+from app.extensions import celery, db, socketio
 from app.modules.appointment.models.appointment_model import (
     Appointment,
 )
@@ -294,7 +294,7 @@ def _clinical_state(
     }
 
 
-def test_gate12_slice5_real_database_failure_recovers_one_clinical_consultation():
+def test_gate12_slice5_real_database_failure_recovers_one_clinical_consultation(monkeypatch):
     database_url = os.environ.get(
         "PHASE9_TEST_DATABASE_URL"
     )
@@ -336,6 +336,29 @@ def test_gate12_slice5_real_database_failure_recovers_one_clinical_consultation(
     os.environ["INTEGRATION_ENCRYPTION_KEY"] = (
         Fernet.generate_key().decode()
     )
+
+    original_redis_client = extensions.redis_client
+    original_socketio_server = socketio.server
+    original_socketio_server_options = dict(
+        getattr(socketio, "server_options", {})
+    )
+    original_celery_config = {
+        "broker_url": celery.conf.get("broker_url"),
+        "result_backend": celery.conf.get("result_backend"),
+        "task_acks_late": celery.conf.get(
+            "task_acks_late"
+        ),
+        "task_reject_on_worker_lost": celery.conf.get(
+            "task_reject_on_worker_lost"
+        ),
+        "worker_prefetch_multiplier": celery.conf.get(
+            "worker_prefetch_multiplier"
+        ),
+        "timezone": celery.conf.get("timezone"),
+        "beat_schedule": celery.conf.get(
+            "beat_schedule"
+        ),
+    }
 
     app = create_app("production")
     clinic_id = None
@@ -459,16 +482,22 @@ def test_gate12_slice5_real_database_failure_recovers_one_clinical_consultation(
                 g.current_clinic_id = clinic_id
                 g._auth_context_loaded = True
 
-            auth_decorators._load_auth_context = (
-                bypass_auth_context
+            monkeypatch.setattr(
+                auth_decorators,
+                "_load_auth_context",
+                bypass_auth_context,
             )
 
-            consultation_route._get_current_user = (
-                lambda: auth_principal
+            monkeypatch.setattr(
+                consultation_route,
+                "_get_current_user",
+                lambda: auth_principal,
             )
 
-            consultation_route._get_authenticated_clinic_id = (
-                lambda: (clinic_id, None)
+            monkeypatch.setattr(
+                consultation_route,
+                "_get_authenticated_clinic_id",
+                lambda: (clinic_id, None),
             )
 
             operation_key = (
@@ -669,4 +698,17 @@ def test_gate12_slice5_real_database_failure_recovers_one_clinical_consultation(
             pytest.fail(
                 "GATE12_S5_CLEANUP_FAILED="
                 f"{cleanup_error!r}"
+            )
+        finally:
+            extensions.redis_client = (
+                original_redis_client
+            )
+            socketio.server = (
+                original_socketio_server
+            )
+            socketio.server_options = (
+                original_socketio_server_options
+            )
+            celery.conf.update(
+                original_celery_config
             )
