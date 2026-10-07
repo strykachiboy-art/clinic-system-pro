@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
@@ -427,6 +427,94 @@ def rotate_integration_credentials(
 
     return integration
 
+
+@transactional
+def migrate_all_integration_credentials_to_active_key() -> dict[str, int]:
+    """
+    Re-encrypt integration credentials stored under retired
+    encryption-key versions using the active encryption key.
+
+    The migration is atomic. Every migrated row is flushed
+    inside the same transaction, so any later failure rolls
+    back all changes.
+
+    Provider credential versioning is intentionally unchanged:
+    this operation changes encryption material only.
+    """
+
+    active_version = get_encryption_key_version()
+
+    statement = (
+        select(IntegrationConfig)
+        .order_by(
+            IntegrationConfig.id.asc(),
+        )
+        .with_for_update()
+    )
+
+    integrations = list(
+        db.session.execute(
+            statement
+        ).scalars()
+    )
+
+    inspected = 0
+    migrated = 0
+    already_current = 0
+    skipped_missing_credentials = 0
+
+    for integration in integrations:
+        inspected += 1
+
+        if not integration.encrypted_credentials:
+            skipped_missing_credentials += 1
+            continue
+
+        if integration.encryption_key_version == active_version:
+            already_current += 1
+            continue
+
+        credentials = decrypt_credentials(
+            integration.encrypted_credentials,
+            encryption_key_version=(
+                integration.encryption_key_version
+            ),
+        )
+
+        reencrypted_credentials = encrypt_credentials(
+            credentials
+        )
+
+        verified_credentials = decrypt_credentials(
+            reencrypted_credentials,
+            encryption_key_version=active_version,
+        )
+
+        if verified_credentials != credentials:
+            raise ValidationError(
+                "Integration credential key migration "
+                "verification failed"
+            )
+
+        integration.encrypted_credentials = (
+            reencrypted_credentials
+        )
+
+        integration.encryption_key_version = (
+            active_version
+        )
+
+        db.session.flush()
+        migrated += 1
+
+    return {
+        "inspected": inspected,
+        "migrated": migrated,
+        "already_current": already_current,
+        "skipped_missing_credentials": (
+            skipped_missing_credentials
+        ),
+    }
 
 @transactional
 def enable_integration_config(
