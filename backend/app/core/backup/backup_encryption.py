@@ -44,6 +44,28 @@ def _get_key() -> bytes:
             "BACKUP_ENCRYPTION_KEY must decode to exactly 32 bytes."
         )
 
+    integration_encoded = current_app.config.get(
+        "INTEGRATION_ENCRYPTION_KEY"
+    )
+
+    if integration_encoded:
+        try:
+            integration_key = (
+                base64.urlsafe_b64decode(
+                    str(
+                        integration_encoded
+                    ).strip().encode("ascii")
+                )
+            )
+        except Exception:
+            integration_key = None
+
+        if integration_key == key:
+            raise RuntimeError(
+                "BACKUP_ENCRYPTION_KEY must be distinct from "
+                "INTEGRATION_ENCRYPTION_KEY."
+            )
+
     return key
 
 
