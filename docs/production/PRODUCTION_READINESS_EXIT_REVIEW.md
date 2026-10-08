@@ -393,23 +393,30 @@ and recovery hardening, followed by encryption/data-protection gates.
 
 Current verified evidence:
 
-- resilience-all: ``66 passed in 95.74s``
-- Gate 11 focused regression: ``11 tests in 133.72s``
-- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
-- encryption regression: ``131 passed in 139.23s``
-- current migration head: ``c8e4f1a9d2b7``
+- final full backend regression: `7,811 passed in 7,971.67s (2:12:51)`,
+  `0 failed`, `0 errors`
+- concurrency verification: `7 passed in 65.92s`
+- resilience-all: `66 passed in 95.74s`
+- Gate 11 focused regression: `11 tests in 133.72s`
+- backend E2E after lifecycle hardening: `50 passed in 252.32s`
+- encryption regression: `131 passed in 139.23s`
+- current migration head: `c8e4f1a9d2b7`
 
 Gate 12 failure-injection slices 1 through 5 are locked:
 
-- remote clinic: ``8d43deb``
-- pharmacy: ``12e62e1``
-- payment timeout: ``b183795``
-- worker notification: ``8fd5281``
-- database failure: ``2ff03476d5a9f223b152b5cef857bf0d691c4f``
+- remote clinic: `8d43deb`
+- pharmacy: `12e62e1`
+- payment timeout: `b183795`
+- worker notification: `8fd5281`
+- database failure: `2ff03476d5a9f223b152b5cef857bf0d691c4f`
 
 Encryption gates 7.1 through 7.6 are locked after focused verification.
 
-The remaining broad verification gate is the final full backend regression.
-Backend completion should not be claimed before that regression and its final review.
+The final full backend regression is now GREEN and reconciled as the broad
+completion evidence for the current backend development boundary.
+
+Backend current development boundary: **GREEN / VERIFIED / LOCKED**.
+
+The next engineering track is Phase 10 - Flutter Foundation.
 
 Actual production operation remains unexecuted.

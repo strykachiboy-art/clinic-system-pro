@@ -91,13 +91,18 @@ Gate 11 focused regression: ``11 tests in 133.72s``
 
 Backend E2E after lifecycle hardening: ``50 passed in 252.32s``
 
-## Remaining Verification Gate
+## Final Backend Verification
 
-The remaining broad verification step is the final full backend regression.
+Final full backend regression: `7,811 passed in 7,971.67s (2:12:51)`
+with `0 failed` and `0 errors`.
 
-Backend completion for the current development boundary must not be claimed
-until that regression passes and the final evidence is reconciled.
+Concurrency verification: `7 passed in 65.92s` using the disposable
+PostgreSQL concurrency environment on `127.0.0.1:55434`.
 
+Backend current development boundary: **GREEN / VERIFIED / LOCKED**.
+
+This regression is the broad completion evidence for the current backend
+development boundary.
 ## Production Boundary
 
 The current repository state is VERIFIED engineering evidence.

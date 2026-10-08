@@ -11,7 +11,15 @@ Current focused evidence:
 - encryption regression: ``131 passed in 139.23s``
 - Gate 11 focused regression: ``11 tests in 133.72s``
 
-The final full backend regression remains the broad completion gate.
+Final full backend regression: `7,811 passed in 7,971.67s (2:12:51)`
+with `0 failed` and `0 errors`.
+
+Concurrency verification: `7 passed in 65.92s`.
+
+Backend current development boundary: **GREEN / VERIFIED / LOCKED**.
+
+The final full backend regression is now the completed broad verification
+evidence for the current backend development boundary.
 
 # CLINIC SYSTEM PRO v5
 
@@ -19,8 +27,8 @@ The final full backend regression remains the broad completion gate.
 
 **Owner:** Stryka
 **Primary Framework:** pytest
-**Application Stack:** Flask · SQLAlchemy 2.x · PostgreSQL · Redis · Celery · Socket.IO · JWT · Google OAuth · Pydantic v2 · Alembic
-**Load / Resilience Tooling:** pytest · Locust · dedicated resilience runners
+**Application Stack:** Flask Â· SQLAlchemy 2.x Â· PostgreSQL Â· Redis Â· Celery Â· Socket.IO Â· JWT Â· Google OAuth Â· Pydantic v2 Â· Alembic
+**Load / Resilience Tooling:** pytest Â· Locust Â· dedicated resilience runners
 
 ---
 
@@ -213,13 +221,13 @@ Where the database isolation harness is used, the lifecycle is:
 
 ```text
 CREATE APP CONTEXT
-    ↓
+    â†“
 CREATE TABLES IN SQLITE :memory:
-    ↓
+    â†“
 RUN TEST
-    ↓
+    â†“
 ROLLBACK / REMOVE SESSION
-      ↓
+      â†“
 DROP TABLES
 ```
 
@@ -430,27 +438,27 @@ Typical areas include:
 
 ```text
 app/tests/
-├── core/
-│   ├── observability/
-│   └── ...
-├── modules/
-│   ├── auth/
-│   ├── patient/
-│   ├── appointment/
-│   ├── consultation/
-│   ├── lab/
-│   ├── pharmacy/
-│   ├── prescription/
-│   ├── inventory/
-│   ├── billing/
-│   ├── ward/
-│   ├── ambulance/
-│   ├── hie/
-│   ├── ai/
-│   ├── reports/
-│   ├── notifications/
-│   └── ...
-└── ...
+â”œâ”€â”€ core/
+â”‚   â”œâ”€â”€ observability/
+â”‚   â””â”€â”€ ...
+â”œâ”€â”€ modules/
+â”‚   â”œâ”€â”€ auth/
+â”‚   â”œâ”€â”€ patient/
+â”‚   â”œâ”€â”€ appointment/
+â”‚   â”œâ”€â”€ consultation/
+â”‚   â”œâ”€â”€ lab/
+â”‚   â”œâ”€â”€ pharmacy/
+â”‚   â”œâ”€â”€ prescription/
+â”‚   â”œâ”€â”€ inventory/
+â”‚   â”œâ”€â”€ billing/
+â”‚   â”œâ”€â”€ ward/
+â”‚   â”œâ”€â”€ ambulance/
+â”‚   â”œâ”€â”€ hie/
+â”‚   â”œâ”€â”€ ai/
+â”‚   â”œâ”€â”€ reports/
+â”‚   â”œâ”€â”€ notifications/
+â”‚   â””â”€â”€ ...
+â””â”€â”€ ...
 ```
 
 The exact directory structure may evolve with the application architecture.
@@ -463,7 +471,7 @@ The invariant is that tests should remain discoverable by architectural responsi
 
 Clinic System Pro v5 uses explicit verification gates.
 
-### Phase 1 — Core Architecture / Security Foundation
+### Phase 1 â€” Core Architecture / Security Foundation
 
 Verification included:
 
@@ -479,7 +487,7 @@ Verification included:
 
 ---
 
-### Phase 2 — Feature Hardening
+### Phase 2 â€” Feature Hardening
 
 Verification included the completed application modules and their associated:
 
@@ -491,7 +499,7 @@ Verification included the completed application modules and their associated:
 
 ---
 
-### Phase 3 — Resilience
+### Phase 3 â€” Resilience
 
 The resilience phase established controlled verification for:
 
@@ -515,7 +523,7 @@ This is a **historical full-suite verification snapshot**, not a permanent asser
 
 ---
 
-### Phase 4 — Observability / Operations
+### Phase 4 â€” Observability / Operations
 
 Phase 4 is formally closed.
 
@@ -552,7 +560,7 @@ Verified areas include:
 
 ---
 
-### Historical Phase 5 — Production Readiness
+### Historical Phase 5 â€” Production Readiness
 
 Phase 5 is the next verification gate.
 
@@ -647,15 +655,15 @@ The project therefore uses:
 
 ```text
 Focused Tests
-      ↓
+      â†“
 Feature / Module Verification
-      ↓
+      â†“
 Phase Verification
-      ↓
+      â†“
 Resilience / Operational Verification
-      ↓
+      â†“
 Full Regression Suite
-      ↓
+      â†“
 Production Readiness Gate
 ```
 
@@ -669,17 +677,17 @@ The expected process is:
 
 ```text
 FAIL
- ↓
+ â†“
 REPRODUCE
- ↓
+ â†“
 CLASSIFY
- ↓
+ â†“
 FIX
- ↓
+ â†“
 RUN FOCUSED SUITE
- ↓
+ â†“
 RUN RELATED REGRESSION
- ↓
+ â†“
 UPDATE VERIFICATION EVIDENCE
 ```
 
@@ -742,12 +750,15 @@ Recorded test results are time-specific evidence and must always be interpreted 
 
 Older phase test counts in this document are historical snapshots.
 
-Current focused evidence:
+Current verified evidence:
 
-- resilience-all: ``66 passed in 95.74s``
-- Gate 11 focused regression: ``11 tests in 133.72s``
-- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
-- encryption regression: ``131 passed in 139.23s``
+- final full backend regression: `7,811 passed in 7,971.67s (2:12:51)`,
+  `0 failed`, `0 errors`
+- concurrency verification: `7 passed in 65.92s`
+- resilience-all: `66 passed in 95.74s`
+- Gate 11 focused regression: `11 tests in 133.72s`
+- backend E2E after lifecycle hardening: `50 passed in 252.32s`
+- encryption regression: `131 passed in 139.23s`
 
 Phase 9 resilience verification covers controlled dependency failure, unknown
 outcomes, idempotency, provider/storage failure, worker failure, and recovery.
@@ -756,7 +767,6 @@ Encryption verification covers integration credential encryption and key version
 encrypted backup artifacts, separate backup-key domains, encrypted restore, recovery,
 and cryptographic failure/retry behavior.
 
-The final full backend regression remains outstanding.
+The current backend development boundary is **GREEN / VERIFIED / LOCKED**.
 
-Backend completion for the current development boundary will be declared only after
-that regression passes and the resulting evidence is reconciled into the documentation.
+The next engineering track is Phase 10 - Flutter Foundation.
