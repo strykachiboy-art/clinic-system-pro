@@ -10,6 +10,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from flask import current_app
+
+from app.core.backup.backup_encryption import (
+    encrypt_backup_artifact,
+)
 from sqlalchemy.engine import URL, make_url
 
 
@@ -34,6 +38,7 @@ class DatabaseBackupResult:
     backup_size_bytes: int
     backup_sha256: str
     format: str
+    encrypted: bool
     migration_revision: str | None
     success: bool
 
@@ -287,9 +292,27 @@ def backup_database(
         f"{final_path.name}.partial"
     )
 
+    encrypted_staging_path = final_path.with_name(
+        f"{final_path.name}.encrypted"
+    )
+
     if partial_path.exists():
         _cleanup_partial(
             partial_path
+        )
+
+    if encrypted_staging_path.exists():
+        _cleanup_partial(
+            encrypted_staging_path
+        )
+
+    encrypted_partial_path = encrypted_staging_path.with_name(
+        f"{encrypted_staging_path.name}.partial"
+    )
+
+    if encrypted_partial_path.exists():
+        _cleanup_partial(
+            encrypted_partial_path
         )
 
     command = _build_command(
@@ -392,17 +415,80 @@ def backup_database(
         )
 
     try:
-        partial_path.replace(
-            final_path
+        encrypt_backup_artifact(
+            partial_path,
+            encrypted_staging_path,
         )
-    except OSError as exc:
+    except Exception as exc:
         _cleanup_partial(
             partial_path
         )
 
+        _cleanup_partial(
+            encrypted_staging_path
+        )
+
+        _cleanup_partial(
+            encrypted_partial_path
+        )
+
         raise DatabaseBackupError(
-            "Unable to finalize database backup"
+            "Unable to encrypt database backup"
         ) from exc
+
+    _cleanup_partial(
+        partial_path
+    )
+
+    if partial_path.exists():
+        _cleanup_partial(
+            encrypted_staging_path
+        )
+
+        _cleanup_partial(
+            encrypted_partial_path
+        )
+
+        raise DatabaseBackupError(
+            "Unable to remove plaintext database backup artifact"
+        )
+
+    try:
+        encrypted_staging_path.replace(
+            final_path
+        )
+    except OSError as exc:
+        _cleanup_partial(
+            encrypted_staging_path
+        )
+
+        _cleanup_partial(
+            encrypted_partial_path
+        )
+
+        raise DatabaseBackupError(
+            "Unable to finalize encrypted database backup"
+        ) from exc
+
+    try:
+        backup_size = final_path.stat().st_size
+    except OSError as exc:
+        _cleanup_partial(
+            final_path
+        )
+
+        raise DatabaseBackupError(
+            "Unable to inspect encrypted backup artifact"
+        ) from exc
+
+    if backup_size <= 0:
+        _cleanup_partial(
+            final_path
+        )
+
+        raise DatabaseBackupError(
+            "Encrypted backup artifact is empty"
+        )
 
     try:
         checksum = _checksum_file(
@@ -431,6 +517,7 @@ def backup_database(
         backup_size_bytes=backup_size,
         backup_sha256=checksum,
         format=DEFAULT_PG_DUMP_FORMAT,
+        encrypted=True,
         migration_revision=(
             migration_revision
         ),
