@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,10 @@ from uuid import uuid4
 
 from flask import current_app
 from sqlalchemy.engine import make_url
+
+from app.core.backup.backup_encryption import (
+    decrypt_backup_artifact,
+)
 
 from app.core.backup.backup_storage import (
     BackupStorageError,
@@ -473,99 +478,156 @@ def _restore_database(
             "Database backup checksum mismatch"
         )
 
-    url = _get_database_url(
-        database_url
-    )
-
-    executable = _get_pg_restore_path(
-        pg_restore_path
-    )
-
-    timeout = _get_timeout_seconds(
-        timeout_seconds
-    )
-
-    safe_url = url.set(
-        password=None
-    ).render_as_string(
-        hide_password=False
-    )
-
-    env = dict()
-
-    import os
-
-    env.update(
-        os.environ
-    )
-
-    if url.password is not None:
-        env["PGPASSWORD"] = (
-            url.password
-        )
-
-    command = [
-        executable,
-        "--clean",
-        "--if-exists",
-        "--exit-on-error",
-        "--single-transaction",
-        "--dbname",
-        safe_url,
-        str(
-            database_path
-        ),
-    ]
+    temporary_restore_directory = None
+    restore_database_path = database_path
 
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RestoreError(
-            "pg_restore timed out"
-        ) from exc
-    except OSError as exc:
-        raise RestoreError(
-            "Unable to execute pg_restore"
-        ) from exc
-
-    if completed.returncode != 0:
-        stderr = (
-            completed.stderr.strip()
+        encrypted = database_metadata.get(
+            "encrypted",
+            False,
         )
 
-        if stderr:
+        if encrypted is True:
+            try:
+                temporary_restore_directory = Path(
+                    tempfile.mkdtemp(
+                        prefix="clinic-system-backup-restore-"
+                    )
+                )
+
+                restore_database_path = (
+                    temporary_restore_directory
+                    / "database.dump"
+                )
+
+                decrypt_backup_artifact(
+                    database_path,
+                    restore_database_path,
+                )
+
+                if not restore_database_path.is_file():
+                    raise RestoreError(
+                        "Encrypted database restore artifact was not created"
+                    )
+
+                if restore_database_path.stat().st_size <= 0:
+                    raise RestoreError(
+                        "Encrypted database restore artifact is empty"
+                    )
+
+            except RestoreError:
+                raise
+
+            except Exception as exc:
+                raise RestoreError(
+                    "Unable to decrypt database backup"
+                ) from exc
+
+        elif encrypted is not False:
             raise RestoreError(
-                f"pg_restore failed: {stderr}"
+                "Invalid database encryption metadata"
             )
 
-        raise RestoreError(
-            "pg_restore failed"
+        url = _get_database_url(
+            database_url
         )
 
-    return DatabaseRestoreResult(
-        success=True,
-        backup_path=str(
-            database_path
-        ),
-        database_name=(
-            url.database
-        ),
-        database_host=(
-            url.host
-        ),
-        database_port=(
-            url.port
-        ),
-    )
+        executable = _get_pg_restore_path(
+            pg_restore_path
+        )
+
+        timeout = _get_timeout_seconds(
+            timeout_seconds
+        )
+
+        safe_url = url.set(
+            password=None
+        ).render_as_string(
+            hide_password=False
+        )
+
+        env = dict()
+
+        import os
+
+        env.update(
+            os.environ
+        )
+
+        if url.password is not None:
+            env["PGPASSWORD"] = (
+                url.password
+            )
+
+        command = [
+            executable,
+            "--clean",
+            "--if-exists",
+            "--exit-on-error",
+            "--single-transaction",
+            "--dbname",
+            safe_url,
+            str(
+                restore_database_path
+            ),
+        ]
+
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RestoreError(
+                "pg_restore timed out"
+            ) from exc
+        except OSError as exc:
+            raise RestoreError(
+                "Unable to execute pg_restore"
+            ) from exc
+
+        if completed.returncode != 0:
+            stderr = (
+                completed.stderr.strip()
+            )
+
+            if stderr:
+                raise RestoreError(
+                    f"pg_restore failed: {stderr}"
+                )
+
+            raise RestoreError(
+                "pg_restore failed"
+            )
+
+        return DatabaseRestoreResult(
+            success=True,
+            backup_path=str(
+                database_path
+            ),
+            database_name=(
+                url.database
+            ),
+            database_host=(
+                url.host
+            ),
+            database_port=(
+                url.port
+            ),
+        )
+
+    finally:
+        if temporary_restore_directory is not None:
+            shutil.rmtree(
+                temporary_restore_directory,
+                ignore_errors=True,
+            )
 
 
 def _load_manifest(

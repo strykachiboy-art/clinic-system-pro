@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -7,11 +8,34 @@ from unittest.mock import Mock
 
 import pytest
 
+from app.core.backup.backup_encryption import (
+    encrypt_backup_artifact,
+)
+
 from app.core.backup.restore_service import (
     RestoreError,
     restore_full_backup,
 )
 
+
+def _backup_key() -> str:
+    return base64.urlsafe_b64encode(
+        b"b" * 32
+    ).decode("ascii")
+
+
+@pytest.fixture(autouse=True)
+def _backup_encryption_context(app):
+    app.config["BACKUP_ENCRYPTION_KEY"] = _backup_key()
+    app.config["BACKUP_ENCRYPTION_KEY_VERSION"] = "1"
+    app.config["INTEGRATION_ENCRYPTION_KEY"] = (
+        base64.urlsafe_b64encode(
+            b"i" * 32
+        ).decode("ascii")
+    )
+
+    with app.app_context():
+        yield
 
 def _sha256(
     payload: bytes,
@@ -51,9 +75,23 @@ def _build_backup(
         / "database.dump"
     )
 
+    database_source_path = (
+        backup_root
+        / "database-source.dump"
+    )
+
     _write_file(
-        database_path,
+        database_source_path,
         database_payload,
+    )
+
+    encrypt_backup_artifact(
+        database_source_path,
+        database_path,
+    )
+
+    database_source_path.unlink(
+        missing_ok=True
     )
 
     restored_storage_key = (
@@ -148,13 +186,12 @@ def _build_backup(
             "backup_path": str(
                 database_path
             ),
-            "backup_size_bytes": len(
-                database_payload
-            ),
+            "backup_size_bytes": database_path.stat().st_size,
             "backup_sha256": _sha256(
-                database_payload
+                database_path.read_bytes()
             ),
             "format": "custom",
+            "encrypted": True,
         },
         "files": {
             "success": True,
@@ -289,6 +326,18 @@ def test_restore_full_backup_restores_database_and_files(
         "--clean"
         in observed["command"]
     )
+
+    assert (
+        observed["command"][-1]
+        != str(
+            backup_root
+            / "database.dump"
+        )
+    )
+
+    assert not Path(
+        observed["command"][-1]
+    ).exists()
 
     assert (
         "--exit-on-error"
@@ -950,3 +999,169 @@ def test_restore_full_backup_rejects_post_restore_verification_failure(
                     fail_verification
                 ),
             )
+def test_restore_full_backup_rejects_wrong_backup_key(
+    app,
+    tmp_path,
+    monkeypatch,
+):
+    (
+        backup_root,
+        _,
+    ) = _build_backup(
+        tmp_path
+    )
+
+    app.config["BACKUP_ENCRYPTION_KEY"] = (
+        base64.urlsafe_b64encode(
+            b"c" * 32
+        ).decode("ascii")
+    )
+
+    def fail_restore(*args, **kwargs):
+        raise AssertionError(
+            "pg_restore must not run after decrypt failure"
+        )
+
+    monkeypatch.setattr(
+        "app.core.backup.restore_service.subprocess.run",
+        fail_restore,
+    )
+
+    with pytest.raises(
+        RestoreError,
+        match="Unable to decrypt database backup",
+    ):
+        restore_full_backup(
+            backup_path=backup_root,
+            database_url=(
+                "postgresql://backup@localhost/"
+                "clinic_system"
+            ),
+            storage_root=(
+                tmp_path
+                / "storage"
+            ),
+        )
+
+
+def test_restore_full_backup_rejects_missing_backup_key(
+    app,
+    tmp_path,
+    monkeypatch,
+):
+    (
+        backup_root,
+        _,
+    ) = _build_backup(
+        tmp_path
+    )
+
+    app.config.pop(
+        "BACKUP_ENCRYPTION_KEY",
+        None,
+    )
+
+    def fail_restore(*args, **kwargs):
+        raise AssertionError(
+            "pg_restore must not run without backup key"
+        )
+
+    monkeypatch.setattr(
+        "app.core.backup.restore_service.subprocess.run",
+        fail_restore,
+    )
+
+    with pytest.raises(
+        RestoreError,
+        match="Unable to decrypt database backup",
+    ):
+        restore_full_backup(
+            backup_path=backup_root,
+            database_url=(
+                "postgresql://backup@localhost/"
+                "clinic_system"
+            ),
+            storage_root=(
+                tmp_path
+                / "storage"
+            ),
+        )
+
+
+def test_restore_full_backup_cleans_decrypted_artifact_on_pg_restore_failure(
+    app,
+    tmp_path,
+    monkeypatch,
+):
+    (
+        backup_root,
+        _,
+    ) = _build_backup(
+        tmp_path
+    )
+
+    observed = {
+        "restore_path": None,
+    }
+
+    def fake_restore(
+        command,
+        **kwargs,
+    ):
+        observed[
+            "restore_path"
+        ] = Path(
+            command[-1]
+        )
+
+        assert observed[
+            "restore_path"
+        ].exists()
+
+        return Mock(
+            returncode=1,
+            stderr="synthetic pg_restore failure",
+            stdout="",
+        )
+
+    monkeypatch.setattr(
+        "app.core.backup.restore_service.shutil.which",
+        lambda value: "pg_restore",
+    )
+
+    monkeypatch.setattr(
+        "app.core.backup.restore_service.subprocess.run",
+        fake_restore,
+    )
+
+    with pytest.raises(
+        RestoreError,
+        match="pg_restore failed: synthetic pg_restore failure",
+    ):
+        restore_full_backup(
+            backup_path=backup_root,
+            database_url=(
+                "postgresql://backup@localhost/"
+                "clinic_system"
+            ),
+            storage_root=(
+                tmp_path
+                / "storage"
+            ),
+        )
+
+    assert observed[
+        "restore_path"
+    ] is not None
+
+    assert not observed[
+        "restore_path"
+    ].exists()
+
+    assert not list(
+        Path(
+            observed[
+                "restore_path"
+            ].parent
+        ).glob("*")
+    )
