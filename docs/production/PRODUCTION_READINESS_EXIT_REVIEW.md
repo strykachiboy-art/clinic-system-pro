@@ -381,3 +381,35 @@ Phase 8 - Full Backend E2E.
 Phase 8 will validate complete backend workflows across critical clinical,
 administrative, financial, communication, emergency-access, reporting, and
 background-processing paths before broader failure-injection work.
+
+## Current Engineering Reconciliation
+
+This document remains the historical Phase 5 through Phase 7 exit-review record.
+Its earlier migration revision, regression count, and Phase 6 operational records
+are preserved as time-specific evidence.
+
+The current engineering state has advanced through Phase 9 failure-injection
+and recovery hardening, followed by encryption/data-protection gates.
+
+Current verified evidence:
+
+- resilience-all: ``66 passed in 95.74s``
+- Gate 11 focused regression: ``11 tests in 133.72s``
+- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
+- encryption regression: ``131 passed in 139.23s``
+- current migration head: ``c8e4f1a9d2b7``
+
+Gate 12 failure-injection slices 1 through 5 are locked:
+
+- remote clinic: ``8d43deb``
+- pharmacy: ``12e62e1``
+- payment timeout: ``b183795``
+- worker notification: ``8fd5281``
+- database failure: ``2ff03476d5a9f223b152b5cef857bf0d691c4f``
+
+Encryption gates 7.1 through 7.6 are locked after focused verification.
+
+The remaining broad verification gate is the final full backend regression.
+Backend completion should not be claimed before that regression and its final review.
+
+Actual production operation remains unexecuted.

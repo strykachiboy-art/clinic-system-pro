@@ -187,3 +187,29 @@ verification.
 
 Rollback execution also remains pending and is governed by
 `docs/production/ROLLBACK_PROCEDURE.md`.
+
+## Current Security Configuration Contract
+
+The current backend contains two separate application encryption domains.
+
+Integration credential domain:
+
+- ``INTEGRATION_ENCRYPTION_KEY``
+- ``INTEGRATION_ENCRYPTION_KEY_VERSION``
+- ``INTEGRATION_ENCRYPTION_LEGACY_KEYS``
+
+Encrypted database-backup domain:
+
+- ``BACKUP_ENCRYPTION_KEY``
+- ``BACKUP_ENCRYPTION_KEY_VERSION``
+
+The backup encryption key must remain distinct from the integration key.
+
+Encrypted backups are ciphertext artifacts. Restore verifies ciphertext integrity,
+decrypts into a unique temporary restore location, runs ``pg_restore``, and
+removes temporary plaintext restore content after success or failure.
+
+Decryption failure is fail-closed and must never fall back to plaintext restore.
+
+These controls are VERIFIED at the repository level. Production secret custody,
+rotation scheduling, and actual deployment remain separate infrastructure gates.

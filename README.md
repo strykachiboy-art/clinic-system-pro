@@ -2527,87 +2527,44 @@ The objective is to establish a backend and client architecture where:
 
 # 94. Current Project Position
 
-The project has progressed beyond the basic CRUD phase.
+The project has progressed beyond the historical Phase 8 documentation.
 
-The major backend foundations are established:
+Current engineering state:
 
-Architecture
+- resilience-all: `66 passed in 95.74s`
 
-Authentication
+- Phase 7 crash durability: GREEN / CLOSED
+- Phase 9 resilience / failure injection: active engineering track
+- Gate 11 focused regression: ``11 tests / 133.72s``
+- backend E2E after lifecycle hardening: ``50 passed / 252.32s``
+- resilience-all: ``66 passed / 95.74s``
+- resilience artifact cleanup: PASS
 
-Authorization
+Gate 12 failure-injection slices currently locked:
 
-RBAC
+- remote clinic: ``8d43deb``
+- pharmacy: ``12e62e1``
+- payment timeout: ``b183795``
+- worker notification: ``8fd5281``
+- database failure: ``2ff03476d5a9f223b152b5cef857bf0d691c4f``
 
-Tenant Isolation
+Encryption/data-protection hardening:
 
-IDOR Protection
+- encryption gates 7.1 through 7.6: locked
+- current migration head: ``c8e4f1a9d2b7``
+- combined encryption regression: ``131 passed in 139.23s``
 
-Validation
+The current implementation freeze baseline is:
 
-Transactions
+``f36db7ac715e8d772eb36aacc1b63e5df9194b94``
 
-Errors
+The remaining broad verification step is the final full backend regression.
 
-Auditability
+The backend will be declared complete for the current development boundary only
+after that regression passes and the final evidence is reconciled.
 
-Clinical Safety
-
-Emergency Access
-
-Consent Guard
-
-Chat
-
-Settings
-
-Asset Control
-
-Dashboard
-
-Reports
-
-Backup / Recovery
-
-Performance
-
-Load Testing
-
-Observability
-
-Feedback
-
-Resilience Engineering
-
-Final Security / Compliance Hardening
-
-Full Project Regression
-
-Phase 3 is formally closed.
-
-Phase 4 Observability / Operations is formally closed with a GREEN exit review.
-
-Phase 5 Production Readiness is formally closed with a GREEN exit review.
-
-Phase 6 Production-like Backend Environment is formally closed with a GREEN
-exit gate.
-
-The current engineering focus is now:
-
-PHASE 8 - FULL BACKEND E2E
-
-followed by:
-
-FAILURE INJECTION
--> FLUTTER
--> FULL CROSS-PLATFORM VALIDATION
--> PRODUCTION SECURITY TESTING
--> RELEASE CANDIDATE
--> DEPLOYMENT
--> POST-DEPLOYMENT VALIDATION
--> PRODUCTION OPERATIONS
--> FUTURE DISTRIBUTED SCALE
--> WHITE GLOVE / RUST
+Actual production deployment and production operation remain outside the current
+verified engineering boundary.
 
 # 95. Project Boundary Statement
 
@@ -2655,7 +2612,9 @@ Harden
 
 Current phase:
 
-PHASE 8 - FULL BACKEND E2E
+PHASE 9 - FAILURE INJECTION / RESILIENCE HARDENING
+
+The immediate remaining backend gate is the final full regression before declaring the backend complete for the current development boundary.
 
 Phase 7 Crash Durability is GREEN / CLOSED. The immediate objective is now to
 validate complete backend workflows and critical user journeys end-to-end

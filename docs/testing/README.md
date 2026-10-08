@@ -1,3 +1,18 @@
+## Current Project Testing State
+
+The earlier phase sections in this document are retained as historical verification records.
+
+The current backend verification track is Phase 9 resilience / failure injection.
+
+Current focused evidence:
+
+- resilience-all: ``66 passed in 95.74s``
+- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
+- encryption regression: ``131 passed in 139.23s``
+- Gate 11 focused regression: ``11 tests in 133.72s``
+
+The final full backend regression remains the broad completion gate.
+
 # CLINIC SYSTEM PRO v5
 
 # TESTING ARCHITECTURE & VERIFICATION MODEL
@@ -537,7 +552,7 @@ Verified areas include:
 
 ---
 
-### Phase 5 — Production Readiness
+### Historical Phase 5 — Production Readiness
 
 Phase 5 is the next verification gate.
 
@@ -722,3 +737,26 @@ Individual module tests define the detailed executable behavior.
 Phase exit reviews define whether a project phase has formally passed its verification gate.
 
 Recorded test results are time-specific evidence and must always be interpreted together with the command, environment, and scope that produced them.
+
+## Current Verification Position
+
+Older phase test counts in this document are historical snapshots.
+
+Current focused evidence:
+
+- resilience-all: ``66 passed in 95.74s``
+- Gate 11 focused regression: ``11 tests in 133.72s``
+- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
+- encryption regression: ``131 passed in 139.23s``
+
+Phase 9 resilience verification covers controlled dependency failure, unknown
+outcomes, idempotency, provider/storage failure, worker failure, and recovery.
+
+Encryption verification covers integration credential encryption and key versioning,
+encrypted backup artifacts, separate backup-key domains, encrypted restore, recovery,
+and cryptographic failure/retry behavior.
+
+The final full backend regression remains outstanding.
+
+Backend completion for the current development boundary will be declared only after
+that regression passes and the resulting evidence is reconciled into the documentation.

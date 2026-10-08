@@ -42,7 +42,7 @@ The following Phase 6 evidence artifacts are retained:
 - `artifacts/production-readiness/phase6/backup-restore-drill-5957367.txt`
 - `artifacts/production-readiness/phase6/restore-drill-report-5957367.json`
 
-## Current Verified Backend State
+## Historical Phase 6 Verified Backend State
 
 - Git revision: `5957367208670df64cc2116eb0dd48620021e9c0`
 - migration head: `4d205e66d288`
@@ -84,7 +84,7 @@ execution:
 These must not be represented as completed until independently executed
 and evidenced.
 
-## Open Evidence Gates
+## Historical Phase 6 Open Evidence Gates
 
 The following remain tracked before final release-candidate freeze:
 
@@ -103,7 +103,7 @@ include #3 (Pillow) and #5 (qrcode).
 These gates must not be represented as completed until independently
 executed and evidenced.
 
-## Final Regression
+## Historical Full Regression Snapshot
 
 The latest full application regression completed with:
 
@@ -114,3 +114,39 @@ The latest full application regression completed with:
 
 The run completed on 2026-10-01 in 8,078.52 seconds (2:14:38) and is
 treated as time-specific evidence.
+
+## Current Engineering Position
+
+The earlier Phase 6 production-like evidence remains historical and authoritative
+for the execution it recorded. It does not describe the current repository state.
+
+The current implementation freeze baseline is:
+
+- implementation freeze baseline: ``f36db7ac715e8d772eb36aacc1b63e5df9194b94``
+- current migration head: ``c8e4f1a9d2b7``
+- migration heads: single head
+
+Current verified engineering evidence includes:
+
+- resilience-all: ``66 passed in 95.74s``
+- resilience artifact cleanup: PASS
+- Gate 11 focused regression: ``11 tests in 133.72s``
+- backend E2E after lifecycle hardening: ``50 passed in 252.32s``
+- encryption regression: ``131 passed in 139.23s``
+
+Gate 12 failure-injection slices currently locked:
+
+- Slice 1 remote-clinic failure handling: ``8d43deb``
+- Slice 2 pharmacy failure handling: ``12e62e1``
+- Slice 3 payment timeout handling: ``b183795``
+- Slice 4 worker notification failure handling: ``8fd5281``
+- Slice 5 database failure handling: ``2ff03476d5a9f223b152b5cef857bf0d691c4f``
+
+Encryption security gates 7.1 through 7.6 are implemented, focused-verified,
+and frozen for documentation reconciliation.
+
+The remaining broad engineering verification is the final full backend regression.
+Only after that regression passes should the backend be described as complete
+for the current development boundary.
+
+None of this establishes actual production deployment or production operation.

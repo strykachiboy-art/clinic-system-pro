@@ -155,3 +155,72 @@ Keep:
 - secret-rotation drill evidence
 - TLS certificate renewal evidence
 - configuration-drift review evidence
+
+## Integration Encryption Operations
+
+Integration credential encryption uses the following configuration contract:
+
+- `INTEGRATION_ENCRYPTION_KEY`
+- `INTEGRATION_ENCRYPTION_KEY_VERSION`
+- `INTEGRATION_ENCRYPTION_LEGACY_KEYS`
+
+`credentials_version` identifies provider credential material/version. It is
+not the cryptographic key version.
+
+`encryption_key_version` records the cryptographic key version associated
+with protected integration credential material.
+
+Key rotation must retain an explicitly approved migration and recovery path.
+Do not replace the active encryption key and discard legacy recovery material
+without evidence that protected records have been migrated or remain recoverable.
+
+## Backup Encryption Operations
+
+Database backup encryption is a separate cryptographic domain:
+
+- `BACKUP_ENCRYPTION_KEY`
+- `BACKUP_ENCRYPTION_KEY_VERSION`
+
+The backup encryption key must not equal the integration encryption key.
+
+Monitor and investigate:
+
+- backup encryption failures
+- backup checksum verification failures
+- decrypt failures
+- wrong or missing backup-key failures
+- backup-key recovery failures
+- restore cleanup failures
+
+The backup encryption key must be supplied through the approved secret-management
+boundary and must never be stored in backup metadata, restore reports, or the
+encrypted backup artifact.
+
+## Encryption Incident Response
+
+A cryptographic failure is fail-closed. Do not bypass decryption failure by
+treating an encrypted artifact as plaintext.
+
+For encrypted restore failures, preserve:
+
+- artifact path
+- checksum and expected size
+- encryption metadata
+- key-version metadata
+- restore error
+- cleanup result
+- recovery-test evidence
+
+Do not record secret values in incident evidence.
+
+## Current Encryption Evidence Boundary
+
+Current repository evidence is VERIFIED.
+
+The combined encryption regression at the documentation freeze was:
+
+`131 passed in 139.23s`
+
+This does not constitute PRODUCTION OPERATED evidence. Secret custody, production
+key rotation scheduling, backup repository controls, and recovery-secret custody
+remain deployment and infrastructure responsibilities.

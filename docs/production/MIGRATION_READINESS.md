@@ -5,7 +5,7 @@
 This document defines the production migration-readiness contract for
 Clinic System Pro v5.
 
-## Current Repository State
+## Historical Phase 6 Repository State
 
 The current Git revision is:
 
@@ -116,3 +116,25 @@ operator evidence, and post-migration verification.
 This document therefore establishes the migration-readiness contract and
 records the completed production-like bootstrap without claiming that a
 production migration has been executed.
+
+## Current Migration State
+
+The earlier Phase 6 migration bootstrap is historical evidence.
+
+The current Alembic head is:
+
+``c8e4f1a9d2b7``
+
+This head is the encryption key-version migration:
+``backend/migrations/versions/c8e4f1a9d2b7_add_encryption_key_version.py``
+
+Verified migration sequence:
+
+- previous head: ``d7f4a6b91c22``
+- upgrade to: ``c8e4f1a9d2b7``
+- downgrade: verified
+- re-upgrade: verified
+- Alembic head count: single head
+
+The current migration chain is part of the encryption/security hardening state.
+Actual production migration remains an infrastructure-dependent release operation.

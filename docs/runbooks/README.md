@@ -68,3 +68,21 @@ An incident is operationally recovered after:
 3. Failure volume is returning toward baseline.
 4. Active critical alerts are resolved or understood.
 5. The operator records the recovery action and verification result.
+
+
+### Backup / Restore Security Drill
+Use `docs/security/BACKUP_RESTORE_DRILL.md` for controlled encrypted backup
+and restore operations, temporary plaintext cleanup, recovery evidence, and
+restore verification.
+
+
+### Security Operations
+Use `docs/security/SECURITY_OPERATIONS.md` for encryption-key operations,
+secret rotation, TLS renewal, configuration drift, and security incident evidence.
+
+## Current Backend Resilience Position
+
+Current resilience engineering covers controlled dependency failure, worker failure,
+provider/storage failure, timeout behavior, unknown outcomes, idempotency, and recovery.
+
+The current resilience baseline is ``66 passed in 95.74s``.
