@@ -1922,9 +1922,9 @@ E2E.
 
 ---
 
-# 63. Phase 8 â€” Full Backend E2E
+# 63. Historical Phase 8 - Full Backend E2E
 
-Phase 8 has completed Gates 3 through 16. Gate 17 - Phase 8 Exit Review - is the current active gate.
+Phase 8 is a historical backend E2E milestone. Its recorded gate results remain preserved as time-specific evidence.
 
 ## Phase 8 Gate Status
 
@@ -1944,7 +1944,7 @@ Phase 8 has completed Gates 3 through 16. Gate 17 - Phase 8 Exit Review - is the
 | 14 | Background + Notifications | GREEN |
 | 15 | HIE + AI + Final Integration Coverage Audit | GREEN / CLOSED |
 | 16 | Full Phase 8 E2E Regression | GREEN |
-| 17 | Phase 8 Exit Review | CURRENT |
+| 17 | Phase 8 Exit Review | HISTORICAL |
 
 ## Gate 15 Evidence
 
@@ -1998,6 +1998,23 @@ Gate 17 is now responsible for the final Phase 8 exit review and evidence consol
 
 ---
 # 64. Phase 9 â€” Failure Injection
+## Current Phase 9 Status
+
+Status: ACTIVE ENGINEERING TRACK
+
+Current verified resilience baseline: ``66 passed in 95.74s``.
+
+Resilience artifact cleanup: PASS.
+
+Gate 12 failure-injection slices 1 through 5 are locked.
+
+Encryption/data-protection gates 7.1 through 7.6 are locked after focused verification.
+
+Current migration head: ``c8e4f1a9d2b7``.
+
+Combined encryption regression: ``131 passed in 139.23s``.
+
+The remaining broad backend verification gate is the final full backend regression.
 
 Introduce controlled failures such as:
 
