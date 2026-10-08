@@ -118,6 +118,15 @@ class Config:
         )
     )
 
+    BACKUP_ENCRYPTION_KEY = os.environ.get(
+        "BACKUP_ENCRYPTION_KEY"
+    )
+
+    BACKUP_ENCRYPTION_KEY_VERSION = os.environ.get(
+        "BACKUP_ENCRYPTION_KEY_VERSION",
+        "1",
+    )
+
     # ------------------------------------------------------------------
     # Flask-Limiter
     # ------------------------------------------------------------------
