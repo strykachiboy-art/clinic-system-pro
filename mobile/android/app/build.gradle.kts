@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.clinic_system_pro"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
