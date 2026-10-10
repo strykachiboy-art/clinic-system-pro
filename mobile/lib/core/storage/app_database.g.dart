@@ -27,8 +27,19 @@ class $AppMetadataTable extends AppMetadata
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
   @override
-  List<GeneratedColumn> get $columns => [key, value];
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [key, value, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -57,6 +68,12 @@ class $AppMetadataTable extends AppMetadata
     } else if (isInserting) {
       context.missing(_valueMeta);
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -74,6 +91,10 @@ class $AppMetadataTable extends AppMetadata
         DriftSqlType.string,
         data['${effectivePrefix}value'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      ),
     );
   }
 
@@ -86,17 +107,31 @@ class $AppMetadataTable extends AppMetadata
 class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
   final String key;
   final String value;
-  const AppMetadataData({required this.key, required this.value});
+  final DateTime? updatedAt;
+  const AppMetadataData({
+    required this.key,
+    required this.value,
+    this.updatedAt,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['key'] = Variable<String>(key);
     map['value'] = Variable<String>(value);
+    if (!nullToAbsent || updatedAt != null) {
+      map['updated_at'] = Variable<DateTime>(updatedAt);
+    }
     return map;
   }
 
   AppMetadataCompanion toCompanion(bool nullToAbsent) {
-    return AppMetadataCompanion(key: Value(key), value: Value(value));
+    return AppMetadataCompanion(
+      key: Value(key),
+      value: Value(value),
+      updatedAt: updatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(updatedAt),
+    );
   }
 
   factory AppMetadataData.fromJson(
@@ -107,6 +142,7 @@ class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
     return AppMetadataData(
       key: serializer.fromJson<String>(json['key']),
       value: serializer.fromJson<String>(json['value']),
+      updatedAt: serializer.fromJson<DateTime?>(json['updatedAt']),
     );
   }
   @override
@@ -115,15 +151,24 @@ class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
     return <String, dynamic>{
       'key': serializer.toJson<String>(key),
       'value': serializer.toJson<String>(value),
+      'updatedAt': serializer.toJson<DateTime?>(updatedAt),
     };
   }
 
-  AppMetadataData copyWith({String? key, String? value}) =>
-      AppMetadataData(key: key ?? this.key, value: value ?? this.value);
+  AppMetadataData copyWith({
+    String? key,
+    String? value,
+    Value<DateTime?> updatedAt = const Value.absent(),
+  }) => AppMetadataData(
+    key: key ?? this.key,
+    value: value ?? this.value,
+    updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
+  );
   AppMetadataData copyWithCompanion(AppMetadataCompanion data) {
     return AppMetadataData(
       key: data.key.present ? data.key.value : this.key,
       value: data.value.present ? data.value.value : this.value,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -131,44 +176,51 @@ class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
   String toString() {
     return (StringBuffer('AppMetadataData(')
           ..write('key: $key, ')
-          ..write('value: $value')
+          ..write('value: $value, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(key, value);
+  int get hashCode => Object.hash(key, value, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is AppMetadataData &&
           other.key == this.key &&
-          other.value == this.value);
+          other.value == this.value &&
+          other.updatedAt == this.updatedAt);
 }
 
 class AppMetadataCompanion extends UpdateCompanion<AppMetadataData> {
   final Value<String> key;
   final Value<String> value;
+  final Value<DateTime?> updatedAt;
   final Value<int> rowid;
   const AppMetadataCompanion({
     this.key = const Value.absent(),
     this.value = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AppMetadataCompanion.insert({
     required String key,
     required String value,
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : key = Value(key),
        value = Value(value);
   static Insertable<AppMetadataData> custom({
     Expression<String>? key,
     Expression<String>? value,
+    Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (key != null) 'key': key,
       if (value != null) 'value': value,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -176,11 +228,13 @@ class AppMetadataCompanion extends UpdateCompanion<AppMetadataData> {
   AppMetadataCompanion copyWith({
     Value<String>? key,
     Value<String>? value,
+    Value<DateTime?>? updatedAt,
     Value<int>? rowid,
   }) {
     return AppMetadataCompanion(
       key: key ?? this.key,
       value: value ?? this.value,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -194,6 +248,9 @@ class AppMetadataCompanion extends UpdateCompanion<AppMetadataData> {
     if (value.present) {
       map['value'] = Variable<String>(value.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -205,6 +262,7 @@ class AppMetadataCompanion extends UpdateCompanion<AppMetadataData> {
     return (StringBuffer('AppMetadataCompanion(')
           ..write('key: $key, ')
           ..write('value: $value, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -226,12 +284,14 @@ typedef $$AppMetadataTableCreateCompanionBuilder =
     AppMetadataCompanion Function({
       required String key,
       required String value,
+      Value<DateTime?> updatedAt,
       Value<int> rowid,
     });
 typedef $$AppMetadataTableUpdateCompanionBuilder =
     AppMetadataCompanion Function({
       Value<String> key,
       Value<String> value,
+      Value<DateTime?> updatedAt,
       Value<int> rowid,
     });
 
@@ -251,6 +311,11 @@ class $$AppMetadataTableFilterComposer
 
   ColumnFilters<String> get value => $composableBuilder(
     column: $table.value,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -273,6 +338,11 @@ class $$AppMetadataTableOrderingComposer
     column: $table.value,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AppMetadataTableAnnotationComposer
@@ -289,6 +359,9 @@ class $$AppMetadataTableAnnotationComposer
 
   GeneratedColumn<String> get value =>
       $composableBuilder(column: $table.value, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
 
 class $$AppMetadataTableTableManager
@@ -320,19 +393,28 @@ class $$AppMetadataTableTableManager
               $$AppMetadataTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
               $$AppMetadataTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<String> key = const Value.absent(),
-            Value<String> value = const Value.absent(),
-            Value<int> rowid = const Value.absent(),
-          }) => AppMetadataCompanion(key: key, value: value, rowid: rowid),
+          updateCompanionCallback:
+              ({
+                Value<String> key = const Value.absent(),
+                Value<String> value = const Value.absent(),
+                Value<DateTime?> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppMetadataCompanion(
+                key: key,
+                value: value,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
           createCompanionCallback:
               ({
                 required String key,
                 required String value,
+                Value<DateTime?> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AppMetadataCompanion.insert(
                 key: key,
                 value: value,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

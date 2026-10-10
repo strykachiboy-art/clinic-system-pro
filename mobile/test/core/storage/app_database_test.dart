@@ -6,11 +6,11 @@ import 'package:clinic_system_pro/core/storage/app_database.dart';
 
 void main() {
   group('AppDatabase', () {
-    test('declares schema version 1 and initializes its table', () async {
+    test('declares schema version 2 and initializes its table', () async {
       final database = AppDatabase(NativeDatabase.memory());
       addTearDown(database.close);
 
-      expect(database.schemaVersion, 1);
+      expect(database.schemaVersion, 2);
       expect(await database.select(database.appMetadata).get(), isEmpty);
     });
 
