@@ -21,18 +21,70 @@ class ApiClient {
   final Duration requestTimeout;
 
   /// Performs a GET request and requires a JSON object response.
-  Future<Map<String, dynamic>> getJson(String path) async {
+  Future<Map<String, dynamic>> getJson(String path, {String? bearerToken}) {
+    return _requestJson(method: 'GET', path: path, bearerToken: bearerToken);
+  }
+
+  /// Performs a JSON POST request and requires a JSON object response.
+  ///
+  /// If [bearerToken] is supplied, it is sent as an Authorization Bearer
+  /// token. Token acquisition, persistence, and refresh belong to the auth
+  /// session layer, not to this transport class.
+  Future<Map<String, dynamic>> postJson(
+    String path, {
+    required Map<String, dynamic> body,
+    String? bearerToken,
+  }) {
+    return _requestJson(
+      method: 'POST',
+      path: path,
+      body: body,
+      bearerToken: bearerToken,
+    );
+  }
+
+  Future<Map<String, dynamic>> _requestJson({
+    required String method,
+    required String path,
+    Map<String, dynamic>? body,
+    String? bearerToken,
+  }) async {
+    if (bearerToken != null && bearerToken.trim().isEmpty) {
+      throw ArgumentError.value(
+        bearerToken,
+        'bearerToken',
+        'Must be non-empty when provided.',
+      );
+    }
+
+    if ((method == 'GET' && body != null) ||
+        (method == 'POST' && body == null)) {
+      throw StateError('Invalid internal API request configuration.');
+    }
+
     final uri = config.endpoint(path);
+    final headers = <String, String>{'Accept': 'application/json'};
+
+    if (body != null) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    if (bearerToken != null) {
+      headers['Authorization'] = 'Bearer $bearerToken';
+    }
 
     late final http.Response response;
 
     try {
-      response = await _client
-          .get(
-            uri,
-            headers: const <String, String>{'Accept': 'application/json'},
-          )
-          .timeout(requestTimeout);
+      if (method == 'GET') {
+        response = await _client
+            .get(uri, headers: headers)
+            .timeout(requestTimeout);
+      } else {
+        response = await _client
+            .post(uri, headers: headers, body: jsonEncode(body))
+            .timeout(requestTimeout);
+      }
     } on TimeoutException catch (error) {
       throw ApiException(
         kind: ApiFailureKind.timeout,
