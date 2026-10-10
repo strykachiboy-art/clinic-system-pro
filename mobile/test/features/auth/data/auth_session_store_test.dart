@@ -57,7 +57,8 @@ AuthTokenResponse validSession() => const AuthTokenResponse(
 );
 
 Map<String, dynamic> validRecord() => {
-  'schema_version': 1,
+  'schema_version': 2,
+  'refresh_pending': false,
   'access_token': testAccessToken,
   'refresh_token': testRefreshToken,
   'user_id': 42,
@@ -87,9 +88,10 @@ void main() {
       final raw = storage.values[AuthSessionStore.storageKey]!;
       final record = jsonDecode(raw) as Map<String, dynamic>;
 
-      expect(record['schema_version'], 1);
+      expect(record['schema_version'], 2);
       expect(record['access_token'], testAccessToken);
       expect(record['refresh_token'], testRefreshToken);
+      expect(record['refresh_pending'], false);
 
       final restored = await store.read();
 
@@ -100,6 +102,34 @@ void main() {
       expect(restored?.clinicContextId, isNull);
     });
 
+    test('persists refresh-pending in the same secure record', () async {
+      final storage = MemorySecureStorage();
+      final store = makeStore(storage);
+
+      await store.save(validSession(), refreshPending: true);
+
+      expect(storage.values.keys.toSet(), {AuthSessionStore.storageKey});
+
+      final stored = await store.readRecord();
+      expect(stored?.refreshPending, true);
+      expect(stored?.session.accessToken, testAccessToken);
+
+      await expectLater(store.read(), throwsA(isA<FormatException>()));
+
+      expect(storage.values.containsKey(AuthSessionStore.storageKey), isTrue);
+    });
+
+    test('rejects a malformed refresh-pending marker', () async {
+      final record = validRecord()..['refresh_pending'] = 'true';
+      final storage = MemorySecureStorage(
+        initialValues: {AuthSessionStore.storageKey: jsonEncode(record)},
+      );
+
+      await expectLater(
+        makeStore(storage).readRecord(),
+        throwsA(isA<FormatException>()),
+      );
+    });
     test('refuses an incomplete token pair before writing', () async {
       final storage = MemorySecureStorage();
       final store = makeStore(storage);
@@ -157,7 +187,7 @@ void main() {
     });
 
     test('rejects an unsupported schema version', () async {
-      final record = validRecord()..['schema_version'] = 2;
+      final record = validRecord()..['schema_version'] = 3;
       final storage = MemorySecureStorage(
         initialValues: {AuthSessionStore.storageKey: jsonEncode(record)},
       );
