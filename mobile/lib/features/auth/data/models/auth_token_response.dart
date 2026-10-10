@@ -1,0 +1,82 @@
+/// Validated token payload returned by the backend authentication API.
+///
+/// This model represents a response only. It does not persist tokens,
+/// manage session expiry, or log sensitive authentication data.
+class AuthTokenResponse {
+  const AuthTokenResponse({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.userId,
+    required this.role,
+    required this.clinicContextId,
+  });
+
+  final String accessToken;
+  final String refreshToken;
+  final int userId;
+  final String role;
+  final int? clinicContextId;
+
+  /// Parses the complete `{success, data}` backend response envelope.
+  factory AuthTokenResponse.fromEnvelope(Map<String, dynamic> envelope) {
+    if (envelope['success'] != true) {
+      throw const FormatException(
+        'Authentication response did not indicate success.',
+      );
+    }
+
+    final Object? payload = envelope['data'];
+
+    if (payload is! Map<String, dynamic>) {
+      throw const FormatException(
+        'Authentication response data must be a JSON object.',
+      );
+    }
+
+    return AuthTokenResponse.fromJson(payload);
+  }
+
+  /// Parses the backend's token payload.
+  factory AuthTokenResponse.fromJson(Map<String, dynamic> json) {
+    final accessToken = _requiredNonEmptyString(json, 'access_token');
+    final refreshToken = _requiredNonEmptyString(json, 'refresh_token');
+    final role = _requiredNonEmptyString(json, 'role');
+
+    final Object? userIdValue = json['user_id'];
+    if (userIdValue is! int || userIdValue <= 0) {
+      throw const FormatException(
+        'Authentication response user_id must be a positive integer.',
+      );
+    }
+
+    final Object? clinicContextValue = json['clinic_context_id'];
+    if (clinicContextValue != null && clinicContextValue is! int) {
+      throw const FormatException(
+        'Authentication response clinic_context_id must be an integer or null.',
+      );
+    }
+
+    return AuthTokenResponse(
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      userId: userIdValue,
+      role: role,
+      clinicContextId: clinicContextValue as int?,
+    );
+  }
+
+  static String _requiredNonEmptyString(
+    Map<String, dynamic> json,
+    String field,
+  ) {
+    final Object? value = json[field];
+
+    if (value is! String || value.isEmpty || value.trim() != value) {
+      throw FormatException(
+        'Authentication response field "$field" must be a non-empty string.',
+      );
+    }
+
+    return value;
+  }
+}
